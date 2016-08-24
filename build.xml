@@ -1,0 +1,137 @@
+<?xml version="1.0"?>
+
+<project name="exit66jb" default="main">
+  <target name="init">
+    <property name="Name" value="Exit 66 Jukebox" />
+    <property name="release.basedir" value="release" />
+    <property name="release.name" value="exit66jb-${version}" />
+    <property name="release.dir" value="${release.basedir}/${release.name}" />
+    <property name="etc.dir" value="etc" />
+    <property name="support.dir" value="support" />
+
+    <property name="izpack.dir" value="c:/program files/izpack" />
+    
+    <taskdef name="izpack" classpath="${izpack.dir}/lib/compiler.jar"
+        classname="com.izforge.izpack.ant.IzPackTask" />
+        
+  </target>
+
+  <target name="jukebox.init" depends="init">
+    <property name="jukebox.src.dir" value="src" />
+    <property name="jukebox.build.dir" value="build" />
+    <property name="jukebox.lib.dir" value="lib" />
+    
+    <property name="hsqldb.jar" value="hsqldb.jar"/>
+	<property name="jakarta-regexp.jar" value="jakarta-regexp-1.5.jar"/>
+	<property name="jetty-all.jar" value="jetty-all-7.4.2.v20110526.jar"/>
+    <property name="jorbis.jar" value="jorbis-0.0.17.jar"/>
+	<property name="servlet.jar" value="servlet-api-2.5.jar"/>
+	<property name="sharedlib.jar" value="sharedlib.jar"/>
+	<property name="myid3.jar" value="myid3.jar"/>
+  </target>
+
+  <target name="jukebox.compile" depends="jukebox.init">
+    <mkdir dir="${jukebox.build.dir}" />
+    <javac srcdir="${jukebox.src.dir}"
+      destdir="${jukebox.build.dir}"
+      includes="**/*.java"
+      deprecation="on"
+      optimize="on"
+      debug="off">
+      <classpath>
+        <pathelement location="${jukebox.lib.dir}/${hsqldb.jar}" />
+        <pathelement location="${jukebox.lib.dir}/${jakarta-regexp.jar}" />
+        <pathelement location="${jukebox.lib.dir}/${jetty-all.jar}" />
+        <pathelement location="${jukebox.lib.dir}/${jorbis.jar}" />
+        <pathelement location="${jukebox.lib.dir}/${servlet.jar}" />
+        <pathelement location="${jukebox.lib.dir}/${sharedlib.jar}" />
+        <pathelement location="${jukebox.lib.dir}/${myid3.jar}" />
+      </classpath>
+    </javac>
+  </target>
+  
+  <target name="jukebox.jar" depends="jukebox.compile">
+    <delete file="${jukebox.build.dir}/exit66jb.jar" failonerror="false" />
+    <jar jarfile="${jukebox.build.dir}/exit66jb.jar"
+        basedir="${jukebox.build.dir}">
+		<include name="**/*.class" />
+		<include name="**/*.dll" />
+        <manifest>
+            <attribute name="Built-By" value="Andrew Barilla"/>
+            <attribute name="Main-Class" value="com.exit66.jukebox.Exit66Jukebox" />
+            <attribute name="Class-Path" value="${hsqldb.jar} ${jakarta-regexp.jar} ${jetty-all.jar} ${jorbis.jar} ${servlet.jar} ${sharedlib.jar} ${myid3.jar}" />
+			<section name="common">
+              <attribute name="Specification-Title" value="Exit 66 Jukebox" />
+              <attribute name="Specification-Version" value="${version}" />
+              <attribute name="Specification-Vendor" value="Andrew Barilla" />
+            </section>
+          </manifest>
+    </jar>
+  </target>
+
+  <target name="doc" depends="init, jukebox.init">
+    
+    <copy todir="${etc.dir}/help_file/html">
+      <fileset dir="${etc.dir}/help_file/src" includes="*.jpg" />
+    </copy> 
+
+    <exec dir="${etc.dir}/help_file/html" executable="java">
+      <arg line="-jar ../../../${support.dir}/saxon/saxon9he.jar ../src/exit66jbdoc.xml ../../../${support.dir}/docbook-xsl-1.76.1/html/docbook.xsl -o:index.html" />
+    </exec>
+
+    <copy todir="doc/html">
+      <fileset dir="${etc.dir}/help_file/html" />
+    </copy>
+  </target>
+
+  <target name="clean" depends="init, jukebox.init">
+    <delete failonerror="false">
+      <fileset dir="${etc.dir}/help_file/html" includes="*" />
+      <fileset dir="${etc.dir}/help_file/htmlhelp" includes="*" />
+      <fileset dir="${jukebox.build.dir}" includes="*" />
+    </delete>
+  </target>
+  
+  <target name="release" if="version" 
+    depends="clean, jukebox.jar, doc">
+
+    <delete dir="${release.dir}" failonerror="false" />
+    <mkdir dir="${release.dir}" />
+
+    <izpack input="${etc.dir}/IzPack-install.xml"
+        output="${release.dir}/exit66jukeboxinstaller-${version}.jar"
+        installerType="standard"
+        basedir="${etc.dir}"
+        izPackDir="${izpack.dir}/" />
+        
+    <copy failonerror="false" file="${release.dir}\exit66jukeboxinstaller-${version}.jar" tofile="${release.dir}\exit66jukeboxinstaller.jar" />
+
+    <zip destfile="${release.dir}\exit66jukeboxsetup-${version}.zip">
+       <zipfileset file="${etc.dir}\install_files\exit66jukeboxinstall.exe" />
+       <zipfileset file="${etc.dir}\install_files\exit66jukeboxinstall.mainfest" />
+       <zipfileset file="${etc.dir}\install_files\launcher.ini" />
+       <zipfileset file="${release.dir}\exit66jukeboxinstaller.jar" />
+    </zip>
+    
+    <zip destfile="${release.dir}\exit66jukebox-${version}.zip">
+       <zipfileset file="${etc.dir}\install_files\*.txt" />
+       <zipfileset file="${etc.dir}\install_files\exit66jb.jpg" />
+       <zipfileset file="${etc.dir}\install_files\exit66jb.ico" />
+       <zipfileset file="${etc.dir}\install_files\blank.gif" />
+       <zipfileset file="${etc.dir}\install_files\mime.types" />
+       <zipfileset dir="web" prefix="web"/>
+       <zipfileset dir="doc" prefix="doc"/>
+       <zipfileset dir="${jukebox.lib.dir}"/>
+       <zipfileset dir="${jukebox.build.dir}" includes="exit66jb.jar" excludes="*.class"/>
+    </zip>
+
+	<tar destfile="${release.dir}\exit66jukebox-${version}.tar.gz" compression="gzip">
+       <zipfileset src="${release.dir}\exit66jukebox-${version}.zip" />
+    </tar>
+	
+    <exec dir="" executable="${support.dir}/ChilkatZipSE.exe">
+        <arg line="-autotemp -run exit66jukeboxinstall.exe ${release.dir}\exit66jukeboxsetup-${version}.zip" />
+    </exec>
+    
+  </target>
+</project>

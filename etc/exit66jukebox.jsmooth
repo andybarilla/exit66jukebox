@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<jsmoothproject>
+<JVMSearchPath>registry</JVMSearchPath>
+<JVMSearchPath>javahome</JVMSearchPath>
+<JVMSearchPath>jrepath</JVMSearchPath>
+<JVMSearchPath>jdkpath</JVMSearchPath>
+<JVMSearchPath>exepath</JVMSearchPath>
+<JVMSearchPath>jview</JVMSearchPath>
+<arguments></arguments>
+<classPath>..\..\exit66jb-runtime\exit66jb.jar</classPath>
+<classPath>..\..\exit66jb-runtime\hsqldb.jar</classPath>
+<classPath>..\..\exit66jb-runtime\jl1.0.jar</classPath>
+<classPath>..\..\exit66jb-runtime\jogg-0.0.7.jar</classPath>
+<classPath>..\..\exit66jb-runtime\jorbis-0.0.13.jar</classPath>
+<classPath>..\..\exit66jb-runtime\mp3spi1.9.2.jar</classPath>
+<classPath>..\..\exit66jb-runtime\systray4j.jar</classPath>
+<classPath>..\..\exit66jb-runtime\tritonus_share.jar</classPath>
+<embeddedJar>false</embeddedJar>
+<executableName>exit66jukebox.exe</executableName>
+<iconLocation>..\exit66jb.ico</iconLocation>
+<initialMemoryHeap>-1</initialMemoryHeap>
+<mainClassName>com.exit66.jukebox.Exit66Jukebox</mainClassName>
+<maximumMemoryHeap>-1</maximumMemoryHeap>
+<maximumVersion></maximumVersion>
+<minimumVersion>1.4.2</minimumVersion>
+<skeletonName>Windowed Wrapper</skeletonName>
+<skeletonProperties>
+<key>Message</key>
+<value>Java has not been found on your computer. Do you want to download it?</value>
+</skeletonProperties>
+<skeletonProperties>
+<key>URL</key>
+<value>http://www.java.com</value>
+</skeletonProperties>
+<skeletonProperties>
+<key>SingleProcess</key>
+<value>1</value>
+</skeletonProperties>
+<skeletonProperties>
+<key>Debug</key>
+<value>0</value>
+</skeletonProperties>
+</jsmoothproject>

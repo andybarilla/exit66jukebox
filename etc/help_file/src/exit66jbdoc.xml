@@ -1,0 +1,262 @@
+<?xml version='1.0'?>
+<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
+                    "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+<book>
+  <bookinfo>
+    <title>Exit 66 Jukebox Documentation</title>
+    <author><firstname>Andrew</firstname><surname>Barilla</surname></author>
+    <copyright><year>2001-2011</year><holder>Andrew Barilla</holder></copyright>
+  </bookinfo>
+
+  <chapter id="ch_introduction">
+    <title>Introduction</title>
+    <sect1 id="whatis">
+      <title>What Is Exit 66 Jukebox?</title>
+      <para>Exit 66 Jukebox is a program to organize and play your MP3 
+        audio files and functions much as a jukebox in your favorite 
+        drinking establishment might.</para>
+      <para>Exit 66 Jukebox runs on a single machine on your network
+        which handles organizing your audio files while playing them through
+		each client.  Since Exit 66 Jukebox is a webserver, any machine on 
+		your network can then access it by going to http://&lt;servername&gt;/.</para>
+      <para><emphasis>Note: Throughout this manual, the computer that Exit 66
+          Jukebox is running on will be called 'the server.'</emphasis></para>
+    </sect1>
+
+    <sect1 id="contactus">
+      <title>How To Contact Us</title>
+      <para>For technical support or to notify us of features you would 
+        like to see in upcoming versions of Exit 66 Jukebox, visit us 
+        on the web at <link>http://www.exit66.com/</link>.</para>
+    </sect1>
+
+    <sect1 id="accessweb">
+      <title>Accessing Via A Webbrowser</title>
+      <para>All access to Exit 66 Jukebox is through a webbrowser.  To
+        access Exit 66 Jukebox from the same machine as which it is
+        installed on simply type http://localhost/ or http://127.0.0.1/ into
+        your webbrowser.</para>
+      <para>To access Exit 66 Jukebox from another machine on your network, 
+        you must access Jukebox by typing http://&lt;server's IP address&gt;
+        in the browser.  To find out your machine's IP address do the following
+        from Windows 7/Vista/XP.</para>
+      <orderedlist>
+        <listitem>Select 'Run' from the Start Menu.</listitem>
+        <listitem>Type cmd and press enter.</listitem>
+        <listitem>Once the command line appears type ipconfig.</listitem>
+        <listitem>Your IP Address will appear on the screen.</listitem>
+      </orderedlist>
+      <para>You may be able to enter http://&lt;servername&gt;/ depending 
+        on your networking setup.</para>
+    </sect1>
+  </chapter>
+
+  <chapter id="ch_gettingstarted"> 
+    <title>Getting Started</title>
+
+    <sect1 id="firsttime">
+      <title>Running For The First Time</title>
+      <para>If the software is not already running, start it up now.  There
+        is no standard windows interface for Exit 66 Jukebox as all
+        access to it is through a webbrowser.</para>
+      <para>On the same machine that you installed Exit 66 Jukebox on, start
+        up your favorite webbrowser and go to http://localhost/;.  To find
+        out more about how to access the Jukebox through your webbrowser, 
+        please see <xref linkend="accessweb" />.</para>
+      <para>The first thing you will have to do is administer the Jukebox
+        server.  To enter admin mode click on the Gear button in the upper 
+		right portion of the webpage.</para>
+      <inlinegraphic fileref="switchadmin.jpg"></inlinegraphic>
+    </sect1>
+    
+    <sect1 id="basicadmin">
+      <title>Basic Administration</title>
+      <para>All the MP3 files that Exit 66 Jukebox has access to are through
+        libraries.  A library is simply a local (to the server) path such
+        as <emphasis>C:\My Music</emphasis> or a network path such as
+        <emphasis>\\MyServer\Audio</emphasis>.  If the directory of MP3 files
+        is moved somewhere else one only needs to repoint the library to
+        the new location.  No rescanning of MP3 files is needed.</para>
+
+      <inlinegraphic fileref="admin_library.jpg"></inlinegraphic>
+
+      <orderedlist>
+        <listitem>Enter the path to your MP3 files (i.e.: 
+          C:\My Music) in the "New Library" field</listitem>
+        <listitem>Press 'Add'</listitem>
+        <listitem>Exit 66 Jukebox has now added this path as a library
+          and will scan for MP3 files and read the ID3 tags in as information
+          to display.  If an MP3 file does not have a valid ID3 tag it will 
+          be ignored.  Depending on the speed of your computer and the amount 
+          of MP3 files this will take awhile.  If there is a problem and the
+          process of scanning fails, you can try again from the
+          Library screen by selecting 'Scan' next to a library.</listitem>
+      </orderedlist>
+    </sect1>
+  </chapter>
+
+  <chapter>  
+    <title>Using Exit 66 Jukebox</title>
+
+    <sect1>
+      <title>Main Screen</title>
+      <para>The main user screen is the first thing you will see when you
+        initially access Exit 66 Jukebox.</para>
+      
+      <inlinegraphic fileref="mainuser.jpg"></inlinegraphic>
+
+      <para>Across the top of the screen are quick jump links to browse your
+	  music files by Artist, Album or Song.  Additionally you can search through
+	  all your music files.</para>
+      
+      <para>Next to those buttons is a status area which states the song and 
+        artist that is currently playing.</para>
+      
+      <para>This header bar is constant and will not move as you
+        browse through the Jukebox.</para>
+      
+      <para>Simply scroll through the list or artists, albums, songs or search results
+	  and the Jukebox will dynamically load more results as you go.  This allows
+	  you to have a very music library without slowing down the Jukebox.</para>
+      
+      <para>Once you click on an artist their songs and albums will appear.  
+	  Below the album name a buttom will appear to play the entire album.</para>
+      
+      <para>Clicking on a song title will request the song and Exit 66 Jukebox 
+		will play your song as soon as possible.</para>
+      
+      <para>Exit 66 JukeBox will pull a cover image from an ID3 v2 tag.  
+        If you would like more information on how to do this, please visit
+        our website at <link>http://www.exit66.com/</link>.</para>
+    </sect1>
+    
+    <sect1>
+      <title>Search Screen</title>
+      <para>The search mechanism is used to search through all of the
+        artist names, album names and track titles in the entire
+        database.</para>
+        
+      <inlinegraphic fileref="mainsearch.jpg"></inlinegraphic>
+
+      <para>To bring up the search results, simply type a search term into
+        the search box at the top of the page and click 'Search.'  The 
+        results will appear on the screen.</para>
+    </sect1>
+  </chapter>
+
+  <chapter>
+    <title>Administration Screens</title>
+
+    <sect1>
+      <title>Library Section</title>
+      <para>The Library Section is used to add new libraries, or scan or delete
+        existing libraries.</para>
+
+      <para>Scanning a library should be done if you need Exit 66 Jukebox
+        to search through that path again to find new MP3 files or refresh
+        ID3 information.</para>
+ 
+      <inlinegraphic fileref="admin_library.jpg"></inlinegraphic>
+    </sect1>
+  </chapter>
+  
+  <glossary>
+    <title>Options File</title>
+    <para>There is a options file in the installation directory
+      (c:\program files\exit 66 jukebox by default) which contains 
+      settings available for you to change.  All the options are
+      stored in the format &lt;options name&gt;=&lt;value&gt;</para>
+    <glossentry><glossterm>webserverport</glossterm> 
+      <glossdef>
+        <para>The port used by the webserver.  Typically webserver's run 
+          on port 80 and web browsers assume this.  For example, 
+          http://www.exit66.com/ is the same as http://www.exit66.com:80/.
+          Default: 80
+        </para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>datadirectory</glossterm> 
+      <glossdef>
+        <para>The directory where the music information is stored.
+        Default: &lt;application path&gt;\data</para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>databaseversion</glossterm>
+      <glossdef>
+        <para>Internal Use Only.  Don't touch unless instructed to
+          by technical support
+        </para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>scanthreadcount</glossterm>
+      <glossdef>
+        <para>Number of concurrent scans done by the software when scanning 
+          a library for mp3 files.  If your machine is running extremely 
+          slow while scanning libraries you can decrease this to a
+          minimum of 1.
+          Default: 5</para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>variousartist</glossterm>
+      <glossdef>
+        <para>The label to use for the artist of a compilation.
+          Default: Various Artists</para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>historycount</glossterm>
+      <glossdef>
+        <para>The number of songs back to check in all songs played (whether
+          through a playlist or request) for whether a song has been played 
+          previously or not to eliminate the same song playing twice to soon.
+          Default: 0</para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>ignorealpha</glossterm>
+      <glossdef>
+        <para>Comma-delimited list of words to ignore when alphabetizing
+          artists names.
+          Default: the,el,la,los,las,le,les,die,das,der</para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>defaultfile</glossterm>
+      <glossdef>
+        <para>Default filename to look for if none is specified.  For 
+          example, http://localhost/ will look for 
+          http://localhost/index.html.
+          Default: index.html</para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>randomcount</glossterm>
+      <glossdef>
+        <para>Number of most recent requests in the queue to randomly pick 
+          from when choosing which song to play.  Setting this to 1 will 
+          always play songs in the order in which they are requested.
+          Default: 0</para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>webdirectory</glossterm>
+      <glossdef>
+        <para>Location of the web templates.
+        Default: &lt;application path&gt;\web</para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>defaultimagefile</glossterm>
+      <glossdef>
+        <para>Image to use when an album image can't be found in the ID3 tag.
+          Default: &lt;application path&gt;\exit66jb.jpg</para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>unknownartist</glossterm>
+      <glossdef>
+        <para>Name to use when an artist can't be found in the ID3 tag.
+          Default: [Unknown Artist]</para>
+      </glossdef>
+    </glossentry>
+    <glossentry><glossterm>unknownalbum</glossterm>
+      <glossdef>
+        <para>Name to use when an album can't be found in the ID3 tag.
+          Default: [Unknown Album]</para>
+      </glossdef>
+    </glossentry>
+  </glossary>
+</book>

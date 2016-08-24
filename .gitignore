@@ -1,0 +1,12 @@
+./bin
+./build
+./cache
+./data
+./data.tmp
+./doc
+./release
+./support
+./data.*
+./exit66jb.log
+./exit66jb.opt
+./etc/help_file/html

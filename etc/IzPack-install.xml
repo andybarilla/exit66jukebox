@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+
+<installation version="1.0">
+    <info>
+        <appname>Exit 66 Jukebox</appname>
+        <appversion>5.0</appversion>
+        <authors>
+            <author name="Andrew Barilla" email="andrew@exit66.com" />
+        </authors>
+        <url>http://www.exit66.com/</url>
+        <javaversion>1.6</javaversion>
+    </info>
+    <guiprefs width="640" height="480" resizable="no" />
+    <locale>
+        <langpack iso3="eng" />
+        <langpack iso3="fra" />
+    </locale>
+    <resources>
+        <res src="install_files/license.txt" id="LicencePanel.licence" />
+        <res src="install_files/readme.txt" id="InfoPanel.info" />
+        <res src="install_files/exit66jb.jpg" id="installer.langsel.img" />
+        <res src="install_files/exit66jb.jpg" id="Installer.image" />
+        <res src="shortcutSpec.xml" id="shortcutSpec.xml" />
+        <res src="Unix_shortcutSpec.xml" id="Unix_shortcutSpec.xml" />
+    </resources>
+    <panels>
+        <panel classname="HelloPanel" />
+        <panel classname="LicencePanel" />
+        <panel classname="PacksPanel" />
+        <panel classname="TargetPanel" />
+        <panel classname="InstallPanel" />
+        <panel classname="ShortcutPanel" />
+        <panel classname="InfoPanel" />
+        <panel classname="SimpleFinishPanel" />
+    </panels>
+    <packs>
+        <pack name="Core" required="yes">
+            <description>Jukebox Core Files</description>
+            <fileset dir="install_files" targetdir="$INSTALL_PATH">
+                <include name="*.txt" />
+                <include name="exit66jb.ico" />
+                <include name="exit66jb.jpg" />
+				<include name="exit66jbicon.png" />
+				<include name="blank.gif" />
+                <include name="mime.types" />
+            </fileset>
+            <fileset dir="../build" targetdir="$INSTALL_PATH">
+                <include name="exit66jb.jar" />
+            </fileset>
+            <fileset dir="../" targetdir="$INSTALL_PATH">
+                <include name="doc/**/*" />
+            </fileset>
+            <fileset dir="../" targetdir="$INSTALL_PATH">
+                <include name="web/**/*" />
+            </fileset>
+            <fileset dir="install_files" targetdir="$INSTALL_PATH" os="windows">
+                <include name="run_exit66jb.bat" />
+            </fileset>
+            <fileset dir="../" targetdir="$INSTALL_PATH" os="windows">
+                <include name="*.dll" />
+            </fileset>
+            <fileset dir="install_files" targetdir="$INSTALL_PATH" os="unix">
+                <include name="run_exit66jb.sh" />
+            </fileset>
+            <executable targetfile="$INSTALL_PATH/run_exit66jb.sh" stage="never" os="unix" />
+            <fileset dir="../lib" targetdir="$INSTALL_PATH">
+                <include name="*.jar" />
+            </fileset>
+        </pack>
+    </packs>
+
+    <native type="izpack" name="ShellLink.dll" />
+
+</installation>

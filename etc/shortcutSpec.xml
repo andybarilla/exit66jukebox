@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+
+<shortcuts>
+    <skipIfNotSupported />
+    <programGroup defaultName="Exit 66 Jukebox"
+        location="startMenu" />
+    <shortcut
+        name="Exit 66 Jukebox"
+        target="$INSTALL_PATH/exit66jb.jar"
+		commandLine="-classpath hsqldb.jar jakarta-regexp-1.5.jar jetty-all-7.4.2.v20110526.jar jorbis-0.0.17.jar myid3.jar servlet-api-2.5.jar sharedlib.jar systray4.jar"
+        workingDirectory="$INSTALL_PATH"
+        description="This starts Exit 66 Jukebox"
+        iconFile="$INSTALL_PATH/exit66jb.ico"
+        programGroup="yes"
+        startup="yes">
+        <createForPack name="Core" />
+    </shortcut>
+    <shortcut
+        name="Read Me"
+        target="$INSTALL_PATH/readme.txt"
+        workingDirectory="$INSTALL_PATH"
+        description="Exit 66 Jukebox Read Me File"
+        programGroup="yes"
+        startup="no">
+        <createForPack name="Core" />
+    </shortcut>     
+    <shortcut
+        name="Help"
+        target="$INSTALL_PATH/doc/html/index.html"
+        workingDirectory="$INSTALL_PATH"
+        description="Exit 66 Jukebox Help"
+        programGroup="yes"
+        startup="no">
+        <createForPack name="Core" />
+    </shortcut>     
+    <shortcut
+        name="Uninstall"
+        target="$INSTALL_PATH/Uninstaller/Uninstaller.jar"
+        workingDirectory="$INSTALL_PATH/Uninstaller"
+        description="Exit 66 Jukebox Uninstaller"
+        programGroup="yes"
+        startup="no">
+        <createForPack name="Core" />
+    </shortcut>        
+</shortcuts>

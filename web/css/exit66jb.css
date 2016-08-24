@@ -1,0 +1,317 @@
+body { 
+    font-family: sans-serif; 
+    margin: 0; 
+    padding: 0;
+    -moz-user-select: -moz-none;
+    -khtml-user-select: none;
+    -webkit-user-select: none;
+    -o-user-select: none;
+    user-select: none;
+	overflow: hidden;
+}
+
+#header {
+    font-family: arial, serif; 
+    height: 48px;
+    background: #333333;
+    background-image: url("../images/headerbutton48.png");
+}
+
+#main {
+    position: absolute;
+    top: 48px;
+    left: 0px;
+    right: 0px;
+    bottom: 0px;
+    background-repeat: no-repeat;
+    background-position: bottom right;
+    background-image: url("../images/bgimage.png");
+}
+
+h1 {
+	margin: 20px;
+	font-size: 1.2em;
+	font-weight: bold;
+}
+
+div.header-bar, div.header-bar-right {
+    width: 2px;
+    height: 48px;
+    background-image: url("../images/headerbar.png");
+}
+
+div.header-bar {
+    float: left;
+}
+
+div.header-bar-right {
+    float: right;
+}
+
+div.break {
+    clear: both;
+}
+
+div.link {
+    color: white;
+    cursor: pointer;
+}
+
+div.header-button, div.admin-button {
+    text-align: center;
+    line-height: 48px;
+    height: 48px;
+    font-size: 16px;
+}
+
+div.header-button {
+    float: left;
+    width: 96px;
+}
+
+div.header-queue {
+	float: right;
+}
+
+div.admin-button {
+    float: right;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-image: url("../images/gear24.png");
+    width: 48px;
+}
+
+div.selected-button {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+div.subdiv {
+    display: block;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    overflow: auto;
+}
+
+div.artists ul li, div.albums ul li, div.album-side .details {
+    margin: 5px;
+    background: rgba(0, 0, 0, .1);
+    background-repeat: no-repeat;
+    background-position: top right;
+    background-image: url("../images/dots.png");
+    border-radius: 10px;
+    padding: 10px;
+}
+
+div.artists ul li, div.albums ul li {
+    float: left;
+    clear: none;
+    list-style: none;
+    cursor: pointer;
+}
+
+div.artists ul li {
+    width: 150px;
+    height: 130px;
+}
+
+div.albums ul li {
+    width: 150px;
+    height: 200px;
+}
+
+div.artist-albums, div.albums-detail{
+    margin-left: 30px;
+    margin-right: 30px;
+}
+
+div.album-side {
+    float: left;
+}
+
+div.album-side .details {
+    width: 150px;
+}
+
+div.request-album, div.back-button, div.clear-queue {
+    background: #666666;
+    text-align: center;
+    color: white;
+    font-size: 12px;
+    height: 36px;
+    line-height: 36px;
+    border-radius: 18px;
+    margin: 10px 5px;
+    width: 150px;
+    padding-left: 24px;
+    cursor: pointer;
+    background-repeat: no-repeat;
+    background-position: 18px 9px; 
+}
+
+div.clear-queue {
+	padding-left: 0px;
+	float: right;
+	margin-right: 20px;
+}
+
+div.request-album {
+    background-image: url("../images/playarrow18.png");
+}
+
+div.back-button {
+    background-image: url("../images/backarrow18.png");
+}
+div.album-songs {
+    margin-left: 200px;
+}
+
+div.artists ul li .artist-name, div.albums ul li .album-name, div.album-side .album-name {
+    font-size: 12px;
+    font-weight: bold;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    width: 100%;
+}
+
+div.albums ul li .artist-name, div.album-side .artist-name {
+    font-size: 12px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    width: 100%;
+}
+
+div.artists ul li .counts, div.albums ul li .counts {
+    font-size: 10px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    width: 100%;
+}
+
+div#now-playing {
+    float: left;
+    margin-left: 1em;
+    color: white;
+    line-height: 48px;
+}
+
+div#now-playing .song-name, div#now-playing .artist-name {
+    color: #8ed6fb;
+}
+
+div.album {
+    margin-bottom: 20px;
+}
+
+div.album-songs {
+	border: 1px solid black;
+	width: 78%;
+	padding: 2px;
+	border-radius: 2px;
+}
+
+div.songs-list, div.library-list, div.stats-list {
+	margin: 20px;
+	border: 1px solid black;
+	padding: 2px;
+	border-radius: 2px;
+}
+
+div.stats-list {
+	width: 50%;
+}
+
+div.new-library-form {
+	margin: 20px;
+}
+
+div.queue div.songs-list {
+	margin-top: 0px;
+}
+
+form.search-form {
+	margin: 20px;
+	border: 1px solid black;
+	padding: 2px;
+	border-radius: 2px;
+	text-align: center;
+}
+
+input.search-field {
+	width: 50%;
+}
+
+table.songs, table.library, table.stats {
+    width: 100%;
+    border-collapse:collapse;
+    border-spacing:0;
+}
+
+table.songs th, table.library th, table.stats th {
+	background-color: black;
+	color: white;
+	font-weight: normal;
+}
+
+table.songs tr, table.library tr, table.stats tr {
+	background-color: rgba(0, 0, 0, .1);
+	cursor: pointer;
+}
+
+table.songs td, table.library td, table.stats td {
+	border-top: 2px solid white;
+}
+
+table.songs tr:first-child td, table.library tr:first-child td, table.stats tr:first-child td {
+	border-top: none;
+}
+
+table.songs tr:hover {
+	background-color: rgba(0, 0, 0, .05);
+}
+
+th {
+    text-align: left;
+}
+
+td.number {
+    width: 5%;
+}
+
+td.song {
+    width: 40%;
+}
+
+td.album { 
+    width: 35%;
+}
+
+div.artist-image {
+	width: 150px;
+	height: 100px;
+}
+
+div.album-image {
+	width: 150px;
+	height: 150px;
+}
+
+#alert { 
+	display: none;
+	position: absolute;
+	bottom: -5px;
+	padding: 5px;
+	border-radius: 5px;
+	width: 80%;
+	left: 10%;
+	right: 10%;
+	background-color: #333333;
+	color: white;
+	text-align: center;
+	cursor: pointer;
+}

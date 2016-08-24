@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+
+<shortcuts>
+    <skipIfNotSupported />
+    <programGroup defaultName="Exit 66 Jukebox"
+        location="applications" />
+    <shortcut
+        name="Exit 66 Jukebox"
+        target="$INSTALL_PATH\run_exit66jb.sh"
+        workingDirectory="$INSTALL_PATH"
+        description="This starts Exit 66 Jukebox"
+        iconFile="$INSTALL_PATH\e66jb.jpg"
+        programGroup="yes"
+        desktop="yes"
+        applications="no"
+        startMenu="no"
+        type="Application"
+        encoding="UTF-8"
+        startup="yes">
+        <createForPack name="Core" />
+    </shortcut>
+    <shortcut
+        name="Uninstall"
+        programGroup="yes"
+        desktop="yes"
+        applications="no"
+        startMenu="no"
+        startup="no"
+        target="java"
+        commandLine="-jar &quot;$INSTALL_PATH/Uninstaller/uninstaller.jar&quot;"
+        initialState="noShow"
+        iconFile="trashcan_full"
+        iconIndex="0" 
+        workingDirectory=""
+        type="Application"
+        encoding="UTF-8"
+        description="Exit 66 Jukebox Uninstaller">
+        <createForPack name="Core" />
+    </shortcut>
+</shortcuts>
