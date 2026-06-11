@@ -43,14 +43,22 @@ func Discover(timeout time.Duration) ([]Device, error) {
 		return nil, err
 	}
 
+	// Collect responders during the read window WITHOUT blocking on HTTP: a slow
+	// device descriptor fetch must not eat into the deadline and cause other
+	// devices' unicast replies to be missed.
 	_ = conn.SetReadDeadline(time.Now().Add(timeout))
 	seen := map[string]bool{}
-	var devices []Device
+	type responder struct{ ip, loc string }
+	var found []responder
+	var readErr error
 	buf := make([]byte, 2048)
 	for {
 		n, _, err := conn.ReadFrom(buf)
 		if err != nil {
-			break // deadline reached
+			if ne, ok := err.(net.Error); !ok || !ne.Timeout() {
+				readErr = err // real I/O error, not the expected deadline
+			}
+			break
 		}
 		loc := parseLocation(string(buf[:n]))
 		ip := hostOf(loc)
@@ -58,13 +66,19 @@ func Discover(timeout time.Duration) ([]Device, error) {
 			continue
 		}
 		seen[ip] = true
-		name := fetchName(loc)
-		if name == "" {
-			name = ip
-		}
-		devices = append(devices, Device{Name: name, IP: ip})
+		found = append(found, responder{ip: ip, loc: loc})
 	}
-	return devices, nil
+
+	// Fetch room names after the read window closes.
+	var devices []Device
+	for _, r := range found {
+		name := fetchName(r.loc)
+		if name == "" {
+			name = r.ip
+		}
+		devices = append(devices, Device{Name: name, IP: r.ip})
+	}
+	return devices, readErr
 }
 
 // parseLocation extracts the LOCATION header from an SSDP response.

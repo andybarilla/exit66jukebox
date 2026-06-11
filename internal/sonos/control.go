@@ -10,6 +10,10 @@ import (
 
 const avTransport = "urn:schemas-upnp-org:service:AVTransport:1"
 
+// soapClient is reused across SOAP calls so SetAVTransportURI + Play to the same
+// player can share a connection.
+var soapClient = &http.Client{Timeout: 4 * time.Second}
+
 // ControlURL is the fixed AVTransport control endpoint for a Sonos player.
 func ControlURL(ip string) string {
 	return fmt.Sprintf("http://%s:1400/MediaRenderer/AVTransport/Control", ip)
@@ -50,7 +54,7 @@ func soap(controlURL, action, inner string) error {
 	}
 	req.Header.Set("Content-Type", `text/xml; charset="utf-8"`)
 	req.Header.Set("SOAPACTION", `"`+avTransport+`#`+action+`"`)
-	resp, err := (&http.Client{Timeout: 4 * time.Second}).Do(req)
+	resp, err := soapClient.Do(req)
 	if err != nil {
 		return err
 	}
