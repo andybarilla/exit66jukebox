@@ -1,0 +1,62 @@
+/* Exit 66 Jukebox — Radii, Borders, Shadows, HUD Edges, Motion
+   SIGNATURE: HUD Outline — crisp flat neon strokes, double frames, sharp
+   corners, NO bloom. The `--glow-*` names are kept for compatibility but now
+   resolve to crisp rings (zero blur). Use `--hud-double-*` for double frames. */
+
+:root {
+  /* ---- RADII (sharp, machined — terminal/HUD) ---- */
+  --radius-xs: 0px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 5px;
+  --radius-xl: 8px;
+  --radius-pill: 999px;
+
+  /* ---- HUD STROKE WEIGHTS ---- */
+  --stroke: 1.5px;
+  --stroke-bold: 2px;
+
+  /* ---- DEPTH SHADOWS (near-black, deep — structure only, no color) ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 32px 80px rgba(0, 0, 0, 0.7);
+
+  /* ---- NEON EDGES (crisp rings — used on hover / active / live elements) ---- */
+  --glow-magenta: 0 0 0 1.5px var(--neon-magenta);
+  --glow-cyan: 0 0 0 1.5px var(--neon-cyan);
+  --glow-amber: 0 0 0 1.5px var(--neon-amber);
+  --glow-soft-magenta: 0 0 0 1px rgba(255, 46, 136, 0.6);
+  --glow-soft-cyan: 0 0 0 1px rgba(31, 224, 255, 0.6);
+
+  /* ---- HUD DOUBLE FRAME (inner gap + outer neon stroke) ---- */
+  --hud-double-magenta: 0 0 0 1px var(--bg-base), 0 0 0 2.5px var(--neon-magenta);
+  --hud-double-cyan: 0 0 0 1px var(--bg-base), 0 0 0 2.5px var(--neon-cyan);
+  --hud-double-amber: 0 0 0 1px var(--bg-base), 0 0 0 2.5px var(--neon-amber);
+
+  /* ---- TEXT (no bloom in HUD — kept as tokens so headings stay flat) ---- */
+  --text-glow-magenta: none;
+  --text-glow-cyan: none;
+  --text-glow-amber: none;
+
+  /* ---- TEXTURES ---- */
+  --scanline: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.025) 0px,
+    rgba(255, 255, 255, 0.025) 1px,
+    transparent 1px,
+    transparent 3px
+  ); /* @kind other */
+  --grid-glow: radial-gradient(circle at 50% 0%, rgba(255, 46, 136, 0.10), transparent 62%); /* @kind other */
+
+  /* ---- MOTION ---- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* @kind other */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* @kind other */
+  --ease-snap: cubic-bezier(0.5, 1.6, 0.4, 1); /* @kind other */ /* slight overshoot for jukebox buttons */
+  --dur-fast: 120ms; /* @kind other */
+  --dur: 200ms; /* @kind other */
+  --dur-slow: 360ms; /* @kind other */
+
+  /* ---- FOCUS (crisp cyan ring, no blur) ---- */
+  --focus-shadow: 0 0 0 2px var(--bg-base), 0 0 0 3.5px var(--focus-ring);
+}

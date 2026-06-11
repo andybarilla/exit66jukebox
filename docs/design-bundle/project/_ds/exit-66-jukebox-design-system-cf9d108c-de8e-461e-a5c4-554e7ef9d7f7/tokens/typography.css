@@ -1,0 +1,56 @@
+/* Exit 66 Jukebox — Typography
+   Display : Chakra Petch — uppercase, tracked-out, neon-sign headers
+   UI/Body : Space Grotesk — interface + reading text
+   Mono    : Space Mono — track times, codes, metadata */
+
+:root {
+  --font-display: 'Chakra Petch', 'Space Grotesk', sans-serif;
+  --font-sans: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'Space Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* Weights */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Type scale (px) — fluid-ready */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-md: 18px;
+  --text-lg: 22px;
+  --text-xl: 28px;
+  --text-2xl: 36px;
+  --text-3xl: 48px;
+  --text-4xl: 64px;
+  --text-5xl: 88px;
+
+  /* Line heights */
+  --leading-tight: 1.05;
+  --leading-snug: 1.2;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* Tracking */
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0em;
+  --tracking-wide: 0.06em;
+  --tracking-wider: 0.14em;
+  --tracking-widest: 0.24em;
+
+  /* Semantic roles */
+  --display-font: var(--font-display);
+  --display-weight: var(--weight-bold);
+  --display-tracking: var(--tracking-wide);
+
+  --heading-font: var(--font-display);
+  --heading-weight: var(--weight-semibold);
+
+  --body-font: var(--font-sans);
+  --body-weight: var(--weight-regular);
+
+  --label-font: var(--font-mono);
+  --label-tracking: var(--tracking-widest);
+}
