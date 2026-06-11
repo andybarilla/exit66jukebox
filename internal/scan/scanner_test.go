@@ -9,7 +9,10 @@ import (
 )
 
 func TestScanIndexesAndIsIncremental(t *testing.T) {
-	db, _ := store.Open(":memory:")
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
 	defer db.Close()
 
 	dir := t.TempDir()
@@ -33,5 +36,28 @@ func TestScanIndexesAndIsIncremental(t *testing.T) {
 	}
 	if res2.Skipped != 2 {
 		t.Fatalf("expected 2 skipped on re-scan, got %d", res2.Skipped)
+	}
+}
+
+func TestScanReindexesChangedFile(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	dir := t.TempDir()
+	src, _ := os.ReadFile("testdata/sample.mp3")
+	p := filepath.Join(dir, "a.mp3")
+	os.WriteFile(p, src, 0o644)
+
+	if res, _ := Scan(db, []string{dir}, 2); res.Added != 1 {
+		t.Fatalf("expected 1 added, got %d", res.Added)
+	}
+	// Append bytes so size changes and the scanner re-reads it.
+	os.WriteFile(p, append(src, src...), 0o644)
+	res, _ := Scan(db, []string{dir}, 2)
+	if res.Updated != 1 {
+		t.Fatalf("expected 1 updated, got %d (added=%d skipped=%d)",
+			res.Updated, res.Added, res.Skipped)
 	}
 }

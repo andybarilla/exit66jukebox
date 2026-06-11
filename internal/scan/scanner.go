@@ -23,10 +23,11 @@ type Result struct {
 var audioExt = map[string]bool{".mp3": true, ".ogg": true, ".flac": true}
 
 type job struct {
-	path    string
-	modTime int64
-	size    int64
-	exists  bool // already indexed and unchanged
+	path       string
+	modTime    int64
+	size       int64
+	exists     bool // already indexed and unchanged
+	wasIndexed bool // existed in the index but stamp differed
 }
 
 // Scan walks the given roots, reads tags from new/changed audio files using
@@ -38,11 +39,12 @@ func Scan(db *sql.DB, roots []string, workers int) (Result, error) {
 	}
 	var res Result
 	jobs := make(chan job)
+	var walkErr error
 
 	go func() {
 		defer close(jobs)
 		for _, root := range roots {
-			filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 				if err != nil || d.IsDir() {
 					return nil
 				}
@@ -54,13 +56,16 @@ func Scan(db *sql.DB, roots []string, workers int) (Result, error) {
 					return nil
 				}
 				mt, sz := info.ModTime().Unix(), info.Size()
-				if omt, osz, ok := store.TrackStamp(db, p); ok && omt == mt && osz == sz {
+				omt, osz, ok := store.TrackStamp(db, p)
+				if ok && omt == mt && osz == sz {
 					jobs <- job{path: p, exists: true}
 					return nil
 				}
-				jobs <- job{path: p, modTime: mt, size: sz}
+				jobs <- job{path: p, modTime: mt, size: sz, wasIndexed: ok}
 				return nil
-			})
+			}); err != nil && walkErr == nil {
+				walkErr = err
+			}
 		}
 	}()
 
@@ -87,14 +92,13 @@ func Scan(db *sql.DB, roots []string, workers int) (Result, error) {
 					Title: meta.Title, TrackNo: meta.TrackNo, Genre: meta.Genre,
 				}
 				mu.Lock()
-				_, _, exists := store.TrackStamp(db, j.path)
 				_, err = store.UpsertTrack(db, tr, meta.Artist, meta.Album)
 				mu.Unlock()
 				if err != nil {
 					atomic.AddInt64(&failed, 1)
 					continue
 				}
-				if exists {
+				if j.wasIndexed {
 					atomic.AddInt64(&updated, 1)
 				} else {
 					atomic.AddInt64(&added, 1)
@@ -108,5 +112,5 @@ func Scan(db *sql.DB, roots []string, workers int) (Result, error) {
 	res.Updated = int(updated)
 	res.Skipped = int(skipped)
 	res.Failed = int(failed)
-	return res, nil
+	return res, walkErr
 }
