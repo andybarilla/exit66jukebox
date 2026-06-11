@@ -1,6 +1,4 @@
 /exit66jukebox
 /exit66.db
-/web/dist/
 /web/node_modules/
-/internal/web/dist/
 *.test
