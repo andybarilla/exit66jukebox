@@ -979,6 +979,8 @@ export function createStore() {
 
   let _uid = 0;
   let _esHouse = null;
+  let tracksById = {}; // id -> enriched track, so the lineup/now-playing reuse
+                       // the exact same slot code + tone the crate computed.
 
   async function loadLibrary() {
     const [rawTracks, rawAlbums, rawArtists] = await Promise.all([
@@ -1003,6 +1005,7 @@ export function createStore() {
       };
       al.tracks.push(enriched);
       codeMap[code] = enriched;
+      tracksById[t.id] = enriched;
     }
     const albumList = [...albumById.values()].map((al) => ({
       ...al, artistName: artistName.get(al.artistId) || 'Unknown',
@@ -1046,10 +1049,12 @@ export function createStore() {
     };
   }
   function codeForTrack(t) {
+    if (tracksById[t.id]) return tracksById[t.id].code;
     const al = albums.find((a) => a.id === t.album_id);
     return al ? al.letter + (t.track_no || 1) : '··';
   }
   function toneForTrack(t) {
+    if (tracksById[t.id]) return tracksById[t.id].tone;
     const al = albums.find((a) => a.id === t.album_id);
     return al ? al.tone : 'magenta';
   }
@@ -1087,7 +1092,9 @@ export function createStore() {
     get albums() { return albums; },
     get artists() { return artists; },
 
-    get listeners() { return listeners[stream]; },
+    // Personal is always "just you": the `me` stream has no broadcast hub, so
+    // the backend reports 0 listeners for it. Never let that 0 surface here.
+    get listeners() { return stream === 'me' ? 1 : (listeners.house || 0); },
     get queue() { return queues[stream]; },
     get nowPlaying() { return nowPlaying[stream]; },
     get progress() { return progress[stream]; },
@@ -1148,20 +1155,25 @@ export function createStore() {
     closeLineup() { lineupOpen = false; },
     onResize() { const ph = window.innerWidth < 760; isPhone = ph; if (!ph) lineupOpen = false; },
 
+    // The backend rejects duplicates / recently-played tracks. Branch on the
+    // real `queued` count so we never claim a success that didn't happen.
     async requestTrack(t) {
-      await requestTo(stream, t.id, { kind: 'track', by: displayName });
+      const r = await requestTo(stream, t.id, { kind: 'track', by: displayName });
       await refreshQueue(stream);
-      pushToast('success', 'Queued', `${t.title} joined the lineup.`);
+      if (r.queued > 0) pushToast('success', 'Queued', `${t.title} joined the lineup.`);
+      else pushToast('amber', 'Not queued', r.message || 'That track is already in the lineup.');
     },
     async requestAlbum(al) {
-      await requestTo(stream, al.id, { kind: 'album', by: displayName });
+      const r = await requestTo(stream, al.id, { kind: 'album', by: displayName });
       await refreshQueue(stream);
-      pushToast('success', 'Queued', `${al.name} — ${al.tracks.length} tracks on the way.`);
+      if (r.queued > 0) pushToast('success', 'Queued', `${al.name} — ${r.queued} track${r.queued === 1 ? '' : 's'} on the way.`);
+      else pushToast('amber', 'Nothing new', `${al.name} is already in the lineup.`);
     },
     async requestArtist(a) {
-      await requestTo(stream, a.id, { kind: 'artist', by: displayName });
+      const r = await requestTo(stream, a.id, { kind: 'artist', by: displayName });
       await refreshQueue(stream);
-      pushToast('success', 'Queued', `${a.name} — ${a.trackCount} tracks on the way.`);
+      if (r.queued > 0) pushToast('success', 'Queued', `${a.name} — ${r.queued} track${r.queued === 1 ? '' : 's'} on the way.`);
+      else pushToast('amber', 'Nothing new', `${a.name} is already in the lineup.`);
     },
     async removeFromQueue(item) {
       await removeRequest(stream, item.id);
@@ -1188,7 +1200,25 @@ export function createStore() {
 
 > Implementation note: `nowPlaying`, `progress`, `queues`, `listeners` are `$state` objects mutated by key (`nowPlaying.house = …`); Svelte 5 deep-reactivity tracks that. The getters expose the active stream's slice so components stay simple.
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Reactivity checkpoint (de-risk before building 15 components on this pattern)**
+
+The store returns getters that close over `$state` locals in a `.svelte.js` module. This pattern works in Svelte 5, but verify it propagates through the getter boundary **before** the rest of the UI depends on it. Temporarily replace `App.svelte` with a throwaway probe:
+
+```svelte
+<script>
+  import { createStore } from './lib/store.svelte.js';
+  const s = createStore();
+</script>
+<button onclick={() => (s.tab = s.tab === 'albums' ? 'tracks' : 'albums')}>tab: {s.tab}</button>
+<button onclick={() => s.toggleStream()}>stream: {s.stream} · listeners: {s.listeners}</button>
+```
+
+Run: `cd web && npm run dev`, open the printed URL, click both buttons.
+Expected: the label text updates on each click (tab flips, stream toggles `house`↔`me`, listeners shows `1` on `me`).
+- If it updates → the pattern is sound; `git checkout web/src/App.svelte` to discard the probe and proceed.
+- If it does NOT update → switch the store to the known-good shape: module-level `$state` (top-level `let x = $state(...)` in the `.svelte.js`, exported via functions) or a class with `$state` fields. Same logic, just where the runes live. Fix here before Task 12.
+
+- [ ] **Step 3: Commit**
 
 ```bash
 git add web/src/lib/store.svelte.js
@@ -2101,6 +2131,8 @@ Run: `./exit66jukebox --library <path-to-a-few-albums>` (see `internal/config` f
   - Compact top bar with tap-to-toggle stream chip; single-column search.
   - 2-up album grid; mobile player with progress bar; "The Lineup" FAB with count.
   - Tap FAB → bottom sheet lineup with shuffle + close; scrim tap closes.
+
+> Expected non-bugs: (1) the **house** player is blank until the next track starts — SSE doesn't replay the last `now-playing` event and `getQueue` doesn't return the current track, so an empty house player right after load is expected (request a track or wait for the next to confirm it populates). (2) House progress is an approximation that starts at 0 and drifts; it can't know a mid-track offset.
 
 - [ ] **Step 4: Console check** — no errors in devtools console during the above.
 
