@@ -92,6 +92,31 @@ func ClearQueue(db *sql.DB, streamID string) error {
 	return err
 }
 
+// QueuedRow is a queued track id paired with who requested it, in play order.
+type QueuedRow struct {
+	TrackID     int64
+	RequestedBy string
+}
+
+// QueueWithRequester returns the queued rows (track id + requester) in play order.
+func QueueWithRequester(db *sql.DB, streamID string) ([]QueuedRow, error) {
+	rows, err := db.Query(
+		`SELECT track_id, added_by FROM queue_item WHERE stream_id=? ORDER BY play_order`, streamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []QueuedRow
+	for rows.Next() {
+		var r QueuedRow
+		if err := rows.Scan(&r.TrackID, &r.RequestedBy); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // QueueTrackIDs returns the queued track ids in play order.
 func QueueTrackIDs(db *sql.DB, streamID string) ([]int64, error) {
 	rows, err := db.Query(
