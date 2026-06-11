@@ -70,3 +70,90 @@ func TrackStamp(db *sql.DB, path string) (modTime, size int64, ok bool) {
 	}
 	return modTime, size, true
 }
+
+// ListTracks returns tracks whose title matches the search substring (empty =
+// all), ordered by title, paged by limit/offset. A limit <= 0 means no limit.
+func ListTracks(db *sql.DB, search string, limit, offset int) ([]model.Track, error) {
+	q := `SELECT id, title, artist_id, album_id, track_no, genre, duration, play_count
+	      FROM track WHERE title LIKE ? ORDER BY title LIMIT ? OFFSET ?`
+	lim := limit
+	if lim <= 0 {
+		lim = -1 // SQLite: no limit
+	}
+	rows, err := db.Query(q, "%"+search+"%", lim, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Track
+	for rows.Next() {
+		var t model.Track
+		if err := rows.Scan(&t.ID, &t.Title, &t.ArtistID, &t.AlbumID,
+			&t.TrackNo, &t.Genre, &t.Duration, &t.PlayCount); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ListArtists returns artists matching search (empty = all), ordered by name.
+func ListArtists(db *sql.DB, search string, limit, offset int) ([]model.Artist, error) {
+	lim := limit
+	if lim <= 0 {
+		lim = -1
+	}
+	rows, err := db.Query(
+		`SELECT id, name FROM artist WHERE name LIKE ? ORDER BY name LIMIT ? OFFSET ?`,
+		"%"+search+"%", lim, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Artist
+	for rows.Next() {
+		var a model.Artist
+		if err := rows.Scan(&a.ID, &a.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ListAlbums returns albums matching search (empty = all), ordered by name.
+func ListAlbums(db *sql.DB, search string, limit, offset int) ([]model.Album, error) {
+	lim := limit
+	if lim <= 0 {
+		lim = -1
+	}
+	rows, err := db.Query(
+		`SELECT id, name, artist_id FROM album WHERE name LIKE ? ORDER BY name LIMIT ? OFFSET ?`,
+		"%"+search+"%", lim, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Album
+	for rows.Next() {
+		var a model.Album
+		if err := rows.Scan(&a.ID, &a.Name, &a.ArtistID); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// GetTrack returns a single track and its file path. ok=false if not found.
+func GetTrack(db *sql.DB, id int64) (t model.Track, path string, ok bool) {
+	err := db.QueryRow(
+		`SELECT id, path, title, artist_id, album_id, track_no, genre, duration, play_count
+		 FROM track WHERE id = ?`, id).Scan(
+		&t.ID, &path, &t.Title, &t.ArtistID, &t.AlbumID,
+		&t.TrackNo, &t.Genre, &t.Duration, &t.PlayCount)
+	if err != nil {
+		return model.Track{}, "", false
+	}
+	return t, path, true
+}
