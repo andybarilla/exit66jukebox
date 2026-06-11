@@ -6,7 +6,6 @@ import (
 
 	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
-	"github.com/andybarilla/exit66jukebox/internal/model"
 )
 
 func (s *Server) getStream(w http.ResponseWriter, r *http.Request) {
@@ -21,9 +20,13 @@ func (s *Server) getStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if q == nil {
-		q = []model.Track{}
+		q = []jukebox.QueuedTrack{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "queue": q})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":        id,
+		"queue":     q,
+		"listeners": s.listenerCount(id),
+	})
 }
 
 func (s *Server) nextTrack(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +50,7 @@ func (s *Server) request(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.ParseForm()
+	by := r.FormValue("by")
 	kind := r.FormValue("kind")
 	if kind == "" {
 		kind = "track"
@@ -59,19 +63,19 @@ func (s *Server) request(w http.ResponseWriter, r *http.Request) {
 
 	switch kind {
 	case "album":
-		n := s.jb.RequestAlbum(id, targetID)
+		n := s.jb.RequestAlbum(id, targetID, by)
 		if n > 0 {
 			s.publishQueueChanged(id)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"queued": n, "message": ""})
 	case "artist":
-		n := s.jb.RequestArtist(id, targetID)
+		n := s.jb.RequestArtist(id, targetID, by)
 		if n > 0 {
 			s.publishQueueChanged(id)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"queued": n, "message": ""})
 	case "track":
-		res, err := s.jb.Request(id, targetID)
+		res, err := s.jb.Request(id, targetID, by)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -116,4 +120,12 @@ func (s *Server) publishQueueChanged(streamID string) {
 	if bus, ok := s.buses[streamID]; ok {
 		bus.Publish(events.Event{Type: "queue-changed", Data: streamID})
 	}
+}
+
+func (s *Server) setShuffle(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	r.ParseForm()
+	on := r.FormValue("value") == "true" || r.FormValue("value") == "1"
+	s.jb.SetShuffle(id, on)
+	writeJSON(w, http.StatusOK, map[string]any{"shuffle": on})
 }
