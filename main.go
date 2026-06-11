@@ -47,9 +47,14 @@ func main() {
 	// Always-on "house" shared stream: one continuous MP3 feed driven by the
 	// shared queue, that any browser/Sonos can tune into.
 	const houseID = "house"
-	jb.EnsureStream(houseID, "shared")
+	if err := jb.EnsureStream(houseID, "shared"); err != nil {
+		log.Fatalf("ensure house stream: %v", err)
+	}
 	houseBus := events.NewBus()
 	silence := broadcast.GenerateSilence(1)
+	if silence == nil {
+		log.Print("warning: MP3 silence generation failed (is ffmpeg installed?); the house stream will send nothing while idle")
+	}
 
 	// next pops the house queue and publishes now-playing; returns the file path
 	// for the broadcaster. Called repeatedly; a no-op when the queue is empty.
