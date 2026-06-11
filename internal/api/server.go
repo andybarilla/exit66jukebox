@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/events"
@@ -19,13 +20,20 @@ type Server struct {
 	ui    fs.FS
 	hubs  map[string]*broadcast.Hub
 	buses map[string]*events.Bus
+
+	// sonosIPs is the allowlist of IPs from the most recent discovery; casts are
+	// restricted to it so an arbitrary ip can't be used to make the server POST
+	// to an internal host (SSRF). Guarded by sonosMu.
+	sonosMu  sync.Mutex
+	sonosIPs map[string]bool
 }
 
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 	return &Server{
 		db: db, jb: jb, ui: ui,
-		hubs:  make(map[string]*broadcast.Hub),
-		buses: make(map[string]*events.Bus),
+		hubs:     make(map[string]*broadcast.Hub),
+		buses:    make(map[string]*events.Bus),
+		sonosIPs: make(map[string]bool),
 	}
 }
 
