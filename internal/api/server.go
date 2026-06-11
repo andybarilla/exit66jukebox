@@ -7,18 +7,32 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/andybarilla/exit66jukebox/internal/broadcast"
+	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 )
 
 // Server holds dependencies and builds the HTTP handler.
 type Server struct {
-	db *sql.DB
-	jb *jukebox.Jukebox
-	ui fs.FS
+	db    *sql.DB
+	jb    *jukebox.Jukebox
+	ui    fs.FS
+	hubs  map[string]*broadcast.Hub
+	buses map[string]*events.Bus
 }
 
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
-	return &Server{db: db, jb: jb, ui: ui}
+	return &Server{
+		db: db, jb: jb, ui: ui,
+		hubs:  make(map[string]*broadcast.Hub),
+		buses: make(map[string]*events.Bus),
+	}
+}
+
+// RegisterStream attaches a broadcast hub and event bus for a shared stream id.
+func (s *Server) RegisterStream(id string, hub *broadcast.Hub, bus *events.Bus) {
+	s.hubs[id] = hub
+	s.buses[id] = bus
 }
 
 // Handler returns the routed mux. Handlers live in sibling files.
@@ -35,6 +49,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tracks/{id}/audio", s.trackAudio)
 	mux.HandleFunc("GET /api/tracks/{id}/cover", s.trackCover)
 	mux.HandleFunc("GET /api/albums/{id}/cover", s.albumCover)
+	mux.HandleFunc("GET /stream/", s.streamAudio)
+	mux.HandleFunc("GET /api/streams/{id}/events", s.streamEvents)
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}
