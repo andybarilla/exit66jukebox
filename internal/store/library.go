@@ -173,6 +173,19 @@ func TrackIDsByArtist(db *sql.DB, artistID int64) ([]int64, error) {
 		`SELECT id FROM track WHERE artist_id=? ORDER BY title`, artistID)
 }
 
+// FirstTrackIDOfAlbum returns the lowest-numbered track id for an album, or
+// ok=false if the album has no tracks.
+func FirstTrackIDOfAlbum(db *sql.DB, albumID int64) (int64, bool) {
+	var id int64
+	err := db.QueryRow(
+		`SELECT id FROM track WHERE album_id=? ORDER BY track_no, title LIMIT 1`,
+		albumID).Scan(&id)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
 func scanIDs(db *sql.DB, q string, arg any) ([]int64, error) {
 	rows, err := db.Query(q, arg)
 	if err != nil {

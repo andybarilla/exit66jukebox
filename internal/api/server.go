@@ -33,6 +33,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/streams/{id}/requests/{trackID}", s.removeRequest)
 	mux.HandleFunc("DELETE /api/streams/{id}/requests", s.clearRequests)
 	mux.HandleFunc("GET /api/tracks/{id}/audio", s.trackAudio)
+	mux.HandleFunc("GET /api/tracks/{id}/cover", s.trackCover)
+	mux.HandleFunc("GET /api/albums/{id}/cover", s.albumCover)
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}
