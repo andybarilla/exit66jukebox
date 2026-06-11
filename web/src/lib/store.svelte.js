@@ -13,7 +13,7 @@ export function createStore() {
   let isPhone = $state(false);
   let lineupOpen = $state(false);
   let detailAlbumId = $state(null);
-  let shuffle = $state(false);
+  let shuffle = $state({ house: false, me: false }); // per-stream, mirrors backend
   let displayName = $state(localStorage.getItem('e66.name') || 'You');
   let toasts = $state([]);
 
@@ -135,7 +135,7 @@ export function createStore() {
     get isPhone() { return isPhone; }, set isPhone(v) { isPhone = v; },
     get lineupOpen() { return lineupOpen; }, set lineupOpen(v) { lineupOpen = v; },
     get detailAlbumId() { return detailAlbumId; },
-    get shuffle() { return shuffle; },
+    get shuffle() { return shuffle[stream]; },
     get displayName() { return displayName; },
     set displayName(v) { displayName = v; localStorage.setItem('e66.name', v); },
     get toasts() { return toasts; },
@@ -187,7 +187,8 @@ export function createStore() {
     setStream(s) {
       if (s === stream) return;
       stream = s;
-      setShuffle(s, shuffle);
+      // Each stream keeps its own shuffle flag (UI + backend); switching just
+      // reveals the target stream's flag — don't push the old one onto it.
       pushToast('cyan', 'Stream', s === 'house'
         ? 'Tuned in to the house stream — everyone hears this.'
         : 'Switched to your personal stream.');
@@ -195,9 +196,12 @@ export function createStore() {
     toggleStream() { this.setStream(stream === 'house' ? 'me' : 'house'); },
 
     async toggleShuffle(v) {
-      shuffle = typeof v === 'boolean' ? v : !shuffle;
-      await setShuffle(stream, shuffle);
+      shuffle[stream] = typeof v === 'boolean' ? v : !shuffle[stream];
+      await setShuffle(stream, shuffle[stream]);
     },
+
+    // Re-fetch a stream's queue (+ listeners) from the backend.
+    refreshQueue(s) { return refreshQueue(s); },
 
     openAlbum(id) { detailAlbumId = id; },
     closeAlbum() { detailAlbumId = null; },

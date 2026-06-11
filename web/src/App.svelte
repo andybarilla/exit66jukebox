@@ -30,7 +30,7 @@
 
   // ---- personal (me) playback: client audio drives now-playing ----
   async function advancePersonal() {
-    const r = await nextTrack(); // GET /api/streams/me/next
+    const r = await nextTrack(); // GET /api/streams/me/next (pops server-side)
     if (r && r.ok && r.track) {
       s.setNowPlaying('me', normalize(r.track));
       s.setProgress('me', 0);
@@ -40,6 +40,9 @@
       s.setNowPlaying('me', null);
       playing = false;
     }
+    // The pop removed the track server-side; personal has no SSE, so refresh
+    // the queue ourselves to keep "up next" in sync.
+    s.refreshQueue('me');
   }
   function normalize(t) {
     // mirror store.normalizeNP via exported helper if present; minimal inline:
@@ -80,6 +83,7 @@
     s.onResize();
     resizeHandler = () => s.onResize();
     window.addEventListener('resize', resizeHandler);
+    if (audio) audio.volume = volume / 100;
     applyStreamAudio();
     // 1s tick: personal reads exact audio time; house approximates.
     tickTimer = setInterval(() => {
