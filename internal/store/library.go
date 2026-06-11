@@ -161,6 +161,35 @@ func ListAlbums(db *sql.DB, search string, limit, offset int) ([]model.Album, er
 	return out, rows.Err()
 }
 
+// TrackIDsByAlbum returns track ids for an album in track-number order.
+func TrackIDsByAlbum(db *sql.DB, albumID int64) ([]int64, error) {
+	return scanIDs(db,
+		`SELECT id FROM track WHERE album_id=? ORDER BY track_no, title`, albumID)
+}
+
+// TrackIDsByArtist returns track ids for an artist in title order.
+func TrackIDsByArtist(db *sql.DB, artistID int64) ([]int64, error) {
+	return scanIDs(db,
+		`SELECT id FROM track WHERE artist_id=? ORDER BY title`, artistID)
+}
+
+func scanIDs(db *sql.DB, q string, arg any) ([]int64, error) {
+	rows, err := db.Query(q, arg)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // GetTrack returns a single track and its file path. ok=false if not found.
 func GetTrack(db *sql.DB, id int64) (t model.Track, path string, ok bool) {
 	err := db.QueryRow(

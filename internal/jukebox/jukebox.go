@@ -102,3 +102,27 @@ func (j *Jukebox) Remove(streamID string, trackID int64) error {
 func (j *Jukebox) Clear(streamID string) error {
 	return store.ClearQueue(j.db, streamID)
 }
+
+// RequestAlbum requests every track on an album, returning how many were newly
+// queued (tracks rejected by fairness are not counted).
+func (j *Jukebox) RequestAlbum(streamID string, albumID int64) int {
+	ids, _ := store.TrackIDsByAlbum(j.db, albumID)
+	return j.requestMany(streamID, ids)
+}
+
+// RequestArtist requests every track by an artist, returning how many were newly
+// queued.
+func (j *Jukebox) RequestArtist(streamID string, artistID int64) int {
+	ids, _ := store.TrackIDsByArtist(j.db, artistID)
+	return j.requestMany(streamID, ids)
+}
+
+func (j *Jukebox) requestMany(streamID string, ids []int64) int {
+	queued := 0
+	for _, id := range ids {
+		if j.Request(streamID, id) == Requested {
+			queued++
+		}
+	}
+	return queued
+}

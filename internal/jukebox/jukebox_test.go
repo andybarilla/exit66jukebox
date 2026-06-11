@@ -40,3 +40,24 @@ func TestNextEmptyQueue(t *testing.T) {
 		t.Fatalf("expected ok=false on empty queue")
 	}
 }
+
+func TestRequestAlbumQueuesAllTracks(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	store.UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "One", TrackNo: 1}, "Band", "LP")
+	store.UpsertTrack(db, model.Track{Path: "/m/2.mp3", Title: "Two", TrackNo: 2}, "Band", "LP")
+
+	var albumID int64
+	db.QueryRow(`SELECT id FROM album WHERE name='LP'`).Scan(&albumID)
+
+	jb := New(db, Config{HistoryWindow: 5})
+	jb.EnsureStream("s", "private")
+	n := jb.RequestAlbum("s", albumID)
+	if n != 2 {
+		t.Fatalf("expected 2 tracks queued, got %d", n)
+	}
+	q, _ := jb.Queue("s")
+	if len(q) != 2 {
+		t.Fatalf("expected queue length 2, got %d", len(q))
+	}
+}
