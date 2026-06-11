@@ -30,3 +30,21 @@ func TestTrackCoverUnknownIdIs404(t *testing.T) {
 		t.Fatalf("want 404 for unknown track, got %d", rec.Code)
 	}
 }
+
+func TestTrackCoverServesEmbeddedArt(t *testing.T) {
+	srv := newTestServer(t)
+	// testdata/art.mp3 carries an embedded MJPEG cover (path relative to package dir).
+	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "testdata/art.mp3", Title: "Art"}, "AA", "AL")
+	req := httptest.NewRequest(http.MethodGet, "/api/tracks/"+strconv.FormatInt(id, 10)+"/cover", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 with embedded art, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct == "" {
+		t.Fatalf("expected an image content-type, got empty")
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatalf("expected image bytes, got none")
+	}
+}
