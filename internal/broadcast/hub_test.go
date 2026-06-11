@@ -104,6 +104,26 @@ func TestHubRunReturnsOnCancel(t *testing.T) {
 	}
 }
 
+func TestListenerCount(t *testing.T) {
+	h := NewHub(nil, func() (string, bool) { return "", false }, nil)
+	if h.ListenerCount() != 0 {
+		t.Fatalf("want 0, got %d", h.ListenerCount())
+	}
+	_, c1 := h.Listen()
+	_, c2 := h.Listen()
+	if h.ListenerCount() != 2 {
+		t.Fatalf("want 2, got %d", h.ListenerCount())
+	}
+	c1()
+	if h.ListenerCount() != 1 {
+		t.Fatalf("want 1, got %d", h.ListenerCount())
+	}
+	c2()
+	if h.ListenerCount() != 0 {
+		t.Fatalf("want 0, got %d", h.ListenerCount())
+	}
+}
+
 func TestHubFansOutToMultipleListeners(t *testing.T) {
 	src := fakeSource{data: map[string][]byte{"A": []byte("aaaa")}}
 	queue := []string{"A"}

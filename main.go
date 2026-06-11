@@ -75,6 +75,9 @@ func main() {
 		}
 		playing = true
 		houseBus.Publish(events.Event{Type: "now-playing", Data: tr})
+		// The pop removed this track from the queue; tell listeners so their
+		// "up next" view doesn't keep showing the now-playing track.
+		houseBus.Publish(events.Event{Type: "queue-changed", Data: houseID})
 		return path, true
 	}
 

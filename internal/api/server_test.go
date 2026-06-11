@@ -41,6 +41,30 @@ func TestArtistsEndpointReturnsJSON(t *testing.T) {
 	}
 }
 
+func TestRequestRecordsRequesterAndStreamReturnsIt(t *testing.T) {
+	srv := newTestServer(t)
+	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "Album")
+
+	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}, "by": {"Mira"}}
+	req := httptest.NewRequest(http.MethodPost, "/api/streams/sess/requests",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("request status %d", rec.Code)
+	}
+
+	rec2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/streams/sess", nil))
+	if !strings.Contains(rec2.Body.String(), `"requested_by":"Mira"`) {
+		t.Fatalf("stream body missing requester: %s", rec2.Body.String())
+	}
+	if !strings.Contains(rec2.Body.String(), `"listeners":`) {
+		t.Fatalf("stream body missing listeners: %s", rec2.Body.String())
+	}
+}
+
 func TestRequestThenNextRoundTrip(t *testing.T) {
 	srv := newTestServer(t)
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "Album")

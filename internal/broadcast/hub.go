@@ -105,6 +105,13 @@ func (h *Hub) play(ctx context.Context, path string) {
 	}
 }
 
+// ListenerCount returns the number of connected listeners.
+func (h *Hub) ListenerCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.listeners)
+}
+
 func (h *Hub) idle(ctx context.Context) {
 	if len(h.silence) > 0 {
 		h.broadcast(h.silence)

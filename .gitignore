@@ -2,3 +2,7 @@
 /exit66.db*
 /web/node_modules/
 *.test
+
+# Local jukebox dev artifacts
+exit66jukebox
+*.db

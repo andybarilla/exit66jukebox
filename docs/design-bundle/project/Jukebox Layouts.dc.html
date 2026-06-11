@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/tokens/colors.css">
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/tokens/typography.css">
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/tokens/effects.css">
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/styles.css">
+<script src="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/_ds_bundle.js"></script>
+<style>
+  html, body { margin: 0; }
+  body { background: #0d0d13; }
+  @keyframes e66-eq { from { transform: scaleY(0.22); } to { transform: scaleY(1); } }
+</style>
+</helmet>
+
+<div style="min-height:100vh; background:linear-gradient(180deg,#14141d 0%,#0b0b11 100%); padding:42px 38px 80px; font-family:var(--font-sans); color:var(--text-body); box-sizing:border-box;">
+
+  <!-- ===== HEADER / REASONING ===== -->
+  <header style="max-width:1240px; margin:0 auto 8px;">
+    <div style="font-family:var(--font-mono); font-size:12px; letter-spacing:0.32em; text-transform:uppercase; color:var(--neon-amber);">Exit 66 · Home jukebox &nbsp;//&nbsp; main screen</div>
+    <h1 style="font-family:var(--font-display); font-weight:700; font-size:46px; line-height:1.04; letter-spacing:0.01em; text-transform:uppercase; color:var(--text-strong); margin:14px 0 0;">Three ways to run the room</h1>
+    <p style="font-family:var(--font-sans); font-size:16px; line-height:1.6; color:var(--text-muted); max-width:760px; margin:16px 0 0;">Same crate, same components — arranged for three different priorities. Every direction shares a persistent now-playing bar with a <span style="color:var(--neon-cyan);">subtle stream switcher</span> (house vs personal), search that filters the active view, and a one-tap request on every item. Pick a direction and I'll build it out fully: Artists / Albums / Tracks tabs, a live queue, toasts, and the phone layout.</p>
+
+    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:20px;">
+      <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid var(--border-default); border-radius:var(--radius-md); background:var(--bg-surface); font-family:var(--font-mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-muted);"><span style="width:7px; height:7px; border-radius:50%; background:var(--neon-magenta);"></span>Assumes no real art yet — grid covers are placeholders</span>
+      <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid var(--border-default); border-radius:var(--radius-md); background:var(--bg-surface); font-family:var(--font-mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-muted);"><span style="width:7px; height:7px; border-radius:50%; background:var(--neon-cyan);"></span>No credits — requesting is one tap</span>
+      <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid var(--border-default); border-radius:var(--radius-md); background:var(--bg-surface); font-family:var(--font-mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-muted);"><span style="width:7px; height:7px; border-radius:50%; background:var(--neon-amber);"></span>Desktop shown · phone designed in the build</span>
+    </div>
+  </header>
+
+  <!-- ===================================================================== -->
+  <!-- LAYOUT A — THREE-PANE CONSOLE -->
+  <!-- ===================================================================== -->
+  <section data-screen-label="Layout A — Three-pane console" style="max-width:1240px; margin:46px auto 0;">
+    <div style="display:flex; align-items:baseline; gap:16px; margin-bottom:16px;">
+      <span style="font-family:var(--font-mono); font-size:30px; font-weight:700; color:var(--neon-cyan); letter-spacing:0.02em;">01</span>
+      <div>
+        <div style="font-family:var(--font-display); font-weight:700; font-size:22px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-strong);">Three-pane console</div>
+        <div style="font-family:var(--font-sans); font-size:14px; color:var(--text-muted); margin-top:2px;">By the book — nav, library, and the lineup all visible at once. Densest and most scannable.</div>
+      </div>
+    </div>
+
+    <div style="width:100%; height:760px; background:var(--bg-base); border:1px solid var(--border-strong); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow-xl); display:flex; flex-direction:column;">
+      <div style="display:flex; flex:1; min-height:0;">
+
+        <!-- Sidebar -->
+        <aside style="width:204px; flex:none; border-right:1px solid var(--border-default); background:var(--ink-900); padding:20px 16px; display:flex; flex-direction:column; gap:26px; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; gap:11px;">
+            <div style="width:38px; height:38px; flex:none; border-radius:var(--radius-md); border:1.5px solid var(--neon-magenta); box-shadow:0 0 0 2px var(--ink-900),0 0 0 3.5px var(--neon-magenta); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:19px; color:var(--neon-magenta-bright); background:rgba(255,46,136,0.05);">66</div>
+            <div style="line-height:1;">
+              <div style="font-family:var(--font-display); font-weight:700; font-size:16px; letter-spacing:0.06em; color:var(--text-strong);">EXIT&nbsp;<span style="color:var(--neon-cyan);">66</span></div>
+              <div style="font-family:var(--font-mono); font-size:8px; letter-spacing:0.3em; color:var(--neon-amber); margin-top:3px;">// JUKEBOX</div>
+            </div>
+          </div>
+          <nav style="display:flex; flex-direction:column; gap:5px;">
+            <div style="display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:var(--radius-md); background:rgba(255,46,136,0.10); border:1px solid rgba(255,46,136,0.4); color:var(--neon-magenta-bright);"><span style="font-size:14px; width:18px; text-align:center;">▤</span><span style="font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:0.06em; text-transform:uppercase;">Library</span></div>
+            <div style="display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:var(--radius-md); color:var(--text-muted);"><span style="font-size:14px; width:18px; text-align:center;">≣</span><span style="font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:0.06em; text-transform:uppercase;">Lineup</span><span style="margin-left:auto; font-family:var(--font-mono); font-size:11px; font-weight:700; color:var(--neon-cyan);">4</span></div>
+            <div style="display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:var(--radius-md); color:var(--text-muted);"><span style="font-size:14px; width:18px; text-align:center;">◉</span><span style="font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:0.06em; text-transform:uppercase;">Streams</span></div>
+          </nav>
+          <div style="margin-top:auto; padding:13px; border-radius:var(--radius-md); border:1px solid var(--border-default); background:var(--bg-surface);">
+            <div style="font-family:var(--font-mono); font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--text-faint); margin-bottom:8px;">On air</div>
+            <div style="display:flex; align-items:center; gap:8px;"><span style="width:8px; height:8px; border-radius:50%; background:var(--neon-cyan);"></span><span style="font-family:var(--font-display); font-weight:600; font-size:14px; letter-spacing:0.04em; color:var(--text-strong);">House</span></div>
+            <div style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; color:var(--text-faint); margin-top:6px;">4 LISTENERS TUNED IN</div>
+          </div>
+        </aside>
+
+        <!-- Center: library browser -->
+        <div style="flex:1; min-width:0; display:flex; flex-direction:column; padding:22px 24px; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px;">
+            <div style="display:inline-flex; flex:none; border:1px solid var(--border-strong); border-radius:var(--radius-md); overflow:hidden; height:36px;">
+              <button style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; background:transparent; color:var(--text-muted); border:none; cursor:pointer;">Artists</button>
+              <button style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; background:var(--neon-magenta); color:var(--text-on-accent); border:none; cursor:pointer;">Albums</button>
+              <button style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; background:transparent; color:var(--text-muted); border:none; cursor:pointer;">Tracks</button>
+            </div>
+            <div style="width:280px; flex:none;">
+              <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Input" placeholder="Search artist, album, track…" hint-size="280px,42px"></x-import>
+            </div>
+          </div>
+          <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+            <span style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; color:var(--text-faint);">8 albums · all genres</span>
+            <span style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; color:var(--text-faint);">Tap + to request</span>
+          </div>
+          <div style="flex:1; min-height:0; overflow-y:auto; margin-right:-8px; padding-right:8px;">
+            <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:14px;">
+              <sc-for list="{{ albums }}" as="a" hint-placeholder-count="8">
+                <dc-import name="JukeAlbumCard" title="{{ a.title }}" artist="{{ a.artist }}" meta="{{ a.meta }}" initial="{{ a.initial }}" cover="{{ a.cover }}" hint-size="100%,214px"></dc-import>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: up next -->
+        <aside style="width:322px; flex:none; border-left:1px solid var(--border-default); background:var(--ink-900); padding:18px; display:flex; flex-direction:column; gap:13px; min-height:0; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <span style="font-family:var(--font-display); font-weight:700; font-size:16px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-strong); white-space:nowrap;">Up Next</span>
+            <span style="display:inline-flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-faint); flex:none; white-space:nowrap;">Shuffle<x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Switch" checked="{{ on }}" tone="cyan" hint-size="46px,26px"></x-import></span>
+          </div>
+
+          <div style="border:1.5px solid var(--neon-cyan); box-shadow:var(--glow-cyan); border-radius:var(--radius-lg); background:var(--bg-surface); padding:13px; display:flex; flex-direction:column; gap:10px;">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <span style="display:inline-flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:var(--neon-magenta);"><span style="width:7px; height:7px; border-radius:50%; background:var(--neon-magenta);"></span>Now playing</span>
+              <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-faint);">2:22 / 4:11</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div style="width:48px; height:48px; flex:none; border-radius:var(--radius-sm); background:{{ npCover }}; display:flex; align-items:flex-end; padding:5px; box-sizing:border-box;"><span style="font-family:var(--font-mono); font-size:9px; font-weight:700; color:rgba(255,255,255,0.85);">A6</span></div>
+              <div style="flex:1; min-width:0;">
+                <div style="font-family:var(--font-sans); font-weight:600; font-size:14px; color:var(--text-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Midnight Loop</div>
+                <div style="font-family:var(--font-sans); font-size:12px; color:var(--text-muted);">Neon Saito</div>
+              </div>
+              <div style="display:flex; align-items:flex-end; gap:3px; height:20px;">
+                <span style="width:3px; height:20px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .5s var(--ease-in-out) infinite alternate;"></span>
+                <span style="width:3px; height:20px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .7s var(--ease-in-out) infinite alternate;"></span>
+                <span style="width:3px; height:20px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .42s var(--ease-in-out) infinite alternate;"></span>
+                <span style="width:3px; height:20px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .62s var(--ease-in-out) infinite alternate;"></span>
+              </div>
+            </div>
+            <div style="position:relative; height:4px; border-radius:var(--radius-pill); background:var(--ink-700);"><div style="position:absolute; left:0; top:0; bottom:0; width:56%; border-radius:var(--radius-pill); background:var(--neon-magenta);"></div></div>
+          </div>
+
+          <div style="font-family:var(--font-mono); font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:var(--text-faint); margin-top:2px;">Queued · 4</div>
+          <div style="flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px; margin-right:-6px; padding-right:6px;">
+            <sc-for list="{{ queue }}" as="q" hint-placeholder-count="4">
+              <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.QueueItem" position="{{ q.pos }}" code="{{ q.code }}" title="{{ q.title }}" artist="{{ q.artist }}" requester="{{ q.requester }}" art-tone="{{ q.tone }}" hint-size="100%,60px"></x-import>
+            </sc-for>
+          </div>
+        </aside>
+      </div>
+
+      <!-- Bottom: now playing bar + subtle stream switcher -->
+      <div style="flex:none; display:flex; align-items:stretch;">
+        <div style="flex:1; min-width:0;">
+          <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.NowPlayingBar" title="Midnight Loop" artist="Neon Saito" code="A6" art-tone="cyan" current="{{ npCur }}" duration="{{ npDur }}" playing="{{ isPlaying }}" volume="{{ vol }}" hint-size="100%,84px"></x-import>
+        </div>
+        <div style="width:208px; flex:none; border-top:1px solid var(--border-strong); border-left:1px solid var(--border-default); background:var(--bg-surface-raised); background-image:var(--scanline); display:flex; flex-direction:column; justify-content:center; gap:7px; padding:0 18px; box-sizing:border-box;">
+          <span style="font-family:var(--font-mono); font-size:9px; letter-spacing:0.22em; text-transform:uppercase; color:var(--text-faint);">Stream</span>
+          <div style="display:inline-flex; border:1px solid var(--border-strong); border-radius:var(--radius-sm); overflow:hidden; width:fit-content;">
+            <span style="padding:5px 11px; font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; background:var(--neon-cyan); color:var(--text-on-accent);">House</span>
+            <span style="padding:5px 11px; font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-muted); cursor:pointer;">Personal</span>
+          </div>
+          <span style="display:inline-flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:10px; letter-spacing:0.1em; color:var(--text-faint);"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>4 TUNED IN</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- LAYOUT B — NOW-PLAYING STAGE -->
+  <!-- ===================================================================== -->
+  <section data-screen-label="Layout B — Now-playing stage" style="max-width:1240px; margin:64px auto 0;">
+    <div style="display:flex; align-items:baseline; gap:16px; margin-bottom:16px;">
+      <span style="font-family:var(--font-mono); font-size:30px; font-weight:700; color:var(--neon-magenta); letter-spacing:0.02em;">02</span>
+      <div>
+        <div style="font-family:var(--font-display); font-weight:700; font-size:22px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-strong);">Now-playing stage</div>
+        <div style="font-family:var(--font-sans); font-size:14px; color:var(--text-muted); margin-top:2px;">The current track is the hero — big art, live equalizer, transport. Library and lineup ride alongside; no bottom bar.</div>
+      </div>
+    </div>
+
+    <div style="width:100%; height:760px; background:var(--bg-base); border:1px solid var(--border-strong); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow-xl); display:flex; flex-direction:column;">
+      <!-- Top bar -->
+      <header style="height:58px; flex:none; display:flex; align-items:center; justify-content:space-between; padding:0 22px; border-bottom:1px solid var(--border-default); background:var(--ink-950);">
+        <div style="display:flex; align-items:center; gap:11px;">
+          <div style="width:34px; height:34px; flex:none; border-radius:var(--radius-md); border:1.5px solid var(--neon-magenta); box-shadow:0 0 0 2px var(--ink-950),0 0 0 3.5px var(--neon-magenta); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:17px; color:var(--neon-magenta-bright); background:rgba(255,46,136,0.05);">66</div>
+          <div style="font-family:var(--font-display); font-weight:700; font-size:16px; letter-spacing:0.06em; color:var(--text-strong);">EXIT&nbsp;<span style="color:var(--neon-cyan);">66</span></div>
+        </div>
+        <div style="display:inline-flex; gap:24px;">
+          <span style="font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:0.08em; text-transform:uppercase; color:var(--neon-magenta-bright); border-bottom:2px solid var(--neon-magenta); padding-bottom:4px;">Library</span>
+          <span style="font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-muted); padding-bottom:4px;">Lineup</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div style="display:inline-flex; border:1px solid var(--border-strong); border-radius:var(--radius-sm); overflow:hidden;">
+            <span style="padding:5px 10px; font-family:var(--font-mono); font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; background:var(--neon-cyan); color:var(--text-on-accent);">House</span>
+            <span style="padding:5px 10px; font-family:var(--font-mono); font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-muted);">Personal</span>
+          </div>
+          <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Avatar" name="You" ring="cyan" size="sm" hint-size="32px,32px"></x-import>
+        </div>
+      </header>
+
+      <div style="display:flex; flex:1; min-height:0;">
+        <!-- Left hero -->
+        <div style="width:512px; flex:none; padding:36px 40px; box-sizing:border-box; display:flex; flex-direction:column; border-right:1px solid var(--border-default); background:radial-gradient(circle at 22% 12%, rgba(31,224,255,0.13), transparent 55%), radial-gradient(circle at 92% 96%, rgba(255,46,136,0.12), transparent 52%), var(--bg-sunken); background-image:var(--scanline);">
+          <div style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.26em; text-transform:uppercase; color:var(--neon-cyan); margin-bottom:24px;">Now playing · house stream</div>
+          <div style="width:300px; height:300px; flex:none; border-radius:var(--radius-lg); background:{{ npCover }}; position:relative; box-shadow:var(--shadow-lg); border:1px solid var(--border-strong);">
+            <span style="position:absolute; top:12px; left:13px; font-family:var(--font-mono); font-size:10px; font-weight:700; letter-spacing:0.16em; color:rgba(255,255,255,0.85); background:rgba(8,8,15,0.5); padding:3px 7px; border-radius:var(--radius-sm);">A6</span>
+          </div>
+          <div style="font-family:var(--font-display); font-weight:700; font-size:30px; letter-spacing:0.01em; text-transform:uppercase; color:var(--text-strong); margin-top:26px; line-height:1.05;">Midnight Loop</div>
+          <div style="font-family:var(--font-sans); font-size:16px; color:var(--text-body); margin-top:6px;">Neon Saito</div>
+          <div style="font-family:var(--font-mono); font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-faint); margin-top:4px;">Lustre · 2087</div>
+
+          <div style="display:flex; align-items:flex-end; gap:4px; height:30px; margin-top:22px;">
+            <span style="width:4px; height:30px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .5s var(--ease-in-out) infinite alternate;"></span>
+            <span style="width:4px; height:30px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .72s var(--ease-in-out) infinite alternate;"></span>
+            <span style="width:4px; height:30px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .4s var(--ease-in-out) infinite alternate;"></span>
+            <span style="width:4px; height:30px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .64s var(--ease-in-out) infinite alternate;"></span>
+            <span style="width:4px; height:30px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .46s var(--ease-in-out) infinite alternate;"></span>
+            <span style="width:4px; height:30px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .68s var(--ease-in-out) infinite alternate;"></span>
+            <span style="width:4px; height:30px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .54s var(--ease-in-out) infinite alternate;"></span>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:14px; margin-top:24px;">
+            <button aria-label="Previous" style="width:42px; height:42px; flex:none; border-radius:50%; border:1px solid var(--border-strong); background:transparent; color:var(--text-body); font-size:17px; cursor:pointer;">⏮</button>
+            <button aria-label="Pause" style="width:58px; height:58px; flex:none; border-radius:50%; border:none; background:var(--neon-magenta); color:var(--text-on-accent); font-size:21px; cursor:pointer; box-shadow:var(--glow-magenta);">❚❚</button>
+            <button aria-label="Next" style="width:42px; height:42px; flex:none; border-radius:50%; border:1px solid var(--border-strong); background:transparent; color:var(--text-body); font-size:17px; cursor:pointer;">⏭</button>
+            <div style="flex:1; display:flex; align-items:center; gap:10px;">
+              <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-faint);">2:22</span>
+              <div style="position:relative; flex:1; height:4px; border-radius:var(--radius-pill); background:var(--ink-700);"><div style="position:absolute; left:0; top:0; bottom:0; width:56%; border-radius:var(--radius-pill); background:var(--neon-magenta);"></div><div style="position:absolute; left:56%; top:50%; transform:translate(-50%,-50%); width:11px; height:11px; border-radius:50%; background:var(--paper-100); border:2px solid var(--neon-magenta);"></div></div>
+              <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-faint);">4:11</span>
+            </div>
+          </div>
+          <div style="display:inline-flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-faint); margin-top:20px;"><span style="width:7px; height:7px; border-radius:50%; background:var(--neon-cyan);"></span>4 listeners tuned in</div>
+        </div>
+
+        <!-- Right: library + up next -->
+        <div style="flex:1; min-width:0; display:flex; flex-direction:column; padding:22px 24px; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:14px;">
+            <div style="display:inline-flex; flex:none; border:1px solid var(--border-strong); border-radius:var(--radius-md); overflow:hidden; height:36px;">
+              <button style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; background:transparent; color:var(--text-muted); border:none; cursor:pointer;">Artists</button>
+              <button style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; background:transparent; color:var(--text-muted); border:none; cursor:pointer;">Albums</button>
+              <button style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; background:var(--neon-magenta); color:var(--text-on-accent); border:none; cursor:pointer;">Tracks</button>
+            </div>
+            <div style="width:240px; flex:none;">
+              <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Input" placeholder="Search the library…" hint-size="240px,42px"></x-import>
+            </div>
+          </div>
+          <div style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; color:var(--text-faint); margin-bottom:6px;">6 tracks</div>
+          <div style="flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:2px; margin-right:-8px; padding-right:8px;">
+            <sc-for list="{{ tracks }}" as="t" hint-placeholder-count="6">
+              <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.TrackRow" code="{{ t.code }}" title="{{ t.title }}" artist="{{ t.artist }}" duration="{{ t.duration }}" art-tone="{{ t.tone }}" explicit="{{ t.explicit }}" on-add="{{ noop }}" hint-size="100%,68px"></x-import>
+            </sc-for>
+          </div>
+          <div style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.18em; text-transform:uppercase; color:var(--text-faint); margin:14px 0 8px;">Up next · 4</div>
+          <div style="flex:none; display:flex; flex-direction:column; gap:8px;">
+            <sc-for list="{{ queue3 }}" as="q" hint-placeholder-count="3">
+              <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.QueueItem" position="{{ q.pos }}" code="{{ q.code }}" title="{{ q.title }}" artist="{{ q.artist }}" requester="{{ q.requester }}" art-tone="{{ q.tone }}" hint-size="100%,60px"></x-import>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <!-- LAYOUT C — CRATE WALL -->
+  <!-- ===================================================================== -->
+  <section data-screen-label="Layout C — Crate wall" style="max-width:1240px; margin:64px auto 0;">
+    <div style="display:flex; align-items:baseline; gap:16px; margin-bottom:16px;">
+      <span style="font-family:var(--font-mono); font-size:30px; font-weight:700; color:var(--neon-amber); letter-spacing:0.02em;">03</span>
+      <div>
+        <div style="font-family:var(--font-display); font-weight:700; font-size:22px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-strong);">Crate wall</div>
+        <div style="font-family:var(--font-sans); font-size:14px; color:var(--text-muted); margin-top:2px;">Art-forward — a full-width wall of covers with search up top. The lineup floats as an overlay rail you can glance at.</div>
+      </div>
+    </div>
+
+    <div style="width:100%; height:760px; background:var(--bg-base); border:1px solid var(--border-strong); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow-xl); display:flex; flex-direction:column;">
+      <!-- Top nav -->
+      <header style="height:62px; flex:none; display:flex; align-items:center; gap:24px; padding:0 24px; border-bottom:1px solid var(--border-default); background:var(--ink-950);">
+        <div style="display:flex; align-items:center; gap:11px; flex:none;">
+          <div style="width:34px; height:34px; flex:none; border-radius:var(--radius-md); border:1.5px solid var(--neon-magenta); box-shadow:0 0 0 2px var(--ink-950),0 0 0 3.5px var(--neon-magenta); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:17px; color:var(--neon-magenta-bright); background:rgba(255,46,136,0.05);">66</div>
+          <div style="font-family:var(--font-display); font-weight:700; font-size:16px; letter-spacing:0.06em; color:var(--text-strong);">EXIT&nbsp;<span style="color:var(--neon-cyan);">66</span></div>
+        </div>
+        <div style="flex:1; max-width:460px; margin:0 auto;">
+          <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Input" placeholder="Search the crate — artist, album, or slot code…" hint-size="100%,42px"></x-import>
+        </div>
+        <div style="display:flex; align-items:center; gap:14px; flex:none;">
+          <span style="display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border:1px solid var(--border-default); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted);"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>House · 4</span>
+          <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Avatar" name="You" ring="cyan" size="sm" hint-size="32px,32px"></x-import>
+        </div>
+      </header>
+
+      <div style="display:flex; flex:1; min-height:0;">
+        <!-- Main: crate wall -->
+        <div style="flex:1; min-width:0; display:flex; flex-direction:column; padding:22px 24px; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:16px;">
+            <div style="display:inline-flex; flex:none; border:1px solid var(--border-strong); border-radius:var(--radius-md); overflow:hidden; height:36px;">
+              <button style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; background:transparent; color:var(--text-muted); border:none; cursor:pointer;">Artists</button>
+              <button style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; background:var(--neon-amber); color:var(--text-on-accent); border:none; cursor:pointer;">Albums</button>
+              <button style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; background:transparent; color:var(--text-muted); border:none; cursor:pointer;">Tracks</button>
+            </div>
+            <span style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:var(--text-faint);">Sort · A–Z</span>
+          </div>
+          <div style="flex:1; min-height:0; overflow-y:auto; margin-right:-8px; padding-right:8px;">
+            <div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:14px;">
+              <sc-for list="{{ albums }}" as="a" hint-placeholder-count="8">
+                <dc-import name="JukeAlbumCard" title="{{ a.title }}" artist="{{ a.artist }}" meta="{{ a.meta }}" initial="{{ a.initial }}" cover="{{ a.cover }}" hint-size="100%,210px"></dc-import>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: floating lineup overlay -->
+        <aside style="width:312px; flex:none; padding:18px 18px 18px 0; min-height:0; display:flex;">
+          <div style="flex:1; min-height:0; display:flex; flex-direction:column; gap:12px; background:var(--bg-surface); background-image:var(--scanline); border:1.5px solid var(--neon-magenta); box-shadow:var(--shadow-lg), var(--glow-soft-magenta); border-radius:var(--radius-lg); padding:16px; box-sizing:border-box;">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <span style="font-family:var(--font-display); font-weight:700; font-size:16px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-strong); white-space:nowrap;">The Lineup</span>
+              <span style="display:inline-flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-faint); flex:none; white-space:nowrap;">Shuffle<x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Switch" checked="{{ on }}" tone="magenta" hint-size="46px,26px"></x-import></span>
+            </div>
+            <div style="border:1.5px solid var(--neon-cyan); box-shadow:var(--glow-cyan); border-radius:var(--radius-md); background:var(--bg-inset); padding:11px; display:flex; align-items:center; gap:11px;">
+              <div style="width:42px; height:42px; flex:none; border-radius:var(--radius-sm); background:{{ npCover }}; display:flex; align-items:flex-end; padding:4px; box-sizing:border-box;"><span style="font-family:var(--font-mono); font-size:8px; font-weight:700; color:rgba(255,255,255,0.85);">A6</span></div>
+              <div style="flex:1; min-width:0;">
+                <div style="font-family:var(--font-mono); font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--neon-magenta); margin-bottom:3px;">Now playing</div>
+                <div style="font-family:var(--font-sans); font-weight:600; font-size:14px; color:var(--text-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Midnight Loop</div>
+                <div style="font-family:var(--font-sans); font-size:12px; color:var(--text-muted);">Neon Saito</div>
+              </div>
+              <div style="display:flex; align-items:flex-end; gap:2px; height:18px;">
+                <span style="width:3px; height:18px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .5s var(--ease-in-out) infinite alternate;"></span>
+                <span style="width:3px; height:18px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .68s var(--ease-in-out) infinite alternate;"></span>
+                <span style="width:3px; height:18px; background:var(--neon-cyan); transform-origin:bottom; animation:e66-eq .44s var(--ease-in-out) infinite alternate;"></span>
+              </div>
+            </div>
+            <div style="flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px; margin-right:-6px; padding-right:6px;">
+              <sc-for list="{{ queue }}" as="q" hint-placeholder-count="4">
+                <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.QueueItem" position="{{ q.pos }}" code="{{ q.code }}" title="{{ q.title }}" artist="{{ q.artist }}" requester="{{ q.requester }}" art-tone="{{ q.tone }}" hint-size="100%,60px"></x-import>
+              </sc-for>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- Bottom bar + stream switcher -->
+      <div style="flex:none; display:flex; align-items:stretch;">
+        <div style="flex:1; min-width:0;">
+          <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.NowPlayingBar" title="Midnight Loop" artist="Neon Saito" code="A6" art-tone="cyan" current="{{ npCur }}" duration="{{ npDur }}" playing="{{ isPlaying }}" volume="{{ vol }}" hint-size="100%,84px"></x-import>
+        </div>
+        <div style="width:208px; flex:none; border-top:1px solid var(--border-strong); border-left:1px solid var(--border-default); background:var(--bg-surface-raised); background-image:var(--scanline); display:flex; flex-direction:column; justify-content:center; gap:7px; padding:0 18px; box-sizing:border-box;">
+          <span style="font-family:var(--font-mono); font-size:9px; letter-spacing:0.22em; text-transform:uppercase; color:var(--text-faint);">Stream</span>
+          <div style="display:inline-flex; border:1px solid var(--border-strong); border-radius:var(--radius-sm); overflow:hidden; width:fit-content;">
+            <span style="padding:5px 11px; font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; background:var(--neon-cyan); color:var(--text-on-accent);">House</span>
+            <span style="padding:5px 11px; font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-muted); cursor:pointer;">Personal</span>
+          </div>
+          <span style="display:inline-flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:10px; letter-spacing:0.1em; color:var(--text-faint);"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>4 TUNED IN</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const cv = (a, b) => `radial-gradient(circle at 28% 22%, rgba(255,255,255,0.16), transparent 46%), linear-gradient(150deg, ${a} 0%, ${b} 100%)`;
+    const albums = [
+      { title: 'Midnight Loop', artist: 'Neon Saito', meta: '9 tracks · 2087', initial: 'M', cover: cv('#0b2e3a', '#1aa6c2') },
+      { title: 'Chrome Highway', artist: 'The Offramps', meta: '11 tracks · 2086', initial: 'C', cover: cv('#2a0f1f', '#c41e6b') },
+      { title: 'Sodium Lights', artist: 'Halcyon', meta: '8 tracks · 2088', initial: 'S', cover: cv('#2a1d08', '#c98a1e') },
+      { title: 'After Hours', artist: 'VX', meta: '10 tracks · 2085', initial: 'A', cover: cv('#17112e', '#5e3fd6') },
+      { title: 'Neon Rust', artist: 'The Offramps', meta: '9 tracks · 2087', initial: 'N', cover: cv('#241024', '#8a1f4a') },
+      { title: 'Static Bloom', artist: 'Cassette Ghost', meta: '12 tracks · 2088', initial: 'S', cover: cv('#0a2230', '#3a6fb0') },
+      { title: 'Tail Lights', artist: 'Mira Vale', meta: '7 tracks · 2086', initial: 'T', cover: cv('#2a1208', '#b8431e') },
+      { title: 'Overpass', artist: 'Null Division', meta: '10 tracks · 2087', initial: 'O', cover: cv('#141033', '#3b5bd6') },
+    ];
+    const tracks = [
+      { code: 'A6', title: 'Midnight Loop', artist: 'Neon Saito', duration: '4:11', tone: 'cyan' },
+      { code: 'B2', title: 'Chrome Highway', artist: 'The Offramps', duration: '3:52', tone: 'magenta', explicit: true },
+      { code: 'C9', title: 'Sodium Lights', artist: 'Halcyon', duration: '2:58', tone: 'amber' },
+      { code: 'D4', title: 'After Hours', artist: 'VX', duration: '3:36', tone: 'violet' },
+      { code: 'E7', title: 'Neon Rust', artist: 'The Offramps', duration: '3:12', tone: 'magenta' },
+      { code: 'F1', title: 'Static Bloom', artist: 'Cassette Ghost', duration: '5:02', tone: 'cyan' },
+    ];
+    const queue = [
+      { pos: 1, code: 'B2', title: 'Chrome Highway', artist: 'The Offramps', tone: 'magenta', requester: 'Mira' },
+      { pos: 2, code: 'D4', title: 'After Hours', artist: 'VX', tone: 'violet', requester: 'Dad' },
+      { pos: 3, code: 'C9', title: 'Sodium Lights', artist: 'Halcyon', tone: 'amber', requester: 'Jules' },
+      { pos: 4, code: 'F1', title: 'Static Bloom', artist: 'Cassette Ghost', tone: 'cyan', requester: 'Andre' },
+    ];
+    return {
+      albums,
+      tracks,
+      queue,
+      queue3: queue.slice(0, 3),
+      noop: () => {},
+      on: true,
+      npCover: cv('#0b2e3a', '#1aa6c2'),
+      npCur: 142,
+      npDur: 251,
+      isPlaying: true,
+      vol: 68,
+    };
+  }
+}
+</script>
+</body>
+</html>

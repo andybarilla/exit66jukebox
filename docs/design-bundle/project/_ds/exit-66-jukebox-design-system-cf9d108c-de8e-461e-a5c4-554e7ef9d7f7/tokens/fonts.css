@@ -1,0 +1,8 @@
+/* Exit 66 Jukebox — Webfonts
+   Display : Chakra Petch  (angular, techy, cyberpunk neon-sign energy)
+   UI/Body : Space Grotesk (modern geometric sans, slight quirk)
+   Mono    : Space Mono    (retro terminal — track metadata, codes, timers)
+   NOTE: loaded from Google Fonts CDN. For production, self-host the .woff2
+   binaries and replace this @import with local @font-face rules. */
+
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
