@@ -28,3 +28,32 @@ func TestQueueWithRequester(t *testing.T) {
 		t.Fatalf("got %+v, want trackID=%d requestedBy=Mira", rows[0], id)
 	}
 }
+
+func TestPopNextShuffleEmptiesQueue(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+	EnsureStream(db, "s", "", "private")
+	var ids []int64
+	for _, title := range []string{"A", "B", "C"} {
+		id, _ := UpsertTrack(db, model.Track{Path: "/m/" + title + ".mp3", Title: title}, "Band", "LP")
+		Enqueue(db, "s", id, "")
+		ids = append(ids, id)
+	}
+	seen := map[int64]bool{}
+	for range ids {
+		tid, ok := PopNextShuffle(db, "s")
+		if !ok {
+			t.Fatal("expected ok=true while queue non-empty")
+		}
+		if seen[tid] {
+			t.Fatalf("popped duplicate %d", tid)
+		}
+		seen[tid] = true
+	}
+	if _, ok := PopNextShuffle(db, "s"); ok {
+		t.Fatal("expected ok=false on empty queue")
+	}
+	if len(seen) != 3 {
+		t.Fatalf("want 3 distinct pops, got %d", len(seen))
+	}
+}

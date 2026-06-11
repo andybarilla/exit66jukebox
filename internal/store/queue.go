@@ -45,19 +45,29 @@ func Enqueue(db *sql.DB, streamID string, trackID int64, addedBy string) error {
 	return err
 }
 
-// PopNext removes and returns the next track id in play order, records it in
-// history, and bumps its play count — all atomically. Returns ok=false if the
-// queue is empty or the transaction fails.
+// PopNext removes and returns the next track id in play order (FIFO).
 func PopNext(db *sql.DB, streamID string) (trackID int64, ok bool) {
+	return popWith(db, streamID,
+		`SELECT track_id FROM queue_item WHERE stream_id=? ORDER BY play_order LIMIT 1`)
+}
+
+// PopNextShuffle removes and returns a random queued track id.
+func PopNextShuffle(db *sql.DB, streamID string) (trackID int64, ok bool) {
+	return popWith(db, streamID,
+		`SELECT track_id FROM queue_item WHERE stream_id=? ORDER BY RANDOM() LIMIT 1`)
+}
+
+// popWith pops the row chosen by selectSQL, recording history and bumping the
+// play count atomically. selectSQL must take a single stream_id parameter and
+// return one track_id.
+func popWith(db *sql.DB, streamID, selectSQL string) (trackID int64, ok bool) {
 	tx, err := db.Begin()
 	if err != nil {
 		return 0, false
 	}
 	defer tx.Rollback()
 
-	if err := tx.QueryRow(
-		`SELECT track_id FROM queue_item WHERE stream_id=? ORDER BY play_order LIMIT 1`,
-		streamID).Scan(&trackID); err != nil {
+	if err := tx.QueryRow(selectSQL, streamID).Scan(&trackID); err != nil {
 		return 0, false
 	}
 	if _, err := tx.Exec(`DELETE FROM queue_item WHERE stream_id=? AND track_id=?`,
