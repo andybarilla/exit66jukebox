@@ -3,6 +3,7 @@ package broadcast
 import (
 	"context"
 	"io"
+	"log"
 	"sync"
 	"time"
 )
@@ -85,6 +86,7 @@ func (h *Hub) Run(ctx context.Context) {
 func (h *Hub) play(ctx context.Context, path string) {
 	rc, err := h.src.Open(path)
 	if err != nil {
+		log.Printf("broadcast: open %q: %v", path, err)
 		return
 	}
 	defer rc.Close()

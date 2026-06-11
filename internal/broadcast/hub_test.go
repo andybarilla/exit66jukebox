@@ -85,3 +85,51 @@ func TestHubStreamsSilenceWhenEmpty(t *testing.T) {
 		t.Fatalf("expected silence bytes when empty, got %q", got)
 	}
 }
+
+func TestHubRunReturnsOnCancel(t *testing.T) {
+	src := fakeSource{data: map[string][]byte{}}
+	next := func() (string, bool) { return "", false }
+	h := NewHub(src, next, nil) // nil silence: idle just waits
+	h.idlePace = time.Millisecond
+
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.Run(ctx); close(done) }()
+	stop()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return promptly after ctx cancel")
+	}
+}
+
+func TestHubFansOutToMultipleListeners(t *testing.T) {
+	src := fakeSource{data: map[string][]byte{"A": []byte("aaaa")}}
+	queue := []string{"A"}
+	next := func() (string, bool) {
+		if len(queue) == 0 {
+			return "", false
+		}
+		p := queue[0]
+		queue = queue[1:]
+		return p, true
+	}
+	h := NewHub(src, next, []byte("S"))
+	h.idlePace = 5 * time.Millisecond
+
+	ch1, c1 := h.Listen()
+	defer c1()
+	ch2, c2 := h.Listen()
+	defer c2()
+
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go h.Run(ctx)
+
+	g1 := collect(ch1, 4, time.Second)
+	g2 := collect(ch2, 4, time.Second)
+	if !bytes.Contains(g1, []byte("aaaa")) || !bytes.Contains(g2, []byte("aaaa")) {
+		t.Fatalf("both listeners should receive track A: g1=%q g2=%q", g1, g2)
+	}
+}
