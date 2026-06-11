@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/events"
@@ -14,20 +15,33 @@ import (
 
 // Server holds dependencies and builds the HTTP handler.
 type Server struct {
-	db    *sql.DB
-	jb    *jukebox.Jukebox
-	ui    fs.FS
-	hubs  map[string]*broadcast.Hub
-	buses map[string]*events.Bus
+	db         *sql.DB
+	jb         *jukebox.Jukebox
+	ui         fs.FS
+	listenAddr string // server's own listen addr, for building Sonos-reachable URLs
+	hubs       map[string]*broadcast.Hub
+	buses      map[string]*events.Bus
+
+	// sonosIPs is the allowlist of IPs from the most recent discovery; casts are
+	// restricted to it so an arbitrary ip can't be used to make the server POST
+	// to an internal host (SSRF). Guarded by sonosMu.
+	sonosMu  sync.Mutex
+	sonosIPs map[string]bool
 }
 
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 	return &Server{
 		db: db, jb: jb, ui: ui,
-		hubs:  make(map[string]*broadcast.Hub),
-		buses: make(map[string]*events.Bus),
+		hubs:     make(map[string]*broadcast.Hub),
+		buses:    make(map[string]*events.Bus),
+		sonosIPs: make(map[string]bool),
 	}
 }
+
+// SetListenAddr records the server's own listen address (e.g. ":8066") so cast
+// URLs can be built from the server's detected IP + this port rather than from
+// the client-controlled Host header.
+func (s *Server) SetListenAddr(addr string) { s.listenAddr = addr }
 
 // RegisterStream attaches a broadcast hub and event bus for a shared stream id.
 func (s *Server) RegisterStream(id string, hub *broadcast.Hub, bus *events.Bus) {
@@ -51,6 +65,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/albums/{id}/cover", s.albumCover)
 	mux.HandleFunc("GET /stream/", s.streamAudio)
 	mux.HandleFunc("GET /api/streams/{id}/events", s.streamEvents)
+	mux.HandleFunc("GET /api/sonos/devices", s.sonosDevices)
+	mux.HandleFunc("POST /api/sonos/cast", s.sonosCast)
+	mux.HandleFunc("POST /api/sonos/stop", s.sonosStop)
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}

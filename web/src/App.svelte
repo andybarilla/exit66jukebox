@@ -3,6 +3,7 @@
   import {
     listTracks, requestTrack, requestTo, getQueue,
     houseStreamURL, coverURL, subscribeEvents, HOUSE,
+    listSonos, castSonos, stopSonos,
   } from './lib/api.js';
   import { createPlayer } from './lib/player.js';
 
@@ -53,6 +54,18 @@
     else startLocal();
   }
 
+  let sonosDevices = [];
+  let castIP = null;
+  let sonosBusy = false;
+
+  async function loadSonos() {
+    sonosBusy = true;
+    try { sonosDevices = await listSonos(); }
+    finally { sonosBusy = false; }
+  }
+  async function cast(ip) { const r = await castSonos(ip); if (r && r.ok) castIP = ip; }
+  async function stopCast() { if (castIP) { await stopSonos(castIP); castIP = null; } }
+
   onMount(async () => {
     tracks = await listTracks('');
     startLocal();
@@ -66,6 +79,18 @@
   <div class="modes">
     <button class:active={mode === 'local'} on:click={() => setMode('local')}>Local</button>
     <button class:active={mode === 'house'} on:click={() => setMode('house')}>House</button>
+  </div>
+
+  <div class="sonos">
+    <button on:click={loadSonos} disabled={sonosBusy}>
+      {sonosBusy ? 'Searching…' : 'Cast to Sonos'}
+    </button>
+    {#each sonosDevices as d (d.ip)}
+      <button class:active={castIP === d.ip} on:click={() => cast(d.ip)}>{d.name}</button>
+    {/each}
+    {#if castIP}
+      <button on:click={stopCast}>Stop casting</button>
+    {/if}
   </div>
 
   <div class="now">
@@ -105,4 +130,6 @@
   li { list-style: none; margin: .25rem 0; }
   ol li { list-style: decimal; margin-left: 1.5rem; }
   button { cursor: pointer; }
+  .sonos { margin: .5rem 0; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+  .sonos button.active { background: #6cf; color: #000; }
 </style>

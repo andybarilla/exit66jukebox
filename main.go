@@ -86,6 +86,7 @@ func main() {
 		log.Fatalf("ui fs: %v", err)
 	}
 	srv := api.NewServer(db, jb, uiFS)
+	srv.SetListenAddr(cfg.Addr)
 	srv.RegisterStream(houseID, houseHub, houseBus)
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, srv.Handler()); err != nil {
