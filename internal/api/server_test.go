@@ -19,6 +19,7 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	t.Cleanup(func() { db.Close() })
 	jb := jukebox.New(db, jukebox.Config{HistoryWindow: 5})
 	return NewServer(db, jb)
 }

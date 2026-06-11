@@ -23,7 +23,7 @@ func (m *multiFlag) Set(v string) error {
 func (c Config) Library() []string { return c.Roots }
 
 // Parse reads flags from the given argument list.
-func Parse(args []string) Config {
+func Parse(args []string) (Config, error) {
 	fs := flag.NewFlagSet("exit66", flag.ContinueOnError)
 	var c Config
 	fs.StringVar(&c.Addr, "addr", ":8066", "listen address")
@@ -31,6 +31,8 @@ func Parse(args []string) Config {
 	fs.IntVar(&c.HistoryWindow, "history", 25, "recently-played window")
 	fs.IntVar(&c.ScanWorkers, "workers", 8, "scan worker goroutines")
 	fs.Var(&c.Roots, "root", "library root (repeatable)")
-	fs.Parse(args)
-	return c
+	if err := fs.Parse(args); err != nil {
+		return Config{}, err
+	}
+	return c, nil
 }
