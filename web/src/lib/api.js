@@ -1,7 +1,13 @@
 const SESSION = 'me'; // single private stream id for v1; replaced by real session later
 
+// The library is loaded once and filtered client-side, so request the whole
+// collection. The cap is high enough to cover a large home library; tracks,
+// albums and artists must share the same ceiling or a track whose album fell
+// outside the cap would be dropped from the grouped view.
+const LIBRARY_LIMIT = 100000;
+
 export async function listTracks(search = '') {
-  const r = await fetch(`/api/tracks?search=${encodeURIComponent(search)}`);
+  const r = await fetch(`/api/tracks?search=${encodeURIComponent(search)}&limit=${LIBRARY_LIMIT}`);
   return r.json();
 }
 export async function requestTrack(trackId) {
@@ -56,11 +62,11 @@ export function subscribeEvents(streamId, onEvent) {
 }
 
 export async function listArtists(search = '') {
-  const r = await fetch(`/api/artists?search=${encodeURIComponent(search)}&limit=500`);
+  const r = await fetch(`/api/artists?search=${encodeURIComponent(search)}&limit=${LIBRARY_LIMIT}`);
   return r.json();
 }
 export async function listAlbums(search = '') {
-  const r = await fetch(`/api/albums?search=${encodeURIComponent(search)}&limit=500`);
+  const r = await fetch(`/api/albums?search=${encodeURIComponent(search)}&limit=${LIBRARY_LIMIT}`);
   return r.json();
 }
 

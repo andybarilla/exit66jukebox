@@ -22,7 +22,7 @@
             <button class="qall" onclick={onRequestAll} style="height:38px; padding:0 18px; border:1.5px solid var(--neon-magenta); background:var(--neon-magenta); color:var(--text-on-accent); border-radius:var(--radius-md); cursor:pointer; font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:0.08em; text-transform:uppercase;">Queue all</button>
           </div>
           <div style="display:flex; flex-direction:column; gap:2px; max-height:336px; overflow-y:auto; margin-right:-6px; padding-right:6px;">
-            {#each album.tracks as t (t.code)}
+            {#each album.tracks as t (t.id)}
               <TrackRow code={t.code} title={t.title} artist={t.artistName} duration={fmt(t.duration)}
                 cover={t.cover} gradient={t.gradient} tone={t.tone}
                 playing={t.id === nowPlayingId} onAdd={() => onAddTrack(t)} />
