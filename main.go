@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 
 	"github.com/andybarilla/exit66jukebox/internal/api"
+	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/config"
+	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/scan"
 	"github.com/andybarilla/exit66jukebox/internal/store"
@@ -41,11 +44,37 @@ func main() {
 		}()
 	}
 
+	// Always-on "house" shared stream: one continuous MP3 feed driven by the
+	// shared queue, that any browser/Sonos can tune into.
+	const houseID = "house"
+	jb.EnsureStream(houseID, "shared")
+	houseBus := events.NewBus()
+	silence := broadcast.GenerateSilence(1)
+
+	// next pops the house queue and publishes now-playing; returns the file path
+	// for the broadcaster. Called repeatedly; a no-op when the queue is empty.
+	next := func() (string, bool) {
+		tr, ok := jb.Next(houseID)
+		if !ok {
+			return "", false
+		}
+		_, path, found := store.GetTrack(db, tr.ID)
+		if !found {
+			return "", false
+		}
+		houseBus.Publish(events.Event{Type: "now-playing", Data: tr})
+		return path, true
+	}
+
+	houseHub := broadcast.NewHub(broadcast.FFmpegSource{}, next, silence)
+	go houseHub.Run(context.Background())
+
 	uiFS, err := web.FS()
 	if err != nil {
 		log.Fatalf("ui fs: %v", err)
 	}
 	srv := api.NewServer(db, jb, uiFS)
+	srv.RegisterStream(houseID, houseHub, houseBus)
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, srv.Handler()); err != nil {
 		log.Fatalf("server: %v", err)
