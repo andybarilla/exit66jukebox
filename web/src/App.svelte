@@ -63,7 +63,7 @@
     try { sonosDevices = await listSonos(); }
     finally { sonosBusy = false; }
   }
-  async function cast(ip) { await castSonos(ip); castIP = ip; }
+  async function cast(ip) { const r = await castSonos(ip); if (r && r.ok) castIP = ip; }
   async function stopCast() { if (castIP) { await stopSonos(castIP); castIP = null; } }
 
   onMount(async () => {
