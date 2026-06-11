@@ -1,0 +1,246 @@
+/* Self-hosted brand fonts (see scripts/fetch-fonts.mjs) */
+@font-face { font-family: 'Chakra Petch'; font-weight: 400; font-display: swap; src: url('/fonts/chakra-petch-400.woff2') format('woff2'); }
+@font-face { font-family: 'Chakra Petch'; font-weight: 500; font-display: swap; src: url('/fonts/chakra-petch-500.woff2') format('woff2'); }
+@font-face { font-family: 'Chakra Petch'; font-weight: 600; font-display: swap; src: url('/fonts/chakra-petch-600.woff2') format('woff2'); }
+@font-face { font-family: 'Chakra Petch'; font-weight: 700; font-display: swap; src: url('/fonts/chakra-petch-700.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 400; font-display: swap; src: url('/fonts/space-grotesk-400.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 500; font-display: swap; src: url('/fonts/space-grotesk-500.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 600; font-display: swap; src: url('/fonts/space-grotesk-600.woff2') format('woff2'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 700; font-display: swap; src: url('/fonts/space-grotesk-700.woff2') format('woff2'); }
+@font-face { font-family: 'Space Mono'; font-weight: 400; font-display: swap; src: url('/fonts/space-mono-400.woff2') format('woff2'); }
+@font-face { font-family: 'Space Mono'; font-weight: 700; font-display: swap; src: url('/fonts/space-mono-700.woff2') format('woff2'); }
+
+/* Exit 66 Jukebox — Color System
+   Neon-noir: deep blue-black surfaces lit by jukebox neon.
+   Base ramps first, semantic aliases below. */
+
+:root {
+  /* ---- INK · backgrounds (cool blue-black) ---- */
+  --ink-980: #06060B;
+  --ink-950: #08080F;
+  --ink-900: #0B0B14;
+  --ink-850: #10101B;
+  --ink-800: #161622;
+  --ink-750: #1C1C2B;
+  --ink-700: #232334;
+  --ink-650: #2C2C40;
+  --ink-600: #38384F;
+
+  /* ---- HAIRLINES ---- */
+  --line-soft: rgba(245, 242, 234, 0.07);
+  --line: rgba(245, 242, 234, 0.12);
+  --line-strong: rgba(245, 242, 234, 0.20);
+
+  /* ---- PAPER · text on dark (warm whites/greys) ---- */
+  --paper-100: #F6F3EB;
+  --paper-200: #D7D3E0;
+  --paper-300: #ABA8BD;
+  --paper-400: #7E7B92;
+  --paper-500: #5A5870;
+
+  /* ---- NEON · brand accents ---- */
+  /* Magenta — the primary jukebox neon */
+  --neon-magenta-bright: #FF52A2;
+  --neon-magenta: #FF2E88;
+  --neon-magenta-deep: #D11468;
+  /* Cyan — electric secondary */
+  --neon-cyan-bright: #6BEBFF;
+  --neon-cyan: #1FE0FF;
+  --neon-cyan-deep: #0FA8C4;
+  /* Amber — Route 66 warmth, highway sign */
+  --neon-amber-bright: #FFC85C;
+  --neon-amber: #FFB02E;
+  --neon-amber-deep: #D98A12;
+  /* Violet — tertiary */
+  --neon-violet: #8A6CFF;
+  --neon-violet-deep: #5E3FD6;
+
+  /* ---- STATUS ---- */
+  --status-success: #3DF59B;
+  --status-success-deep: #16B86C;
+  --status-warning: #FFB02E;
+  --status-danger: #FF4D5E;
+  --status-danger-deep: #D42234;
+
+  /* ---- SEMANTIC ALIASES ---- */
+  --bg-base: var(--ink-950);
+  --bg-sunken: var(--ink-980);
+  --bg-surface: var(--ink-850);
+  --bg-surface-raised: var(--ink-800);
+  --bg-surface-hover: var(--ink-750);
+  --bg-inset: var(--ink-900);
+
+  --text-strong: var(--paper-100);
+  --text-body: var(--paper-200);
+  --text-muted: var(--paper-300);
+  --text-faint: var(--paper-400);
+  --text-disabled: var(--paper-500);
+
+  --border-subtle: var(--line-soft);
+  --border-default: var(--line);
+  --border-strong: var(--line-strong);
+
+  --accent: var(--neon-magenta);
+  --accent-hover: var(--neon-magenta-bright);
+  --accent-press: var(--neon-magenta-deep);
+  --accent-2: var(--neon-cyan);
+  --accent-3: var(--neon-amber);
+
+  --text-on-accent: #0B0B14;
+
+  --focus-ring: var(--neon-cyan);
+}
+
+/* Exit 66 Jukebox — Typography
+   Display : Chakra Petch — uppercase, tracked-out, neon-sign headers
+   UI/Body : Space Grotesk — interface + reading text
+   Mono    : Space Mono — track times, codes, metadata */
+
+:root {
+  --font-display: 'Chakra Petch', 'Space Grotesk', sans-serif;
+  --font-sans: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'Space Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* Weights */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Type scale (px) — fluid-ready */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-md: 18px;
+  --text-lg: 22px;
+  --text-xl: 28px;
+  --text-2xl: 36px;
+  --text-3xl: 48px;
+  --text-4xl: 64px;
+  --text-5xl: 88px;
+
+  /* Line heights */
+  --leading-tight: 1.05;
+  --leading-snug: 1.2;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* Tracking */
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0em;
+  --tracking-wide: 0.06em;
+  --tracking-wider: 0.14em;
+  --tracking-widest: 0.24em;
+
+  /* Semantic roles */
+  --display-font: var(--font-display);
+  --display-weight: var(--weight-bold);
+  --display-tracking: var(--tracking-wide);
+
+  --heading-font: var(--font-display);
+  --heading-weight: var(--weight-semibold);
+
+  --body-font: var(--font-sans);
+  --body-weight: var(--weight-regular);
+
+  --label-font: var(--font-mono);
+  --label-tracking: var(--tracking-widest);
+}
+
+/* Exit 66 Jukebox — Spacing & Layout
+   4px base grid. */
+
+:root {
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+  --space-11: 80px;
+  --space-12: 96px;
+  --space-13: 128px;
+
+  /* Containers */
+  --container-sm: 640px;
+  --container-md: 880px;
+  --container-lg: 1120px;
+  --container-xl: 1360px;
+
+  /* Component sizing */
+  --control-h-sm: 32px;
+  --control-h-md: 42px;
+  --control-h-lg: 54px;
+
+  --gutter: var(--space-6);
+  --section-y: var(--space-12);
+}
+
+/* Exit 66 Jukebox — Radii, Borders, Shadows, HUD Edges, Motion
+   SIGNATURE: HUD Outline — crisp flat neon strokes, double frames, sharp
+   corners, NO bloom. The `--glow-*` names are kept for compatibility but now
+   resolve to crisp rings (zero blur). Use `--hud-double-*` for double frames. */
+
+:root {
+  /* ---- RADII (sharp, machined — terminal/HUD) ---- */
+  --radius-xs: 0px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 5px;
+  --radius-xl: 8px;
+  --radius-pill: 999px;
+
+  /* ---- HUD STROKE WEIGHTS ---- */
+  --stroke: 1.5px;
+  --stroke-bold: 2px;
+
+  /* ---- DEPTH SHADOWS (near-black, deep — structure only, no color) ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 32px 80px rgba(0, 0, 0, 0.7);
+
+  /* ---- NEON EDGES (crisp rings — used on hover / active / live elements) ---- */
+  --glow-magenta: 0 0 0 1.5px var(--neon-magenta);
+  --glow-cyan: 0 0 0 1.5px var(--neon-cyan);
+  --glow-amber: 0 0 0 1.5px var(--neon-amber);
+  --glow-soft-magenta: 0 0 0 1px rgba(255, 46, 136, 0.6);
+  --glow-soft-cyan: 0 0 0 1px rgba(31, 224, 255, 0.6);
+
+  /* ---- HUD DOUBLE FRAME (inner gap + outer neon stroke) ---- */
+  --hud-double-magenta: 0 0 0 1px var(--bg-base), 0 0 0 2.5px var(--neon-magenta);
+  --hud-double-cyan: 0 0 0 1px var(--bg-base), 0 0 0 2.5px var(--neon-cyan);
+  --hud-double-amber: 0 0 0 1px var(--bg-base), 0 0 0 2.5px var(--neon-amber);
+
+  /* ---- TEXT (no bloom in HUD — kept as tokens so headings stay flat) ---- */
+  --text-glow-magenta: none;
+  --text-glow-cyan: none;
+  --text-glow-amber: none;
+
+  /* ---- TEXTURES ---- */
+  --scanline: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.025) 0px,
+    rgba(255, 255, 255, 0.025) 1px,
+    transparent 1px,
+    transparent 3px
+  ); /* @kind other */
+  --grid-glow: radial-gradient(circle at 50% 0%, rgba(255, 46, 136, 0.10), transparent 62%); /* @kind other */
+
+  /* ---- MOTION ---- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* @kind other */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* @kind other */
+  --ease-snap: cubic-bezier(0.5, 1.6, 0.4, 1); /* @kind other */ /* slight overshoot for jukebox buttons */
+  --dur-fast: 120ms; /* @kind other */
+  --dur: 200ms; /* @kind other */
+  --dur-slow: 360ms; /* @kind other */
+
+  /* ---- FOCUS (crisp cyan ring, no blur) ---- */
+  --focus-shadow: 0 0 0 2px var(--bg-base), 0 0 0 3.5px var(--focus-ring);
+}
