@@ -19,12 +19,6 @@ export function audioURL(trackId) {
 
 export const HOUSE = 'house';
 
-export async function requestTo(streamId, trackId) {
-  const body = new URLSearchParams({ kind: 'track', id: String(trackId) });
-  const r = await fetch(`/api/streams/${streamId}/requests`, { method: 'POST', body });
-  return r.json();
-}
-
 export async function getQueue(streamId) {
   const r = await fetch(`/api/streams/${streamId}`);
   return r.json(); // { id, queue: [...] }
@@ -60,3 +54,32 @@ export function subscribeEvents(streamId, onEvent) {
   };
   return () => es.close();
 }
+
+export async function listArtists(search = '') {
+  const r = await fetch(`/api/artists?search=${encodeURIComponent(search)}&limit=500`);
+  return r.json();
+}
+export async function listAlbums(search = '') {
+  const r = await fetch(`/api/albums?search=${encodeURIComponent(search)}&limit=500`);
+  return r.json();
+}
+
+// requestTo sends the requester name and a kind (track|album|artist).
+export async function requestTo(streamId, id, { kind = 'track', by = 'You' } = {}) {
+  const body = new URLSearchParams({ kind, id: String(id), by });
+  const r = await fetch(`/api/streams/${streamId}/requests`, { method: 'POST', body });
+  return r.json();
+}
+
+export async function removeRequest(streamId, trackId) {
+  const r = await fetch(`/api/streams/${streamId}/requests/${trackId}`, { method: 'DELETE' });
+  return r.json();
+}
+
+export async function setShuffle(streamId, on) {
+  const body = new URLSearchParams({ value: on ? 'true' : 'false' });
+  const r = await fetch(`/api/streams/${streamId}/shuffle`, { method: 'POST', body });
+  return r.json();
+}
+
+export function albumCoverURL(albumId) { return `/api/albums/${albumId}/cover`; }
