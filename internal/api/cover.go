@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/dhowden/tag"
 
@@ -56,7 +57,11 @@ func serveCover(w http.ResponseWriter, s *Server, trackID int64) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", pic.MIMEType)
+	ct := pic.MIMEType
+	if !strings.HasPrefix(ct, "image/") {
+		ct = http.DetectContentType(pic.Data) // tag MIME missing/garbage; sniff the bytes
+	}
+	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "max-age=86400")
 	w.Write(pic.Data)
 }

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
@@ -41,8 +42,8 @@ func TestTrackCoverServesEmbeddedArt(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200 with embedded art, got %d", rec.Code)
 	}
-	if ct := rec.Header().Get("Content-Type"); ct == "" {
-		t.Fatalf("expected an image content-type, got empty")
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "image/") {
+		t.Fatalf("expected an image/* content-type, got %q", ct)
 	}
 	if rec.Body.Len() == 0 {
 		t.Fatalf("expected image bytes, got none")
