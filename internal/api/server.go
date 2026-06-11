@@ -51,6 +51,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/albums/{id}/cover", s.albumCover)
 	mux.HandleFunc("GET /stream/", s.streamAudio)
 	mux.HandleFunc("GET /api/streams/{id}/events", s.streamEvents)
+	mux.HandleFunc("GET /api/sonos/devices", s.sonosDevices)
+	mux.HandleFunc("POST /api/sonos/cast", s.sonosCast)
+	mux.HandleFunc("POST /api/sonos/stop", s.sonosStop)
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}
