@@ -6,26 +6,31 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/model"
 )
 
-func upsertArtist(db *sql.DB, name string) (int64, error) {
-	if _, err := db.Exec(
+type execQuerier interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func upsertArtist(q execQuerier, name string) (int64, error) {
+	if _, err := q.Exec(
 		`INSERT INTO artist(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name,
 	); err != nil {
 		return 0, err
 	}
 	var id int64
-	err := db.QueryRow(`SELECT id FROM artist WHERE name = ?`, name).Scan(&id)
+	err := q.QueryRow(`SELECT id FROM artist WHERE name = ?`, name).Scan(&id)
 	return id, err
 }
 
-func upsertAlbum(db *sql.DB, name string, artistID int64) (int64, error) {
-	if _, err := db.Exec(
+func upsertAlbum(q execQuerier, name string, artistID int64) (int64, error) {
+	if _, err := q.Exec(
 		`INSERT INTO album(name, artist_id) VALUES(?, ?)
 		 ON CONFLICT(name, artist_id) DO NOTHING`, name, artistID,
 	); err != nil {
 		return 0, err
 	}
 	var id int64
-	err := db.QueryRow(
+	err := q.QueryRow(
 		`SELECT id FROM album WHERE name = ? AND artist_id = ?`, name, artistID,
 	).Scan(&id)
 	return id, err
@@ -34,15 +39,21 @@ func upsertAlbum(db *sql.DB, name string, artistID int64) (int64, error) {
 // UpsertTrack inserts or updates a track by its path, creating the artist and
 // album rows as needed. Returns the track id.
 func UpsertTrack(db *sql.DB, t model.Track, artistName, albumName string) (int64, error) {
-	artistID, err := upsertArtist(db, artistName)
+	tx, err := db.Begin()
 	if err != nil {
 		return 0, err
 	}
-	albumID, err := upsertAlbum(db, albumName, artistID)
+	defer tx.Rollback()
+
+	artistID, err := upsertArtist(tx, artistName)
 	if err != nil {
 		return 0, err
 	}
-	_, err = db.Exec(
+	albumID, err := upsertAlbum(tx, albumName, artistID)
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.Exec(
 		`INSERT INTO track(path, mod_time, size, title, artist_id, album_id, track_no, genre, duration)
 		 VALUES(?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(path) DO UPDATE SET
@@ -55,8 +66,13 @@ func UpsertTrack(db *sql.DB, t model.Track, artistName, albumName string) (int64
 		return 0, err
 	}
 	var id int64
-	err = db.QueryRow(`SELECT id FROM track WHERE path = ?`, t.Path).Scan(&id)
-	return id, err
+	if err = tx.QueryRow(`SELECT id FROM track WHERE path = ?`, t.Path).Scan(&id); err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	return id, nil
 }
 
 // TrackStamp returns the stored mod_time and size for a path, or ok=false if

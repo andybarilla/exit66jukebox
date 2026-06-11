@@ -21,6 +21,14 @@ func Open(path string) (*sql.DB, error) {
 	if path == ":memory:" {
 		db.SetMaxOpenConns(1)
 	}
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
 		db.Close()
 		return nil, err
