@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"strconv"
 
@@ -13,10 +14,11 @@ import (
 type Server struct {
 	db *sql.DB
 	jb *jukebox.Jukebox
+	ui fs.FS
 }
 
-func NewServer(db *sql.DB, jb *jukebox.Jukebox) *Server {
-	return &Server{db: db, jb: jb}
+func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
+	return &Server{db: db, jb: jb, ui: ui}
 }
 
 // Handler returns the routed mux. Handlers live in sibling files.
@@ -31,6 +33,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/streams/{id}/requests/{trackID}", s.removeRequest)
 	mux.HandleFunc("DELETE /api/streams/{id}/requests", s.clearRequests)
 	mux.HandleFunc("GET /api/tracks/{id}/audio", s.trackAudio)
+	if s.ui != nil {
+		mux.Handle("GET /", http.FileServerFS(s.ui))
+	}
 	return mux
 }
 

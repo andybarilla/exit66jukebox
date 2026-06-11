@@ -10,6 +10,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/scan"
 	"github.com/andybarilla/exit66jukebox/internal/store"
+	"github.com/andybarilla/exit66jukebox/internal/web"
 )
 
 func main() {
@@ -40,7 +41,11 @@ func main() {
 		}()
 	}
 
-	srv := api.NewServer(db, jb)
+	uiFS, err := web.FS()
+	if err != nil {
+		log.Fatalf("ui fs: %v", err)
+	}
+	srv := api.NewServer(db, jb, uiFS)
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, srv.Handler()); err != nil {
 		log.Fatalf("server: %v", err)

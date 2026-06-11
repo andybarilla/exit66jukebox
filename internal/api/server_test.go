@@ -21,7 +21,7 @@ func newTestServer(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { db.Close() })
 	jb := jukebox.New(db, jukebox.Config{HistoryWindow: 5})
-	return NewServer(db, jb)
+	return NewServer(db, jb, nil)
 }
 
 func TestArtistsEndpointReturnsJSON(t *testing.T) {
