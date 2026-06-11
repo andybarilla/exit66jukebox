@@ -38,6 +38,19 @@ export function coverURL(trackId) {
   return `/api/tracks/${trackId}/cover`;
 }
 
+export async function listSonos() {
+  const r = await fetch('/api/sonos/devices');
+  return r.json(); // [{name, ip}]
+}
+export async function castSonos(ip) {
+  const r = await fetch('/api/sonos/cast', { method: 'POST', body: new URLSearchParams({ ip }) });
+  return r.json();
+}
+export async function stopSonos(ip) {
+  const r = await fetch('/api/sonos/stop', { method: 'POST', body: new URLSearchParams({ ip }) });
+  return r.json();
+}
+
 // subscribeEvents opens an SSE connection; onEvent gets parsed {type,data}.
 // Returns a close function.
 export function subscribeEvents(streamId, onEvent) {
