@@ -18,11 +18,13 @@ func TestSonosCastRequiresIP(t *testing.T) {
 	}
 }
 
-func TestHouseStreamURLFromHost(t *testing.T) {
-	got := houseStreamURL("192.168.1.10:8066")
-	want := "http://192.168.1.10:8066/stream/house.mp3"
-	if got != want {
-		t.Fatalf("houseStreamURL = %q, want %q", got, want)
+func TestStreamURL(t *testing.T) {
+	if got := streamURL("192.168.1.10", ":8066"); got != "http://192.168.1.10:8066/stream/house.mp3" {
+		t.Fatalf("streamURL = %q", got)
+	}
+	// Empty/invalid listen addr falls back to the default port.
+	if got := streamURL("192.168.1.10", ""); got != "http://192.168.1.10:8066/stream/house.mp3" {
+		t.Fatalf("streamURL fallback = %q", got)
 	}
 }
 

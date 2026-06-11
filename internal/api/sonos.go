@@ -8,24 +8,26 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/sonos"
 )
 
-// houseStreamURL builds a LAN-reachable URL for the house stream from the host
-// the browser used to reach us. If host is loopback, substitute the server's
-// detected outbound IP (keeping the port) so the Sonos can reach it.
-func houseStreamURL(host string) string {
-	h, port, err := net.SplitHostPort(host)
-	if err != nil {
-		h = host
-		port = ""
+// streamURL builds the house-stream URL the Sonos will fetch, from a server IP
+// and the server's listen address (for the port). It deliberately does NOT use
+// the request Host header — that is client-controlled and could point the Sonos
+// at an attacker's URL (Host injection).
+func streamURL(ip, listenAddr string) string {
+	_, port, err := net.SplitHostPort(listenAddr)
+	if err != nil || port == "" {
+		port = "8066"
 	}
-	if h == "127.0.0.1" || h == "localhost" || h == "::1" {
-		if ip := sonos.OutboundIP(); ip != "" {
-			h = ip
-		}
+	return "http://" + net.JoinHostPort(ip, port) + "/stream/house.mp3"
+}
+
+// houseStreamURL returns a Sonos-reachable URL for the house stream using the
+// server's detected outbound LAN IP and configured port.
+func (s *Server) houseStreamURL() string {
+	ip := sonos.OutboundIP()
+	if ip == "" {
+		ip = "127.0.0.1" // last resort; not Sonos-reachable, but never panics
 	}
-	if port != "" {
-		h = net.JoinHostPort(h, port)
-	}
-	return "http://" + h + "/stream/house.mp3"
+	return streamURL(ip, s.listenAddr)
 }
 
 // rememberDevices records the discovered device IPs as the cast allowlist.
@@ -100,7 +102,7 @@ func (s *Server) sonosCast(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := sonos.Cast(ip, houseStreamURL(r.Host), "Exit 66 Jukebox"); err != nil {
+	if err := sonos.Cast(ip, s.houseStreamURL(), "Exit 66 Jukebox"); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
