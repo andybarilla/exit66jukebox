@@ -57,16 +57,23 @@ func main() {
 	}
 
 	// next pops the house queue and publishes now-playing; returns the file path
-	// for the broadcaster. Called repeatedly; a no-op when the queue is empty.
+	// for the broadcaster. Called repeatedly; publishes a null now-playing once
+	// when the stream transitions from playing to idle (empty queue).
+	playing := false
 	next := func() (string, bool) {
 		tr, ok := jb.Next(houseID)
 		if !ok {
+			if playing {
+				playing = false
+				houseBus.Publish(events.Event{Type: "now-playing", Data: nil})
+			}
 			return "", false
 		}
 		_, path, found := store.GetTrack(db, tr.ID)
 		if !found {
 			return "", false
 		}
+		playing = true
 		houseBus.Publish(events.Event{Type: "now-playing", Data: tr})
 		return path, true
 	}

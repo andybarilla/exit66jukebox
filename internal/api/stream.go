@@ -73,7 +73,10 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case e := <-ch:
+		case e, open := <-ch:
+			if !open {
+				return
+			}
 			data, _ := json.Marshal(e)
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
