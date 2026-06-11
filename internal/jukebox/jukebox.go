@@ -52,17 +52,29 @@ func (j *Jukebox) EnsureStream(id, kind string) error {
 }
 
 // Request applies the fairness rules and enqueues the track if it passes.
-func (j *Jukebox) Request(streamID string, trackID int64) Result {
-	if dup, _ := store.InQueue(j.db, streamID, trackID); dup {
-		return AlreadyQueued
+// Returns a non-nil error only on an underlying DB failure (not on a fairness
+// rejection, which is reported via Result).
+func (j *Jukebox) Request(streamID string, trackID int64) (Result, error) {
+	dup, err := store.InQueue(j.db, streamID, trackID)
+	if err != nil {
+		return Requested, err
+	}
+	if dup {
+		return AlreadyQueued, nil
 	}
 	if j.cfg.HistoryWindow > 0 {
-		if recent, _ := store.RecentlyPlayed(j.db, streamID, trackID, j.cfg.HistoryWindow); recent {
-			return RecentlyPlayed
+		recent, err := store.RecentlyPlayed(j.db, streamID, trackID, j.cfg.HistoryWindow)
+		if err != nil {
+			return Requested, err
+		}
+		if recent {
+			return RecentlyPlayed, nil
 		}
 	}
-	store.Enqueue(j.db, streamID, trackID, streamID)
-	return Requested
+	if err := store.Enqueue(j.db, streamID, trackID, ""); err != nil {
+		return Requested, err
+	}
+	return Requested, nil
 }
 
 // Next pops the next track in play order. ok=false if the queue is empty.
@@ -120,7 +132,7 @@ func (j *Jukebox) RequestArtist(streamID string, artistID int64) int {
 func (j *Jukebox) requestMany(streamID string, ids []int64) int {
 	queued := 0
 	for _, id := range ids {
-		if j.Request(streamID, id) == Requested {
+		if res, err := j.Request(streamID, id); err == nil && res == Requested {
 			queued++
 		}
 	}

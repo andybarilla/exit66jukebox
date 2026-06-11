@@ -34,9 +34,11 @@ func RecentlyPlayed(db *sql.DB, streamID string, trackID int64, window int) (boo
 // Enqueue appends a track to the end of the stream's queue.
 func Enqueue(db *sql.DB, streamID string, trackID int64, addedBy string) error {
 	var next int
-	db.QueryRow(
+	if err := db.QueryRow(
 		`SELECT coalesce(max(play_order),0)+1 FROM queue_item WHERE stream_id=?`,
-		streamID).Scan(&next)
+		streamID).Scan(&next); err != nil {
+		return err
+	}
 	_, err := db.Exec(
 		`INSERT INTO queue_item(stream_id, track_id, play_order, added_by) VALUES(?,?,?,?)`,
 		streamID, trackID, next, addedBy)
@@ -44,18 +46,36 @@ func Enqueue(db *sql.DB, streamID string, trackID int64, addedBy string) error {
 }
 
 // PopNext removes and returns the next track id in play order, records it in
-// history, and bumps its play count. Returns ok=false if the queue is empty.
+// history, and bumps its play count — all atomically. Returns ok=false if the
+// queue is empty or the transaction fails.
 func PopNext(db *sql.DB, streamID string) (trackID int64, ok bool) {
-	err := db.QueryRow(
-		`SELECT track_id FROM queue_item WHERE stream_id=? ORDER BY play_order LIMIT 1`,
-		streamID).Scan(&trackID)
+	tx, err := db.Begin()
 	if err != nil {
 		return 0, false
 	}
-	db.Exec(`DELETE FROM queue_item WHERE stream_id=? AND track_id=?`, streamID, trackID)
-	db.Exec(`INSERT INTO history(stream_id, track_id, played_at) VALUES(?,?,strftime('%s','now'))`,
-		streamID, trackID)
-	db.Exec(`UPDATE track SET play_count = play_count + 1 WHERE id=?`, trackID)
+	defer tx.Rollback()
+
+	if err := tx.QueryRow(
+		`SELECT track_id FROM queue_item WHERE stream_id=? ORDER BY play_order LIMIT 1`,
+		streamID).Scan(&trackID); err != nil {
+		return 0, false
+	}
+	if _, err := tx.Exec(`DELETE FROM queue_item WHERE stream_id=? AND track_id=?`,
+		streamID, trackID); err != nil {
+		return 0, false
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO history(stream_id, track_id, played_at) VALUES(?,?,strftime('%s','now'))`,
+		streamID, trackID); err != nil {
+		return 0, false
+	}
+	if _, err := tx.Exec(`UPDATE track SET play_count = play_count + 1 WHERE id=?`,
+		trackID); err != nil {
+		return 0, false
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, false
+	}
 	return trackID, true
 }
 
