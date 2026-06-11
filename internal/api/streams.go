@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/model"
 )
@@ -59,9 +60,15 @@ func (s *Server) request(w http.ResponseWriter, r *http.Request) {
 	switch kind {
 	case "album":
 		n := s.jb.RequestAlbum(id, targetID)
+		if n > 0 {
+			s.publishQueueChanged(id)
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"queued": n, "message": ""})
 	case "artist":
 		n := s.jb.RequestArtist(id, targetID)
+		if n > 0 {
+			s.publishQueueChanged(id)
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"queued": n, "message": ""})
 	case "track":
 		res, err := s.jb.Request(id, targetID)
@@ -72,6 +79,7 @@ func (s *Server) request(w http.ResponseWriter, r *http.Request) {
 		queued := 0
 		if res == jukebox.Requested {
 			queued = 1
+			s.publishQueueChanged(id)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"queued": queued, "message": res.Message()})
 	default:
@@ -90,6 +98,7 @@ func (s *Server) removeRequest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.publishQueueChanged(id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -99,5 +108,12 @@ func (s *Server) clearRequests(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.publishQueueChanged(id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) publishQueueChanged(streamID string) {
+	if bus, ok := s.buses[streamID]; ok {
+		bus.Publish(events.Event{Type: "queue-changed", Data: streamID})
+	}
 }

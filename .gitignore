@@ -1,4 +1,4 @@
 /exit66jukebox
-/exit66.db
+/exit66.db*
 /web/node_modules/
 *.test

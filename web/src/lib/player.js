@@ -1,23 +1,37 @@
 import { nextTrack, audioURL } from './api.js';
 
-// Player wires an <audio> element to the private queue: when a track ends, it
-// fetches the next one. Returns a start() that kicks off playback.
+// createPlayer wires an <audio> element to the private queue (local mode): when a
+// track ends it fetches the next. Returns { start, stop }; stop() tears down the
+// poll loop and listener so the player can be replaced when switching modes.
 export function createPlayer(audio, onNowPlaying) {
+  let stopped = false;
+  let timer = null;
+
   async function playNext() {
+    if (stopped) return;
     try {
       const res = await nextTrack();
+      if (stopped) return;
       if (res.ok) {
         audio.src = audioURL(res.track.id);
         audio.play().catch(() => onNowPlaying(null));
         onNowPlaying(res.track);
       } else {
         onNowPlaying(null);
-        setTimeout(playNext, 2000); // queue empty: poll
+        timer = setTimeout(playNext, 2000);
       }
     } catch (_) {
-      setTimeout(playNext, 5000); // network error: back off and retry
+      timer = setTimeout(playNext, 5000);
     }
   }
+
   audio.addEventListener('ended', playNext);
-  return { start: playNext };
+
+  function stop() {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    audio.removeEventListener('ended', playNext);
+  }
+
+  return { start: playNext, stop };
 }

@@ -39,6 +39,28 @@ func TestScanIndexesAndIsIncremental(t *testing.T) {
 	}
 }
 
+func TestScanStoresDuration(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	dir := t.TempDir()
+	src, _ := os.ReadFile("testdata/sample.mp3")
+	os.WriteFile(filepath.Join(dir, "a.mp3"), src, 0o644)
+
+	if _, err := Scan(db, []string{dir}, 2); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	var dur int
+	if err := db.QueryRow(`SELECT duration FROM track LIMIT 1`).Scan(&dur); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if dur <= 0 {
+		t.Fatalf("expected stored duration > 0, got %d", dur)
+	}
+}
+
 func TestScanReindexesChangedFile(t *testing.T) {
 	db, err := store.Open(":memory:")
 	if err != nil {

@@ -16,3 +16,34 @@ export async function nextTrack() {
 export function audioURL(trackId) {
   return `/api/tracks/${trackId}/audio`;
 }
+
+export const HOUSE = 'house';
+
+export async function requestTo(streamId, trackId) {
+  const body = new URLSearchParams({ kind: 'track', id: String(trackId) });
+  const r = await fetch(`/api/streams/${streamId}/requests`, { method: 'POST', body });
+  return r.json();
+}
+
+export async function getQueue(streamId) {
+  const r = await fetch(`/api/streams/${streamId}`);
+  return r.json(); // { id, queue: [...] }
+}
+
+export function houseStreamURL() {
+  return `/stream/${HOUSE}.mp3`;
+}
+
+export function coverURL(trackId) {
+  return `/api/tracks/${trackId}/cover`;
+}
+
+// subscribeEvents opens an SSE connection; onEvent gets parsed {type,data}.
+// Returns a close function.
+export function subscribeEvents(streamId, onEvent) {
+  const es = new EventSource(`/api/streams/${streamId}/events`);
+  es.onmessage = (m) => {
+    try { onEvent(JSON.parse(m.data)); } catch (_) {}
+  };
+  return () => es.close();
+}
