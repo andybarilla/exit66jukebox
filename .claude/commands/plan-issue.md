@@ -24,44 +24,24 @@ anything related. Form a concrete understanding of what the change requires.
 
 ## 3. Decide tier
 
-The spec/plan lives in the **issue body itself** — do not write separate markdown files.
-
-- **small** — bounded, fits one focused PR, no design ambiguity. → inline plan
-  (approach paragraph + acceptance-criteria checklist).
+- **small** — bounded, fits one focused PR, no design ambiguity. → inline plan.
 - **needs-spec** — multi-file/subsystem, design choices, or >~1 day of work.
-  → write the full spec (design, decisions, components) and step-by-step plan as
-  sections directly in the issue body. Keep it self-contained so a worker needs
-  nothing but the ticket.
+  → write a spec to `docs/superpowers/specs/YYYY-MM-DD-<slug>-design.md` and a plan
+  to `docs/superpowers/plans/YYYY-MM-DD-<slug>.md` (follow the existing files there
+  as templates). Create these on a branch — do NOT commit to `main`.
 
-## 4. Split out additional issues
+## 4. Propose in-session
 
-If the work uncovers separable units (dependencies, follow-ups, parallel pieces),
-propose creating dedicated issues for them. On approval, create each and add it to
-the board:
+Show the user the proposed issue body: a one-paragraph approach + a checklist of
+acceptance criteria (and spec/plan links if `needs-spec`). Ask for a yes / edits.
+Do not proceed until approved.
 
-```bash
-NEW_URL=$(gh issue create --repo andybarilla/exit66jukebox \
-  --title "<title>" --body "<body>" --label enhancement | tail -n1)
-gh project item-add 2 --owner andybarilla --url "$NEW_URL"
-```
+## 5. Apply on approval
 
-Reference the new issues from the parent body (and vice versa) so the split is
-traceable. New issues land in `Backlog` for a later `/plan-issue` pass unless the
-user wants them planned now.
-
-## 5. Propose in-session
-
-Show the user the proposed issue body: the approach + acceptance-criteria checklist
-(plus the embedded spec/plan sections if `needs-spec`), and any additional issues to
-split out. Ask for a yes / edits. Do not proceed until approved.
-
-## 6. Apply on approval
-
-- Update the issue body (carries the full spec/plan):
+- Update the issue body:
   `gh issue edit <n> --body "<approved body>"`
 - Labels: add the tier (`small` or `needs-spec`) and a type (`bug` or `enhancement`):
   `gh issue edit <n> --add-label small --add-label enhancement`
-- Create and add any split-out issues to the board (see step 4).
 - Move the board item to `Ready`. Resolve IDs at runtime (option IDs are not stable
   across field edits, so always look them up by name):
 
@@ -78,5 +58,4 @@ split out. Ask for a yes / edits. Do not proceed until approved.
     --field-id "$FIELD_ID" --single-select-option-id "$READY_OPT"
   ```
 
-Report: issue number, tier, labels applied, any split-out issues created, and that
-it's now `Ready`.
+Report: issue number, tier, labels applied, and that it's now `Ready`.
