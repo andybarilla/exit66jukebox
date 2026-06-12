@@ -12,6 +12,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
+	"github.com/andybarilla/exit66jukebox/internal/scan"
 )
 
 // Server holds dependencies and builds the HTTP handler.
@@ -23,6 +24,7 @@ type Server struct {
 	hubs       map[string]*broadcast.Hub
 	buses      map[string]*events.Bus
 	enrich     *enrich.Runner // nil until SetEnrichRunner; endpoints 503 while nil
+	scan       *scan.Progress // nil until SetScanProgress (no library); endpoint 503 while nil
 
 	// sonosIPs is the allowlist of IPs from the most recent discovery; casts are
 	// restricted to it so an arbitrary ip can't be used to make the server POST
@@ -48,6 +50,10 @@ func (s *Server) SetListenAddr(addr string) { s.listenAddr = addr }
 // SetEnrichRunner attaches the MusicBrainz/CAA enrichment runner that backs the
 // /api/enrich endpoints.
 func (s *Server) SetEnrichRunner(r *enrich.Runner) { s.enrich = r }
+
+// SetScanProgress attaches the library scan progress that backs GET /api/scan.
+// Left nil when no library is configured (no scan ever runs).
+func (s *Server) SetScanProgress(p *scan.Progress) { s.scan = p }
 
 // RegisterStream attaches a broadcast hub and event bus for a shared stream id.
 func (s *Server) RegisterStream(id string, hub *broadcast.Hub, bus *events.Bus) {
@@ -89,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/discover/genres", s.discoverGenres)
 	mux.HandleFunc("POST /api/enrich", s.enrichStart)
 	mux.HandleFunc("GET /api/enrich", s.enrichStatus)
+	mux.HandleFunc("GET /api/scan", s.scanStatus)
 	mux.HandleFunc("GET /api/streams/{id}/station", s.getStationHandler)
 	mux.HandleFunc("POST /api/streams/{id}/station", s.startStationHandler)
 	mux.HandleFunc("DELETE /api/streams/{id}/station", s.stopStationHandler)
