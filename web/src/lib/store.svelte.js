@@ -237,6 +237,12 @@ export function createStore() {
 
     // ----- actions -----
     async init() {
+      // Seed scan state before the (slow, at 20k) initial load so a scan that
+      // finishes *during* loadLibrary is still seen as a true→false transition
+      // by the first poll, triggering the reload that pulls in the last tracks.
+      const s0 = await scanStatus().catch(() => null);
+      scan = s0;
+      _scanWasRunning = !!(s0 && s0.running);
       await loadLibrary();
       startScanPolling();
       await Promise.all([refreshQueue('house'), refreshQueue('me')]);
