@@ -37,7 +37,7 @@ Refuse and stop if any of:
 - It carries the `ready-blocked` label.
 - It is already `closed`.
 
-## 3. Move to In Progress + branch
+## 3. Move to In Progress + worktree branch
 
 - Set board status to `In Progress` (resolve the option id the same way as in
   `/plan-issue`, selecting `name=="In Progress"`):
@@ -52,7 +52,12 @@ Refuse and stop if any of:
   gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" --field-id "$FIELD_ID" --single-select-option-id "$OPT"
   ```
 
-- Create a branch off `main`: `git checkout main && git pull && git checkout -b issue-<n>-<short-slug>`.
+- Do all work in a worktree. If this session is not already in a dedicated worktree
+  (check `git rev-parse --show-toplevel` against the main checkout), use the
+  `superpowers:using-git-worktrees` skill to create one for branch
+  `issue-<n>-<short-slug>` off `main`, and switch into it before implementing.
+  If already in a worktree, just create the branch there:
+  `git checkout main && git pull && git checkout -b issue-<n>-<short-slug>`.
 
 ## 4. Implement
 
