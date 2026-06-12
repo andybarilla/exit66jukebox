@@ -51,15 +51,36 @@ gh api graphql -f query='mutation{
   }){projectV2Field{... on ProjectV2SingleSelectField{options{id name}}}}
 }'
 ```
-Expected: returns the five options with fresh IDs. **Note:** renaming `Todo` to `Backlog` (rather than deleting) preserves the existing `Todo`-status items as `Backlog`. Verify in Step 3.
+Expected: returns the five options with fresh IDs. **WARNING:** this mutation regenerates ALL option IDs (even for unchanged names like `In Progress`/`Done`), which CLEARS the status on every existing board item. To preserve current assignments you would need to pass each kept option's existing `id`, OR re-apply statuses afterward. In this project we re-applied: closed issues → `Done`, open issues → `Backlog`. Verify and re-apply in Step 3.
 
-- [ ] **Step 3: Verify existing items survived the rename**
+- [ ] **Step 3: Re-apply statuses (the Step 2 mutation wipes them)**
 
 Run:
 ```bash
 gh project item-list 2 --owner andybarilla --format json | python3 -c "import json,sys;d=json.load(sys.stdin);[print(i.get('status'),'|',i.get('title')) for i in d['items']]"
 ```
-Expected: previously-`Done` items still `Done`; no items stuck on a now-deleted status. If any item shows a blank/old status, set it manually on the board.
+Expected after the Step 2 mutation: every item shows `None`. Re-apply by issue state —
+closed → `Done`, open → `Backlog` — resolving the option IDs by name at runtime:
+```bash
+PROJECT_ID=PVT_kwHOAFtOQM4BaYsp
+FIELD_ID=PVTSSF_lAHOAFtOQM4BaYspzhVQr60
+DONE_OPT=$(gh api graphql -f query='query{node(id:"'$FIELD_ID'"){... on ProjectV2SingleSelectField{options{id name}}}}' --jq '.data.node.options[]|select(.name=="Done")|.id')
+BACKLOG_OPT=$(gh api graphql -f query='query{node(id:"'$FIELD_ID'"){... on ProjectV2SingleSelectField{options{id name}}}}' --jq '.data.node.options[]|select(.name=="Backlog")|.id')
+gh issue list --state all --limit 200 --json number,state > /tmp/issue_states.json
+gh project item-list 2 --owner andybarilla --format json > /tmp/items.json
+python3 - "$PROJECT_ID" "$FIELD_ID" "$DONE_OPT" "$BACKLOG_OPT" <<'PY'
+import json, subprocess, sys
+project, field, done_opt, backlog_opt = sys.argv[1:5]
+states = {i['number']: i['state'] for i in json.load(open('/tmp/issue_states.json'))}
+for it in json.load(open('/tmp/items.json'))['items']:
+    num = it.get('content',{}).get('number')
+    if num is None: continue
+    opt = done_opt if states.get(num)=='CLOSED' else backlog_opt
+    subprocess.run(['gh','project','item-edit','--id',it['id'],'--project-id',project,
+                    '--field-id',field,'--single-select-option-id',opt], check=True, capture_output=True)
+PY
+```
+Expected: closed issues `Done`, open issues `Backlog`.
 
 - [ ] **Step 4: Create the tier labels**
 
