@@ -78,6 +78,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sonos/devices", s.sonosDevices)
 	mux.HandleFunc("POST /api/sonos/cast", s.sonosCast)
 	mux.HandleFunc("POST /api/sonos/stop", s.sonosStop)
+	mux.HandleFunc("GET /api/discover/rediscover", s.discoverRediscover)
+	mux.HandleFunc("GET /api/discover/recent", s.discoverRecent)
+	mux.HandleFunc("GET /api/discover/genres", s.discoverGenres)
+	mux.HandleFunc("GET /api/streams/{id}/station", s.getStationHandler)
+	mux.HandleFunc("POST /api/streams/{id}/station", s.startStationHandler)
+	mux.HandleFunc("DELETE /api/streams/{id}/station", s.stopStationHandler)
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}

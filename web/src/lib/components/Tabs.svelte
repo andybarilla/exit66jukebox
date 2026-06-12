@@ -1,6 +1,6 @@
 <script>
   let { tab = 'albums', onTab } = $props();
-  const TABS = [['artists', 'Artists'], ['albums', 'Albums'], ['tracks', 'Tracks']];
+  const TABS = [['artists', 'Artists'], ['albums', 'Albums'], ['tracks', 'Tracks'], ['discover', 'Discover']];
 </script>
 <div style="display:inline-flex; flex:none; border:1px solid var(--border-strong); border-radius:var(--radius-md); overflow:hidden; height:36px;">
   {#each TABS as [key, label]}

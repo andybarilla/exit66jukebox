@@ -8,6 +8,7 @@
   import AlbumGrid from './lib/components/AlbumGrid.svelte';
   import ArtistList from './lib/components/ArtistList.svelte';
   import TrackList from './lib/components/TrackList.svelte';
+  import Discover from './lib/components/Discover.svelte';
   import Lineup from './lib/components/Lineup.svelte';
   import NowPlayingBar from './lib/components/NowPlayingBar.svelte';
   import MobilePlayer from './lib/components/MobilePlayer.svelte';
@@ -108,6 +109,13 @@
   $effect(() => {
     if (s.stream !== lastStream) { lastStream = s.stream; playing = true; applyStreamAudio(); }
   });
+
+  // Load discover data when switching to the discover tab.
+  let lastTab = s.tab;
+  $effect(() => {
+    if (s.tab === 'discover' && s.tab !== lastTab) s.loadDiscover();
+    lastTab = s.tab;
+  });
 </script>
 
 <div style="position:relative; height:100vh; width:100%; display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; background:var(--grid-glow), var(--bg-base); font-family:var(--font-sans); color:var(--text-body);">
@@ -120,11 +128,26 @@
     <main style="flex:1; min-width:0; display:flex; flex-direction:column; padding:18px 22px; box-sizing:border-box;">
       <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:16px;">
         <Tabs tab={s.tab} onTab={(t) => (s.tab = t)} />
-        <span style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:var(--text-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{s.currentCount} in the crate</span>
+        {#if s.tab !== 'discover'}
+          <span style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:var(--text-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{s.currentCount} in the crate</span>
+        {/if}
       </div>
 
       <div style="flex:1; min-height:0; overflow-y:auto; margin-right:-8px; padding-right:8px;">
-        {#if s.currentCount === 0}
+        {#if s.tab === 'discover'}
+          <Discover
+            genres={s.discoverGenres}
+            selectedGenre={s.discoverSelectedGenre}
+            onGenre={(g) => s.setDiscoverGenre(g)}
+            rediscover={s.discoverRediscover}
+            recent={s.discoverRecent}
+            nowPlayingId={np?.id}
+            onAdd={(t) => s.requestTrack(t)}
+            station={s.discoverStation}
+            onStartStation={(g) => s.startStation(g)}
+            onStopStation={() => s.stopStation()}
+          />
+        {:else if s.currentCount === 0}
           <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; padding:70px 20px;">
             <div style="font-family:var(--font-display); font-weight:700; font-size:18px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-muted);">No matches on this side</div>
             <div style="font-family:var(--font-sans); font-size:14px; color:var(--text-faint); max-width:300px;">Nothing in the crate matches that. Try another artist, album, or slot code.</div>

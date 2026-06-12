@@ -1,6 +1,8 @@
 import {
   listTracks, listAlbums, listArtists, getQueue, requestTo, removeRequest,
   setShuffle, subscribeEvents, coverURL, albumCoverURL, HOUSE,
+  discoverGenres, discoverRediscover, discoverRecent,
+  getStation, startStation as apiStartStation, stopStation as apiStopStation,
 } from './api.js';
 import { albumLetter, toneFor, gradientFor } from './format.js';
 
@@ -27,6 +29,13 @@ export function createStore() {
   let progress = $state({ house: 0, me: 0 });   // seconds
   let queues = $state({ house: [], me: [] });
   let listeners = $state({ house: 0, me: 1 });
+
+  // discover state
+  let discoverGenreList = $state([]);     // [{genre, count}]
+  let discoverSelectedGenre = $state('');
+  let discoverRediscoverRows = $state([]);
+  let discoverRecentRows = $state([]);
+  let discoverStation = $state(null);     // {stream_id, genre, threshold, batch} | null
 
   let _uid = 0;
   let _esHouse = null;
@@ -118,6 +127,30 @@ export function createStore() {
     return al ? al.name : '';
   }
 
+  // Enrich a raw discover track (id,title,artist_id,album_id,track_no,duration…)
+  // with the same display fields TrackList/TrackRow expect.
+  function enrichDiscover(t) {
+    return {
+      id: t.id, title: t.title, duration: t.duration || 0,
+      code: codeForTrack(t), artistName: nameForArtist(t.artist_id),
+      albumName: albumNameFor(t.album_id), tone: toneForTrack(t),
+      cover: coverURL(t.id), gradient: gradientFor(t.id),
+    };
+  }
+
+  async function loadDiscoverLists(genre) {
+    const [rd, rc] = await Promise.all([
+      discoverRediscover(genre), discoverRecent(genre),
+    ]);
+    discoverRediscoverRows = (Array.isArray(rd) ? rd : []).map(enrichDiscover);
+    discoverRecentRows = (Array.isArray(rc) ? rc : []).map(enrichDiscover);
+  }
+
+  async function loadStation() {
+    const r = await getStation(stream);
+    discoverStation = r?.genre ? r : null;
+  }
+
   function pushToast(tone, title, message) {
     const id = ++_uid;
     toasts = [...toasts, { id, tone, title, message }];
@@ -164,15 +197,26 @@ export function createStore() {
       return all.filter((t) => match(t.title) || match(t.artistName) || match(t.albumName) || match(t.code));
     },
     get currentCount() {
-      return this.tab === 'albums' ? this.albumCards.length
-        : this.tab === 'artists' ? this.artistRows.length : this.trackRows.length;
+      if (this.tab === 'albums') return this.albumCards.length;
+      if (this.tab === 'artists') return this.artistRows.length;
+      if (this.tab === 'discover') return discoverRediscoverRows.length + discoverRecentRows.length;
+      return this.trackRows.length;
     },
+
+    // discover accessors
+    get discoverGenres() { return discoverGenreList; },
+    get discoverSelectedGenre() { return discoverSelectedGenre; },
+    get discoverRediscover() { return discoverRediscoverRows; },
+    get discoverRecent() { return discoverRecentRows; },
+    get discoverStation() { return discoverStation; },
     get detailAlbum() { return albums.find((a) => a.id === detailAlbumId) || null; },
 
     // ----- actions -----
     async init() {
       await loadLibrary();
       await Promise.all([refreshQueue('house'), refreshQueue('me')]);
+      // Pre-load discover genres (lists load on tab activation via loadDiscover).
+      discoverGenres().then((g) => { discoverGenreList = Array.isArray(g) ? g : []; }).catch(() => {});
       _esHouse = subscribeEvents(HOUSE, (e) => {
         if (e.type === 'now-playing') {
           nowPlaying.house = e.data ? normalizeNP(e.data) : null;
@@ -234,6 +278,28 @@ export function createStore() {
       await removeRequest(stream, item.id);
       await refreshQueue(stream);
     },
+    // discover actions
+    async loadDiscover() {
+      const genres = await discoverGenres();
+      discoverGenreList = Array.isArray(genres) ? genres : [];
+      await Promise.all([loadDiscoverLists(discoverSelectedGenre), loadStation()]);
+    },
+    async setDiscoverGenre(genre) {
+      discoverSelectedGenre = genre;
+      await loadDiscoverLists(genre);
+    },
+    async startStation(genre) {
+      await apiStartStation(stream, genre);
+      await Promise.all([loadStation(), refreshQueue(stream)]);
+      pushToast('cyan', 'Station started', `${genre} radio is now filling the queue.`);
+    },
+    async stopStation() {
+      await apiStopStation(stream);
+      discoverStation = null;
+      await refreshQueue(stream);
+      pushToast('amber', 'Station stopped', 'Genre radio stopped.');
+    },
+
     dismissToast(id) { toasts = toasts.filter((t) => t.id !== id); },
 
     // progress tick (called once/sec by App for the active stream's now-playing)

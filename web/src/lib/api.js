@@ -51,6 +51,35 @@ export async function stopSonos(ip) {
   return r.json();
 }
 
+export async function discoverRediscover(genre = '') {
+  const r = await fetch(`/api/discover/rediscover?genre=${encodeURIComponent(genre)}`);
+  return r.json();
+}
+export async function discoverRecent(genre = '') {
+  const r = await fetch(`/api/discover/recent?genre=${encodeURIComponent(genre)}`);
+  return r.json();
+}
+export async function discoverGenres() {
+  const r = await fetch('/api/discover/genres');
+  return r.json(); // [{genre, count}]
+}
+export async function getStation(streamId) {
+  const r = await fetch(`/api/streams/${streamId}/station`);
+  return r.json(); // {stream_id, genre, threshold, batch} or {}
+}
+export async function startStation(streamId, genre) {
+  const r = await fetch(`/api/streams/${streamId}/station`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ genre }),
+  });
+  return r.json();
+}
+export async function stopStation(streamId) {
+  const r = await fetch(`/api/streams/${streamId}/station`, { method: 'DELETE' });
+  return r.json();
+}
+
 // subscribeEvents opens an SSE connection; onEvent gets parsed {type,data}.
 // Returns a close function.
 export function subscribeEvents(streamId, onEvent) {

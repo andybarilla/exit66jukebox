@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS track (
     track_no   INTEGER NOT NULL DEFAULT 0,
     genre      TEXT NOT NULL DEFAULT '',
     duration   INTEGER NOT NULL DEFAULT 0,
-    play_count INTEGER NOT NULL DEFAULT 0
+    play_count INTEGER NOT NULL DEFAULT 0,
+    added_at   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_track_artist ON track(artist_id);
 CREATE INDEX IF NOT EXISTS idx_track_album  ON track(album_id);
@@ -43,3 +44,9 @@ CREATE TABLE IF NOT EXISTS history (
     played_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_history_stream ON history(stream_id, played_at);
+CREATE TABLE IF NOT EXISTS station (
+    stream_id TEXT PRIMARY KEY REFERENCES stream(id),
+    genre     TEXT NOT NULL,
+    threshold INTEGER NOT NULL,
+    batch     INTEGER NOT NULL
+);
