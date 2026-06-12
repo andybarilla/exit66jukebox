@@ -54,8 +54,8 @@ func UpsertTrack(db *sql.DB, t model.Track, artistName, albumName string) (int64
 		return 0, err
 	}
 	_, err = tx.Exec(
-		`INSERT INTO track(path, mod_time, size, title, artist_id, album_id, track_no, genre, duration)
-		 VALUES(?,?,?,?,?,?,?,?,?)
+		`INSERT INTO track(path, mod_time, size, title, artist_id, album_id, track_no, genre, duration, added_at)
+		 VALUES(?,?,?,?,?,?,?,?,?, strftime('%s','now'))
 		 ON CONFLICT(path) DO UPDATE SET
 		   mod_time=excluded.mod_time, size=excluded.size, title=excluded.title,
 		   artist_id=excluded.artist_id, album_id=excluded.album_id,
