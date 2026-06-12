@@ -21,7 +21,7 @@ func TestScanIndexesAndIsIncremental(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, name), src, 0o644)
 	}
 
-	res, err := Scan(db, []string{dir}, 4)
+	res, err := Scan(db, []string{dir}, 4, nil)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestScanIndexesAndIsIncremental(t *testing.T) {
 		t.Fatalf("expected 2 added, got %d", res.Added)
 	}
 
-	res2, _ := Scan(db, []string{dir}, 4)
+	res2, _ := Scan(db, []string{dir}, 4, nil)
 	if res2.Added != 0 || res2.Updated != 0 {
 		t.Fatalf("expected no changes on re-scan, got added=%d updated=%d",
 			res2.Added, res2.Updated)
@@ -49,7 +49,7 @@ func TestScanStoresDuration(t *testing.T) {
 	src, _ := os.ReadFile("testdata/sample.mp3")
 	os.WriteFile(filepath.Join(dir, "a.mp3"), src, 0o644)
 
-	if _, err := Scan(db, []string{dir}, 2); err != nil {
+	if _, err := Scan(db, []string{dir}, 2, nil); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 	var dur int
@@ -72,12 +72,12 @@ func TestScanReindexesChangedFile(t *testing.T) {
 	p := filepath.Join(dir, "a.mp3")
 	os.WriteFile(p, src, 0o644)
 
-	if res, _ := Scan(db, []string{dir}, 2); res.Added != 1 {
+	if res, _ := Scan(db, []string{dir}, 2, nil); res.Added != 1 {
 		t.Fatalf("expected 1 added, got %d", res.Added)
 	}
 	// Append bytes so size changes and the scanner re-reads it.
 	os.WriteFile(p, append(src, src...), 0o644)
-	res, _ := Scan(db, []string{dir}, 2)
+	res, _ := Scan(db, []string{dir}, 2, nil)
 	if res.Updated != 1 {
 		t.Fatalf("expected 1 updated, got %d (added=%d skipped=%d)",
 			res.Updated, res.Added, res.Skipped)

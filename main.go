@@ -34,11 +34,17 @@ func main() {
 
 	jb := jukebox.New(db, jukebox.Config{HistoryWindow: cfg.HistoryWindow})
 
-	// Initial scan in the background so the server comes up immediately.
+	// Initial scan in the background so the server comes up immediately. The
+	// shared Progress is attached to the API server below so GET /api/scan can
+	// report live status; it stays nil when no library is configured.
+	var scanProgress *scan.Progress
 	if roots := cfg.Library(); len(roots) > 0 {
+		scanProgress = &scan.Progress{}
+		scanProgress.SetRunning(true)
 		go func() {
+			defer scanProgress.SetRunning(false)
 			log.Printf("scanning %v ...", roots)
-			res, err := scan.Scan(db, roots, cfg.ScanWorkers)
+			res, err := scan.Scan(db, roots, cfg.ScanWorkers, scanProgress)
 			if err != nil {
 				log.Printf("scan error: %v", err)
 				return
@@ -95,6 +101,7 @@ func main() {
 	srv := api.NewServer(db, jb, uiFS)
 	srv.SetListenAddr(cfg.Addr)
 	srv.RegisterStream(houseID, houseHub, houseBus)
+	srv.SetScanProgress(scanProgress)
 
 	// MusicBrainz/Cover Art Archive enrichment, triggered via POST /api/enrich.
 	// Covers are cached next to the DB file. ≤1 req/sec, descriptive UA.

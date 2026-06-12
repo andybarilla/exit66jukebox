@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
 	"github.com/andybarilla/exit66jukebox/internal/store"
@@ -32,10 +31,15 @@ type job struct {
 
 // Scan walks the given roots, reads tags from new/changed audio files using
 // `workers` goroutines, and upserts them. Unchanged files (same mod_time and
-// size) are skipped without reading tags.
-func Scan(db *sql.DB, roots []string, workers int) (Result, error) {
+// size) are skipped without reading tags. If p is non-nil its counters are
+// updated live as files are processed, so a concurrent reader can observe
+// progress; pass nil when live progress isn't needed.
+func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) {
 	if workers < 1 {
 		workers = 1
+	}
+	if p == nil {
+		p = &Progress{}
 	}
 	var res Result
 	jobs := make(chan job)
@@ -69,7 +73,6 @@ func Scan(db *sql.DB, roots []string, workers int) (Result, error) {
 		}
 	}()
 
-	var added, updated, skipped, failed int64
 	var wg sync.WaitGroup
 	var mu sync.Mutex // serialize writes (single SQLite writer)
 
@@ -79,12 +82,12 @@ func Scan(db *sql.DB, roots []string, workers int) (Result, error) {
 			defer wg.Done()
 			for j := range jobs {
 				if j.exists {
-					atomic.AddInt64(&skipped, 1)
+					p.skipped.Add(1)
 					continue
 				}
 				meta, err := ReadTags(j.path)
 				if err != nil {
-					atomic.AddInt64(&failed, 1)
+					p.failed.Add(1)
 					continue
 				}
 				tr := model.Track{
@@ -96,22 +99,23 @@ func Scan(db *sql.DB, roots []string, workers int) (Result, error) {
 				_, err = store.UpsertTrack(db, tr, meta.Artist, meta.Album)
 				mu.Unlock()
 				if err != nil {
-					atomic.AddInt64(&failed, 1)
+					p.failed.Add(1)
 					continue
 				}
 				if j.wasIndexed {
-					atomic.AddInt64(&updated, 1)
+					p.updated.Add(1)
 				} else {
-					atomic.AddInt64(&added, 1)
+					p.added.Add(1)
 				}
 			}
 		}()
 	}
 	wg.Wait()
 
-	res.Added = int(added)
-	res.Updated = int(updated)
-	res.Skipped = int(skipped)
-	res.Failed = int(failed)
+	snap := p.Snapshot()
+	res.Added = snap.Added
+	res.Updated = snap.Updated
+	res.Skipped = snap.Skipped
+	res.Failed = snap.Failed
 	return res, walkErr
 }
