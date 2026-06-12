@@ -1,6 +1,9 @@
 package api
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 // enrichStart begins a background enrichment pass (or reports the in-progress
 // one). It always returns the current status; the body's running field tells
@@ -10,7 +13,9 @@ func (s *Server) enrichStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "enrichment not available")
 		return
 	}
-	status, _ := s.enrich.Start(r.Context())
+	// The pass outlives this request, so it must not use the request context
+	// (cancelled the moment the handler returns). Run it on a background context.
+	status, _ := s.enrich.Start(context.Background())
 	writeJSON(w, http.StatusOK, status)
 }
 
