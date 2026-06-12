@@ -22,12 +22,13 @@ func NewMusicBrainz(c *Client) *MB {
 // RecordingMatch is the subset of a recording search hit the enrichment pass
 // uses. Score is MusicBrainz's 0–100 confidence in the match.
 type RecordingMatch struct {
-	Score         int
-	RecordingMBID string
-	ArtistMBID    string
-	ArtistName    string
-	ReleaseMBID   string
-	ReleaseTitle  string
+	Score          int
+	RecordingMBID  string
+	RecordingTitle string
+	ArtistMBID     string
+	ArtistName     string
+	ReleaseMBID    string
+	ReleaseTitle   string
 }
 
 // recordingSearchResponse mirrors the JSON fields we read.
@@ -73,8 +74,9 @@ func (m *MB) SearchRecording(ctx context.Context, artist, title, album string) (
 	}
 	r := resp.Recordings[0]
 	match := RecordingMatch{
-		Score:         r.Score,
-		RecordingMBID: r.ID,
+		Score:          r.Score,
+		RecordingMBID:  r.ID,
+		RecordingTitle: r.Title,
 	}
 	if len(r.ArtistCredit) > 0 {
 		match.ArtistMBID = r.ArtistCredit[0].Artist.ID
