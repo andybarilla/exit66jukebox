@@ -5,11 +5,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/api"
 	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/config"
+	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/events"
+	"github.com/andybarilla/exit66jukebox/internal/external"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/scan"
 	"github.com/andybarilla/exit66jukebox/internal/store"
@@ -91,6 +95,16 @@ func main() {
 	srv := api.NewServer(db, jb, uiFS)
 	srv.SetListenAddr(cfg.Addr)
 	srv.RegisterStream(houseID, houseHub, houseBus)
+
+	// MusicBrainz/Cover Art Archive enrichment, triggered via POST /api/enrich.
+	// Covers are cached next to the DB file. ≤1 req/sec, descriptive UA.
+	coversDir := filepath.Join(filepath.Dir(cfg.DBPath), "covers")
+	if err := os.MkdirAll(coversDir, 0o755); err != nil {
+		log.Fatalf("covers dir: %v", err)
+	}
+	extClient := external.New("exit66jukebox/0.1 (+https://github.com/andybarilla/exit66jukebox)", time.Second)
+	srv.SetEnrichRunner(enrich.NewRunner(db,
+		external.NewMusicBrainz(extClient), external.NewCoverArt(extClient), coversDir))
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, srv.Handler()); err != nil {
 		log.Fatalf("server: %v", err)

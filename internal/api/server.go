@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/andybarilla/exit66jukebox/internal/broadcast"
+	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 )
@@ -21,6 +22,7 @@ type Server struct {
 	listenAddr string // server's own listen addr, for building Sonos-reachable URLs
 	hubs       map[string]*broadcast.Hub
 	buses      map[string]*events.Bus
+	enrich     *enrich.Runner // nil until SetEnrichRunner; endpoints 503 while nil
 
 	// sonosIPs is the allowlist of IPs from the most recent discovery; casts are
 	// restricted to it so an arbitrary ip can't be used to make the server POST
@@ -42,6 +44,10 @@ func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 // URLs can be built from the server's detected IP + this port rather than from
 // the client-controlled Host header.
 func (s *Server) SetListenAddr(addr string) { s.listenAddr = addr }
+
+// SetEnrichRunner attaches the MusicBrainz/CAA enrichment runner that backs the
+// /api/enrich endpoints.
+func (s *Server) SetEnrichRunner(r *enrich.Runner) { s.enrich = r }
 
 // RegisterStream attaches a broadcast hub and event bus for a shared stream id.
 func (s *Server) RegisterStream(id string, hub *broadcast.Hub, bus *events.Bus) {
@@ -81,6 +87,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/discover/rediscover", s.discoverRediscover)
 	mux.HandleFunc("GET /api/discover/recent", s.discoverRecent)
 	mux.HandleFunc("GET /api/discover/genres", s.discoverGenres)
+	mux.HandleFunc("POST /api/enrich", s.enrichStart)
+	mux.HandleFunc("GET /api/enrich", s.enrichStatus)
 	mux.HandleFunc("GET /api/streams/{id}/station", s.getStationHandler)
 	mux.HandleFunc("POST /api/streams/{id}/station", s.startStationHandler)
 	mux.HandleFunc("DELETE /api/streams/{id}/station", s.stopStationHandler)
