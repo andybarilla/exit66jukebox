@@ -1,12 +1,13 @@
 <script>
-  import { toneGradient } from '../format.js';
+  import { toneGradient, keyActivate } from '../format.js';
   let { code = 'A6', title = 'Untitled', artist = 'Unknown', duration = '0:00',
         cover = null, gradient = null, tone = 'magenta', explicit = false,
         playing = false, onAdd, onClick } = $props();
   let artFailed = $state(false);
   const tile = $derived(gradient || toneGradient(tone));
 </script>
-<div class="tr" class:playing onclick={onClick}
+<div class="tr" class:playing
+  {...onClick ? { role: 'button', tabindex: 0, onclick: onClick, onkeydown: keyActivate(onClick) } : {}}
   style="display:flex; align-items:center; gap:14px; padding:10px 12px; border-radius:var(--radius-md); cursor:pointer; transition:background var(--dur) var(--ease-out); border:1px solid {playing ? 'rgba(255,46,136,0.35)' : 'transparent'}; background:{playing ? 'rgba(255,46,136,0.08)' : 'transparent'};">
   <div style="position:relative; width:46px; height:46px; flex:none; border-radius:var(--radius-sm); overflow:hidden; box-shadow:{playing ? 'var(--glow-magenta)' : 'inset 0 0 0 1px rgba(255,255,255,0.08)'}; background:{tile}; display:flex; align-items:flex-end; padding:5px; box-sizing:border-box;">
     {#if cover && !artFailed}
