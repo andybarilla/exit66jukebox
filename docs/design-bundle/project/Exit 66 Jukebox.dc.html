@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/tokens/colors.css">
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/tokens/typography.css">
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/tokens/effects.css">
+<link rel="stylesheet" href="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/styles.css">
+<script src="_ds/exit-66-jukebox-design-system-cf9d108c-de8e-461e-a5c4-554e7ef9d7f7/_ds_bundle.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg-base); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--ink-650); border-radius: 99px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  @keyframes e66-eq { from { transform: scaleY(0.22); } to { transform: scaleY(1); } }
+  @keyframes e66-toast-in { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: translateX(0); } }
+</style>
+</helmet>
+
+<div style="position:relative; height:100vh; width:100%; display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; background:var(--grid-glow), var(--bg-base); font-family:var(--font-sans); color:var(--text-body);">
+
+  <!-- ============ DESKTOP TOP BAR ============ -->
+  <sc-if value="{{ desktop }}" hint-placeholder-val="{{ true }}">
+    <header style="height:62px; flex:none; display:flex; align-items:center; gap:24px; padding:0 24px; border-bottom:1px solid var(--border-default); background:var(--ink-950); z-index:5;">
+      <div style="display:flex; align-items:center; gap:11px; flex:none;">
+        <div style="width:34px; height:34px; flex:none; border-radius:var(--radius-md); border:1.5px solid var(--neon-magenta); box-shadow:0 0 0 2px var(--ink-950),0 0 0 3.5px var(--neon-magenta); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:17px; color:var(--neon-magenta-bright); background:rgba(255,46,136,0.05);">66</div>
+        <div style="font-family:var(--font-display); font-weight:700; font-size:16px; letter-spacing:0.06em; color:var(--text-strong);">EXIT&nbsp;<span style="color:var(--neon-cyan);">66</span></div>
+      </div>
+      <div style="flex:1; max-width:480px; margin:0 auto;">
+        <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Input" value="{{ query }}" onChange="{{ onSearch }}" placeholder="Search the crate — artist, album, track, or slot code…" hint-size="100%,42px"></x-import>
+      </div>
+      <div style="display:flex; align-items:center; gap:14px; flex:none;">
+        <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid var(--border-default); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{{ streamChipLabel }} listening</span>
+        <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Avatar" name="You" ring="cyan" size="sm" hint-size="32px,32px"></x-import>
+      </div>
+    </header>
+  </sc-if>
+
+  <!-- ============ PHONE TOP BAR ============ -->
+  <sc-if value="{{ isPhone }}" hint-placeholder-val="{{ false }}">
+    <header style="flex:none; display:flex; flex-direction:column; gap:10px; padding:12px 14px; border-bottom:1px solid var(--border-default); background:var(--ink-950); z-index:5;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <div style="display:flex; align-items:center; gap:9px;">
+          <div style="width:30px; height:30px; flex:none; border-radius:var(--radius-md); border:1.5px solid var(--neon-magenta); box-shadow:0 0 0 2px var(--ink-950),0 0 0 3px var(--neon-magenta); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:15px; color:var(--neon-magenta-bright);">66</div>
+          <div style="font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:0.06em; color:var(--text-strong);">EXIT&nbsp;<span style="color:var(--neon-cyan);">66</span></div>
+        </div>
+        <button onClick="{{ toggleStreamChip }}" style="display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--bg-surface); font-family:var(--font-mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-body); cursor:pointer; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{{ streamChipLabel }}</button>
+      </div>
+      <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Input" value="{{ query }}" onChange="{{ onSearch }}" placeholder="Search the crate…" hint-size="100%,42px"></x-import>
+    </header>
+  </sc-if>
+
+  <!-- ============ BODY: library + (desktop) rail ============ -->
+  <div style="display:flex; flex:1; min-height:0;">
+
+    <main style="flex:1; min-width:0; display:flex; flex-direction:column; padding:18px 22px; box-sizing:border-box;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:16px;">
+        <div style="display:inline-flex; flex:none; border:1px solid var(--border-strong); border-radius:var(--radius-md); overflow:hidden; height:36px;">
+          <button onClick="{{ tabArtists }}" style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; border:none; cursor:pointer; background:{{ artistsBg }}; color:{{ artistsFg }};">Artists</button>
+          <button onClick="{{ tabAlbums }}" style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; border:none; cursor:pointer; background:{{ albumsBg }}; color:{{ albumsFg }};">Albums</button>
+          <button onClick="{{ tabTracks }}" style="padding:0 16px; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; border:none; cursor:pointer; background:{{ tracksBg }}; color:{{ tracksFg }};">Tracks</button>
+        </div>
+        <span style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:var(--text-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ currentCount }} in the crate</span>
+      </div>
+
+      <div style="flex:1; min-height:0; overflow-y:auto; margin-right:-8px; padding-right:8px;">
+
+        <sc-if value="{{ showAlbums }}" hint-placeholder-val="{{ true }}">
+          <div style="display:grid; grid-template-columns:{{ gridCols }}; gap:14px;">
+            <sc-for list="{{ albumCards }}" as="a" hint-placeholder-count="8">
+              <dc-import name="JukeAlbumCard" title="{{ a.title }}" artist="{{ a.artist }}" meta="{{ a.meta }}" initial="{{ a.initial }}" cover="{{ a.cover }}" on-card-click="{{ a.onOpen }}" on-request="{{ a.onRequest }}" hint-size="100%,210px"></dc-import>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ showArtists }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <sc-for list="{{ artistRows }}" as="ar" hint-placeholder-count="6">
+              <div onClick="{{ ar.onOpen }}" style="display:flex; align-items:center; gap:14px; padding:12px 14px; border:1px solid var(--border-default); border-radius:var(--radius-md); background:var(--bg-surface); cursor:pointer; transition:border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);" style-hover="border-color:var(--neon-magenta); background:var(--bg-surface-hover);">
+                <div style="width:46px; height:46px; flex:none; border-radius:50%; background:{{ ar.cover }}; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:18px; color:rgba(255,255,255,0.9); box-shadow:inset 0 0 0 1px rgba(255,255,255,0.1);">{{ ar.initial }}</div>
+                <div style="flex:1; min-width:0;">
+                  <div style="font-family:var(--font-sans); font-weight:600; font-size:15px; color:var(--text-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ ar.name }}</div>
+                  <div style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.06em; color:var(--text-faint); margin-top:3px; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ ar.meta }}</div>
+                </div>
+                <button onClick="{{ ar.onRequest }}" style="flex:none; height:34px; padding:0 14px; border:1px solid var(--neon-cyan); background:transparent; color:var(--neon-cyan); border-radius:var(--radius-md); cursor:pointer; font-family:var(--font-display); font-weight:600; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap;" style-hover="background:rgba(31,224,255,0.10);">+ Queue all</button>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ showTracks }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <sc-for list="{{ trackRows }}" as="t" hint-placeholder-count="8">
+              <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.TrackRow" code="{{ t.code }}" title="{{ t.title }}" artist="{{ t.artist }}" duration="{{ t.duration }}" art-tone="{{ t.tone }}" explicit="{{ t.explicit }}" playing="{{ t.playing }}" onAdd="{{ t.onAdd }}" hint-size="100%,68px"></x-import>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ noResults }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; padding:70px 20px;">
+            <div style="font-family:var(--font-display); font-weight:700; font-size:18px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-muted);">No matches on this side</div>
+            <div style="font-family:var(--font-sans); font-size:14px; color:var(--text-faint); max-width:300px;">Nothing in the crate matches that. Try another artist, album, or slot code.</div>
+          </div>
+        </sc-if>
+
+      </div>
+    </main>
+
+    <!-- Desktop lineup rail (overlay-styled) -->
+    <sc-if value="{{ showRail }}" hint-placeholder-val="{{ true }}">
+      <aside style="width:328px; flex:none; padding:18px 18px 18px 0; min-height:0; display:flex;">
+        <div style="flex:1; min-height:0; display:flex; background:var(--bg-surface); background-image:var(--scanline); border:1.5px solid var(--neon-magenta); box-shadow:var(--shadow-lg), var(--glow-soft-magenta); border-radius:var(--radius-lg); padding:16px; box-sizing:border-box;">
+          <dc-import name="JukeLineup" style="flex:1; min-height:0;" stream-label="{{ streamLabel }}" listeners="{{ listeners }}" shuffle="{{ shuffle }}" on-toggle-shuffle="{{ toggleShuffle }}" np-title="{{ npTitle }}" np-artist="{{ npArtist }}" np-album="{{ npAlbum }}" np-code="{{ npCode }}" np-cover="{{ npCover }}" np-pct="{{ npPct }}" up-count="{{ upCount }}" queue="{{ queue }}" queue-empty="{{ queueEmpty }}" has-queue="{{ hasQueue }}" is-phone="{{ false }}" hint-size="100%,100%"></dc-import>
+        </div>
+      </aside>
+    </sc-if>
+  </div>
+
+  <!-- ============ DESKTOP PLAYER ============ -->
+  <sc-if value="{{ desktop }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:none; display:flex; align-items:stretch;">
+      <div style="flex:1; min-width:0;">
+        <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.NowPlayingBar" title="{{ npTitle }}" artist="{{ npArtist }}" code="{{ npCode }}" art-tone="{{ npTone }}" current="{{ npCur }}" duration="{{ npDur }}" playing="{{ playing }}" volume="{{ volume }}" onPlayPause="{{ togglePlay }}" onPrev="{{ prev }}" onNext="{{ next }}" onSeek="{{ seek }}" onVolume="{{ setVolume }}" hint-size="100%,84px"></x-import>
+      </div>
+      <div style="width:220px; flex:none; border-top:1px solid var(--border-strong); border-left:1px solid var(--border-default); background:var(--bg-surface-raised); background-image:var(--scanline); display:flex; flex-direction:column; justify-content:center; gap:8px; padding:0 18px; box-sizing:border-box;">
+        <span style="font-family:var(--font-mono); font-size:9px; letter-spacing:0.22em; text-transform:uppercase; color:var(--text-faint);">Stream</span>
+        <div style="display:inline-flex; border:1px solid var(--border-strong); border-radius:var(--radius-sm); overflow:hidden; width:fit-content;">
+          <button onClick="{{ toHouse }}" style="padding:5px 12px; border:none; cursor:pointer; font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; background:{{ houseBg }}; color:{{ houseFg }};">House</button>
+          <button onClick="{{ toPersonal }}" style="padding:5px 12px; border:none; cursor:pointer; font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; background:{{ personalBg }}; color:{{ personalFg }};">Personal</button>
+        </div>
+        <span style="display:inline-flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:10px; letter-spacing:0.1em; color:var(--text-faint);"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{{ listeners }} TUNED IN</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ MOBILE PLAYER ============ -->
+  <sc-if value="{{ isPhone }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:none; position:relative; border-top:1px solid var(--border-strong); background:var(--bg-surface-raised); background-image:var(--scanline);">
+      <div style="position:absolute; top:0; left:0; right:0; height:3px; background:var(--ink-700);"><div style="height:100%; width:{{ npPct }}; background:var(--neon-magenta);"></div></div>
+      <div style="display:flex; align-items:center; gap:12px; padding:11px 14px;">
+        <div style="width:44px; height:44px; flex:none; border-radius:var(--radius-sm); background:{{ npCover }}; display:flex; align-items:flex-end; padding:5px; box-sizing:border-box;"><span style="font-family:var(--font-mono); font-size:9px; font-weight:700; color:rgba(255,255,255,0.85);">{{ npCode }}</span></div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-family:var(--font-sans); font-weight:600; font-size:14px; color:var(--text-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ npTitle }}</div>
+          <div style="font-family:var(--font-sans); font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ npArtist }} · {{ npAlbum }}</div>
+        </div>
+        <button aria-label="Play / pause" onClick="{{ togglePlay }}" style="width:42px; height:42px; flex:none; border-radius:50%; border:none; background:var(--neon-magenta); color:var(--text-on-accent); font-size:18px; cursor:pointer;">{{ playGlyph }}</button>
+        <button aria-label="Next" onClick="{{ next }}" style="width:38px; height:38px; flex:none; border-radius:50%; border:1px solid var(--border-strong); background:transparent; color:var(--text-body); font-size:16px; cursor:pointer;">⏭</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ PHONE LINEUP FAB ============ -->
+  <sc-if value="{{ showFab }}" hint-placeholder-val="{{ false }}">
+    <button onClick="{{ openLineup }}" style="position:absolute; right:16px; bottom:86px; z-index:60; height:46px; padding:0 16px; border-radius:var(--radius-md); background:var(--neon-magenta); color:var(--text-on-accent); border:none; box-shadow:var(--shadow-lg), var(--glow-soft-magenta); font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:0.08em; text-transform:uppercase; display:inline-flex; align-items:center; gap:9px; cursor:pointer;">The Lineup<span style="font-family:var(--font-mono); font-weight:700; font-size:12px; padding:2px 7px; border-radius:var(--radius-sm); background:rgba(11,11,20,0.25);">{{ upCount }}</span></button>
+  </sc-if>
+
+  <!-- ============ PHONE LINEUP SHEET ============ -->
+  <sc-if value="{{ showSheet }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; inset:0; z-index:75; display:flex; flex-direction:column; justify-content:flex-end;">
+      <div onClick="{{ closeLineup }}" style="position:absolute; inset:0; background:rgba(6,6,11,0.72); backdrop-filter:blur(6px);"></div>
+      <div style="position:relative; height:74vh; background:var(--bg-surface); background-image:var(--scanline); border-top:1.5px solid var(--neon-magenta); border-radius:var(--radius-lg) var(--radius-lg) 0 0; padding:18px; box-shadow:var(--shadow-xl); display:flex; box-sizing:border-box;">
+        <dc-import name="JukeLineup" style="flex:1; min-height:0;" stream-label="{{ streamLabel }}" listeners="{{ listeners }}" shuffle="{{ shuffle }}" on-toggle-shuffle="{{ toggleShuffle }}" np-title="{{ npTitle }}" np-artist="{{ npArtist }}" np-album="{{ npAlbum }}" np-code="{{ npCode }}" np-cover="{{ npCover }}" np-pct="{{ npPct }}" up-count="{{ upCount }}" queue="{{ queue }}" queue-empty="{{ queueEmpty }}" has-queue="{{ hasQueue }}" is-phone="{{ true }}" on-close="{{ closeLineup }}" hint-size="100%,100%"></dc-import>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ ALBUM DETAIL DIALOG ============ -->
+  <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Dialog" open="{{ detailOpen }}" onClose="{{ closeAlbum }}" eyebrow="{{ detailEyebrow }}" title="{{ detailTitle }}" hint-size="0,0">
+    <div style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <span style="font-family:var(--font-mono); font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:var(--text-faint);">{{ detailCount }} tracks</span>
+        <button onClick="{{ requestDetailAll }}" style="height:38px; padding:0 18px; border:1.5px solid var(--neon-magenta); background:var(--neon-magenta); color:var(--text-on-accent); border-radius:var(--radius-md); cursor:pointer; font-family:var(--font-display); font-weight:600; font-size:13px; letter-spacing:0.08em; text-transform:uppercase;" style-hover="background:var(--neon-magenta-bright); border-color:var(--neon-magenta-bright);">Queue all</button>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:2px; max-height:336px; overflow-y:auto; margin-right:-6px; padding-right:6px;">
+        <sc-for list="{{ detailTracks }}" as="dt" hint-placeholder-count="5">
+          <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.TrackRow" code="{{ dt.code }}" title="{{ dt.title }}" artist="{{ dt.artist }}" duration="{{ dt.duration }}" art-tone="{{ dt.tone }}" explicit="{{ dt.explicit }}" playing="{{ dt.playing }}" onAdd="{{ dt.onAdd }}" hint-size="100%,68px"></x-import>
+        </sc-for>
+      </div>
+    </div>
+  </x-import>
+
+  <!-- ============ TOASTS ============ -->
+  <div style="position:absolute; top:16px; right:16px; display:flex; flex-direction:column; gap:10px; z-index:95; max-width:320px;">
+    <sc-for list="{{ toasts }}" as="tt" hint-placeholder-count="0">
+      <div style="animation:e66-toast-in .28s var(--ease-out);">
+        <x-import component-from-global-scope="Exit66JukeboxDesignSystem_cf9d10.Toast" tone="{{ tt.tone }}" title="{{ tt.title }}" message="{{ tt.message }}" onClose="{{ tt.onClose }}" hint-size="300px,64px"></x-import>
+      </div>
+    </sc-for>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const cv = (a, b) => `radial-gradient(circle at 28% 22%, rgba(255,255,255,0.16), transparent 46%), linear-gradient(150deg, ${a} 0%, ${b} 100%)`;
+    const rawAlbums = [
+      { L: 'A', title: 'Midnight Loop', artist: 'Neon Saito', genre: 'Synthwave', year: 2087, c1: '#0b2e3a', c2: '#1aa6c2',
+        tracks: [['Midnight Loop', '4:11', false], ['Offramp Mirage', '3:48', false], ['Cassette Sun', '5:02', false], ['Tail Lights', '3:22', false], ['Sodium', '4:40', false]] },
+      { L: 'B', title: 'Chrome Highway', artist: 'The Offramps', genre: 'Darkwave', year: 2086, c1: '#2a0f1f', c2: '#c41e6b',
+        tracks: [['Chrome Highway', '3:52', true], ['Neon Rust', '3:12', false], ['Dead Channel', '4:08', true], ['Hum', '2:58', false], ['Last Exit', '4:31', false]] },
+      { L: 'C', title: 'Sodium Lights', artist: 'Halcyon', genre: 'City Pop', year: 2088, c1: '#2a1d08', c2: '#c98a1e',
+        tracks: [['Sodium Lights', '2:58', false], ['Harbor Drive', '3:40', false], ['Velvet Hours', '4:12', false], ['Coastline', '3:05', false]] },
+      { L: 'D', title: 'After Hours', artist: 'VX', genre: 'Synthwave', year: 2085, c1: '#17112e', c2: '#5e3fd6',
+        tracks: [['After Hours', '3:36', false], ['Lowlight', '4:20', false], ['Pulse Theory', '3:58', false], ['Aftertaste', '4:44', false], ['Closing Time', '5:18', false]] },
+      { L: 'E', title: 'Tail Lights', artist: 'Mira Vale', genre: 'City Pop', year: 2086, c1: '#2a1208', c2: '#b8431e',
+        tracks: [['Tail Lights', '3:48', true], ['Open Road', '3:14', false], ['Rearview', '4:02', false], ['Gasoline Heart', '3:36', false]] },
+      { L: 'F', title: 'Overpass', artist: 'Null Division', genre: 'Darkwave', year: 2087, c1: '#141033', c2: '#3b5bd6',
+        tracks: [['Overpass', '4:27', false], ['Concrete Sky', '3:50', false], ['Signal Loss', '5:11', true], ['Underpass', '4:03', false], ['Gridlock', '3:29', false]] },
+      { L: 'G', title: 'Cassette Ghost', artist: 'Cassette Ghost', genre: 'Lo-Fi Drive', year: 2088, c1: '#0a2230', c2: '#3a6fb0',
+        tracks: [['Static Bloom', '5:02', false], ['Tape Hiss', '3:18', false], ['Ghost Radio', '4:09', false], ['Slow Fade', '4:55', false]] },
+      { L: 'H', title: 'Neon Rust', artist: 'The Offramps', genre: 'Darkwave', year: 2087, c1: '#241024', c2: '#8a1f4a',
+        tracks: [['Neon Rust', '3:12', false], ['Oxide', '3:44', false], ['Corrosion', '4:20', true], ['Red Shift', '3:58', false], ['Patina', '5:06', false]] },
+    ];
+    const tones = ['cyan', 'magenta', 'amber', 'violet', 'amber', 'violet', 'cyan', 'magenta'];
+    const albums = [];
+    let allTracks = [];
+    rawAlbums.forEach((al, ai) => {
+      const cover = cv(al.c1, al.c2);
+      const tone = tones[ai];
+      const tracks = al.tracks.map((t, ti) => ({
+        code: al.L + (ti + 1), title: t[0], duration: t[1], explicit: t[2],
+        artist: al.artist, album: al.title, tone, cover, year: al.year, genre: al.genre,
+      }));
+      albums.push({ id: al.L, title: al.title, artist: al.artist, genre: al.genre, year: al.year, tone, cover, initial: al.title[0], tracks });
+      allTracks = allTracks.concat(tracks);
+    });
+    const amap = {};
+    albums.forEach((al) => {
+      if (!amap[al.artist]) amap[al.artist] = { name: al.artist, genre: al.genre, tone: al.tone, cover: al.cover, albums: [], tracks: [] };
+      amap[al.artist].albums.push(al);
+      amap[al.artist].tracks = amap[al.artist].tracks.concat(al.tracks);
+    });
+    this.albums = albums;
+    this.allTracks = allTracks;
+    this.artists = Object.values(amap);
+    const byCode = {};
+    allTracks.forEach((t) => { byCode[t.code] = t; });
+    this.byCode = byCode;
+
+    let uid = 100;
+    const mq = (code, req) => ({ ...byCode[code], requester: req, uid: ++uid });
+    this.state = {
+      tab: 'albums', query: '', stream: 'house', shuffle: false,
+      playing: true, volume: 68, isPhone: false, lineupOpen: false, detailId: null, toasts: [],
+      streams: {
+        house: { label: 'House', listeners: 4, np: byCode['A1'], current: 142,
+          queue: [mq('B1', 'Mira'), mq('D1', 'Dad'), mq('C1', 'Jules'), mq('F3', 'Andre')] },
+        personal: { label: 'Personal', listeners: 1, np: byCode['G1'], current: 36,
+          queue: [mq('H2', 'You')] },
+      },
+    };
+    this._uid = uid;
+  }
+
+  toSec(s) { if (typeof s === 'number') return s; const p = String(s).split(':'); return (+p[0]) * 60 + (+p[1]); }
+
+  componentDidMount() {
+    this.onResize();
+    this._rs = () => this.onResize();
+    window.addEventListener('resize', this._rs);
+    this.timer = setInterval(() => {
+      const st = this.state;
+      if (!st.playing) return;
+      const s = st.streams[st.stream];
+      const dur = this.toSec(s.np.duration);
+      if (s.current + 1 >= dur) this.adv();
+      else this.updateStream((x) => ({ ...x, current: x.current + 1 }));
+    }, 1000);
+  }
+  componentWillUnmount() { clearInterval(this.timer); window.removeEventListener('resize', this._rs); }
+
+  onResize() { const ph = window.innerWidth < 760; this.setState((st) => ({ isPhone: ph, lineupOpen: ph ? st.lineupOpen : false })); }
+
+  updateStream(mut) { this.setState((st) => ({ streams: { ...st.streams, [st.stream]: mut(st.streams[st.stream]) } })); }
+
+  adv() {
+    this.setState((st) => {
+      const s = st.streams[st.stream];
+      const dur = this.toSec(s.np.duration);
+      if (!s.queue.length) return { playing: false, streams: { ...st.streams, [st.stream]: { ...s, current: dur } } };
+      const idx = st.shuffle ? Math.floor(Math.random() * s.queue.length) : 0;
+      const nx = s.queue[idx];
+      const nq = s.queue.filter((_, i) => i !== idx);
+      return { playing: true, streams: { ...st.streams, [st.stream]: { ...s, np: nx, current: 0, queue: nq } } };
+    });
+  }
+
+  makeQ(t, who) { return { ...t, requester: who || 'You', uid: ++this._uid }; }
+  request(tracks, who) { const arr = Array.isArray(tracks) ? tracks : [tracks]; this.updateStream((s) => ({ ...s, queue: [...s.queue, ...arr.map((t) => this.makeQ(t, who))] })); }
+  requestTrack(t) { this.request(t, 'You'); this.pushToast('success', 'Queued', `${t.title} joined the lineup.`); }
+  requestAlbum(al) { this.request(al.tracks, 'You'); this.pushToast('success', 'Queued', `${al.title} — ${al.tracks.length} tracks on the way.`); }
+  requestArtist(ar) { this.request(ar.tracks, 'You'); this.pushToast('success', 'Queued', `${ar.name} — ${ar.tracks.length} tracks on the way.`); }
+  removeFromQueue(uid) { this.updateStream((s) => ({ ...s, queue: s.queue.filter((q) => q.uid !== uid) })); }
+
+  pushToast(tone, title, message) {
+    const id = ++this._uid;
+    this.setState((st) => ({ toasts: [...st.toasts, { id, tone, title, message }] }));
+    setTimeout(() => this.setState((st) => ({ toasts: st.toasts.filter((t) => t.id !== id) })), 3400);
+  }
+
+  switchStream(s) { if (s === this.state.stream) return; this.setState({ stream: s }); this.pushToast('cyan', 'Stream', s === 'house' ? 'Tuned in to the house stream — everyone hears this.' : 'Switched to your personal stream.'); }
+  toggleShuffle(v) { this.setState((st) => ({ shuffle: typeof v === 'boolean' ? v : !st.shuffle })); }
+  setTab(tab) { this.setState({ tab }); }
+  onSearch(e) { this.setState({ query: e.target.value }); }
+  openArtist(ar) { this.setState({ tab: 'tracks', query: ar.name }); }
+  openAlbum(al) { this.setState({ detailId: al.id }); }
+  closeAlbum() { this.setState({ detailId: null }); }
+  togglePlay() { this.setState((st) => ({ playing: !st.playing })); }
+  prev() { this.updateStream((s) => ({ ...s, current: 0 })); }
+  seek(frac) { this.updateStream((s) => ({ ...s, current: Math.round(frac * this.toSec(s.np.duration)) })); }
+  setVolume(v) { this.setState({ volume: v }); }
+  openLineup() { this.setState({ lineupOpen: true }); }
+  closeLineup() { this.setState({ lineupOpen: false }); }
+
+  renderVals() {
+    const st = this.state;
+    const q = st.query.trim().toLowerCase();
+    const active = st.streams[st.stream];
+    const np = active.np;
+    const durSec = this.toSec(np.duration);
+    const curSec = Math.min(active.current, durSec);
+    const pct = durSec ? (curSec / durSec * 100) : 0;
+    const match = (s) => !q || String(s).toLowerCase().includes(q);
+
+    const albumCards = this.albums.filter((a) => match(a.title) || match(a.artist) || match(a.genre)).map((a) => ({
+      title: a.title, artist: a.artist, initial: a.initial, cover: a.cover, meta: `${a.tracks.length} tracks · ${a.year}`,
+      onOpen: () => this.openAlbum(a),
+      onRequest: (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.requestAlbum(a); },
+    }));
+    const artistRows = this.artists.filter((a) => match(a.name) || match(a.genre)).map((a) => ({
+      name: a.name, initial: a.name[0], cover: a.cover, meta: `${a.albums.length} albums · ${a.tracks.length} tracks · ${a.genre}`,
+      onOpen: () => this.openArtist(a),
+      onRequest: (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.requestArtist(a); },
+    }));
+    const trackRows = this.allTracks.filter((t) => match(t.title) || match(t.artist) || match(t.album) || match(t.code)).map((t) => ({
+      code: t.code, title: t.title, artist: t.artist, duration: t.duration, tone: t.tone, explicit: !!t.explicit,
+      playing: t.code === np.code, onAdd: () => this.requestTrack(t),
+    }));
+
+    const counts = { albums: albumCards.length, artists: artistRows.length, tracks: trackRows.length };
+    const currentCount = st.tab === 'albums' ? counts.albums : st.tab === 'artists' ? counts.artists : counts.tracks;
+    const noResults = currentCount === 0;
+
+    const queue = active.queue.map((item, i) => ({ ...item, pos: i + 1, onRemove: () => this.removeFromQueue(item.uid) }));
+
+    const detailAlbum = st.detailId != null ? this.albums.find((a) => a.id === st.detailId) : null;
+    const detailTracks = detailAlbum ? detailAlbum.tracks.map((t) => ({ code: t.code, title: t.title, artist: t.artist, duration: t.duration, tone: t.tone, explicit: !!t.explicit, playing: t.code === np.code, onAdd: () => this.requestTrack(t) })) : [];
+
+    const toasts = st.toasts.map((t) => ({ ...t, onClose: () => this.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== t.id) })) }));
+
+    const a = (on, c) => (on ? c : 'transparent');
+    const f = (on) => (on ? 'var(--text-on-accent)' : 'var(--text-muted)');
+
+    return {
+      isPhone: st.isPhone, desktop: !st.isPhone, showRail: !st.isPhone,
+      showSheet: st.isPhone && st.lineupOpen, showFab: st.isPhone,
+      tab: st.tab, query: st.query,
+      tabAlbums: () => this.setTab('albums'), tabArtists: () => this.setTab('artists'), tabTracks: () => this.setTab('tracks'),
+      onSearch: (e) => this.onSearch(e),
+      albumsBg: a(st.tab === 'albums', 'var(--neon-amber)'), albumsFg: f(st.tab === 'albums'),
+      artistsBg: a(st.tab === 'artists', 'var(--neon-amber)'), artistsFg: f(st.tab === 'artists'),
+      tracksBg: a(st.tab === 'tracks', 'var(--neon-amber)'), tracksFg: f(st.tab === 'tracks'),
+      albumCards, artistRows, trackRows,
+      showAlbums: st.tab === 'albums' && !noResults,
+      showArtists: st.tab === 'artists' && !noResults,
+      showTracks: st.tab === 'tracks' && !noResults,
+      noResults, currentCount,
+      gridCols: 'repeat(auto-fill, minmax(150px, 1fr))',
+      npTitle: np.title, npArtist: np.artist, npAlbum: np.album, npCode: np.code, npTone: np.tone, npCover: np.cover,
+      npCur: curSec, npDur: durSec, npPct: pct + '%', playGlyph: st.playing ? '❚❚' : '▶',
+      playing: st.playing, volume: st.volume,
+      togglePlay: () => this.togglePlay(), prev: () => this.prev(), next: () => this.adv(), seek: (fr) => this.seek(fr), setVolume: (v) => this.setVolume(v),
+      streamLabel: active.label, listeners: active.listeners, streamChipLabel: `${active.label} · ${active.listeners}`,
+      shuffle: st.shuffle, toggleShuffle: (v) => this.toggleShuffle(v),
+      queue, upCount: queue.length, queueEmpty: queue.length === 0, hasQueue: queue.length > 0,
+      openLineup: () => this.openLineup(), closeLineup: () => this.closeLineup(),
+      houseBg: a(st.stream === 'house', 'var(--neon-cyan)'), houseFg: f(st.stream === 'house'),
+      personalBg: a(st.stream === 'personal', 'var(--neon-cyan)'), personalFg: f(st.stream === 'personal'),
+      toHouse: () => this.switchStream('house'), toPersonal: () => this.switchStream('personal'),
+      toggleStreamChip: () => this.switchStream(st.stream === 'house' ? 'personal' : 'house'),
+      detailOpen: !!detailAlbum, detailTitle: detailAlbum ? detailAlbum.title : '',
+      detailEyebrow: detailAlbum ? `${detailAlbum.artist} · ${detailAlbum.year}` : '',
+      detailTracks, detailCount: detailTracks.length,
+      closeAlbum: () => this.closeAlbum(),
+      requestDetailAll: () => { if (detailAlbum) this.requestAlbum(detailAlbum); },
+      toasts,
+    };
+  }
+}
+</script>
+</body>
+</html>

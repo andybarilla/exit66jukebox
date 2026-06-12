@@ -49,6 +49,15 @@ func (s *Server) RegisterStream(id string, hub *broadcast.Hub, bus *events.Bus) 
 	s.buses[id] = bus
 }
 
+// listenerCount returns connected listeners for a registered shared stream, or
+// 0 for private streams with no hub.
+func (s *Server) listenerCount(streamID string) int {
+	if hub, ok := s.hubs[streamID]; ok {
+		return hub.ListenerCount()
+	}
+	return 0
+}
+
 // Handler returns the routed mux. Handlers live in sibling files.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -60,6 +69,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/streams/{id}/requests", s.request)
 	mux.HandleFunc("DELETE /api/streams/{id}/requests/{trackID}", s.removeRequest)
 	mux.HandleFunc("DELETE /api/streams/{id}/requests", s.clearRequests)
+	mux.HandleFunc("POST /api/streams/{id}/shuffle", s.setShuffle)
 	mux.HandleFunc("GET /api/tracks/{id}/audio", s.trackAudio)
 	mux.HandleFunc("GET /api/tracks/{id}/cover", s.trackCover)
 	mux.HandleFunc("GET /api/albums/{id}/cover", s.albumCover)

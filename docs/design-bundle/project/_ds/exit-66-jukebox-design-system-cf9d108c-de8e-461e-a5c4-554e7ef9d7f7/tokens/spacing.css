@@ -1,0 +1,33 @@
+/* Exit 66 Jukebox — Spacing & Layout
+   4px base grid. */
+
+:root {
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+  --space-11: 80px;
+  --space-12: 96px;
+  --space-13: 128px;
+
+  /* Containers */
+  --container-sm: 640px;
+  --container-md: 880px;
+  --container-lg: 1120px;
+  --container-xl: 1360px;
+
+  /* Component sizing */
+  --control-h-sm: 32px;
+  --control-h-md: 42px;
+  --control-h-lg: 54px;
+
+  --gutter: var(--space-6);
+  --section-y: var(--space-12);
+}

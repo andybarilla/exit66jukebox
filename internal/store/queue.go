@@ -45,19 +45,29 @@ func Enqueue(db *sql.DB, streamID string, trackID int64, addedBy string) error {
 	return err
 }
 
-// PopNext removes and returns the next track id in play order, records it in
-// history, and bumps its play count — all atomically. Returns ok=false if the
-// queue is empty or the transaction fails.
+// PopNext removes and returns the next track id in play order (FIFO).
 func PopNext(db *sql.DB, streamID string) (trackID int64, ok bool) {
+	return popWith(db, streamID,
+		`SELECT track_id FROM queue_item WHERE stream_id=? ORDER BY play_order LIMIT 1`)
+}
+
+// PopNextShuffle removes and returns a random queued track id.
+func PopNextShuffle(db *sql.DB, streamID string) (trackID int64, ok bool) {
+	return popWith(db, streamID,
+		`SELECT track_id FROM queue_item WHERE stream_id=? ORDER BY RANDOM() LIMIT 1`)
+}
+
+// popWith pops the row chosen by selectSQL, recording history and bumping the
+// play count atomically. selectSQL must take a single stream_id parameter and
+// return one track_id.
+func popWith(db *sql.DB, streamID, selectSQL string) (trackID int64, ok bool) {
 	tx, err := db.Begin()
 	if err != nil {
 		return 0, false
 	}
 	defer tx.Rollback()
 
-	if err := tx.QueryRow(
-		`SELECT track_id FROM queue_item WHERE stream_id=? ORDER BY play_order LIMIT 1`,
-		streamID).Scan(&trackID); err != nil {
+	if err := tx.QueryRow(selectSQL, streamID).Scan(&trackID); err != nil {
 		return 0, false
 	}
 	if _, err := tx.Exec(`DELETE FROM queue_item WHERE stream_id=? AND track_id=?`,
@@ -90,6 +100,31 @@ func RemoveFromQueue(db *sql.DB, streamID string, trackID int64) error {
 func ClearQueue(db *sql.DB, streamID string) error {
 	_, err := db.Exec(`DELETE FROM queue_item WHERE stream_id=?`, streamID)
 	return err
+}
+
+// QueuedRow is a queued track id paired with who requested it, in play order.
+type QueuedRow struct {
+	TrackID     int64
+	RequestedBy string
+}
+
+// QueueWithRequester returns the queued rows (track id + requester) in play order.
+func QueueWithRequester(db *sql.DB, streamID string) ([]QueuedRow, error) {
+	rows, err := db.Query(
+		`SELECT track_id, added_by FROM queue_item WHERE stream_id=? ORDER BY play_order`, streamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []QueuedRow
+	for rows.Next() {
+		var r QueuedRow
+		if err := rows.Scan(&r.TrackID, &r.RequestedBy); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // QueueTrackIDs returns the queued track ids in play order.

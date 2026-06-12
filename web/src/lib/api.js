@@ -1,7 +1,13 @@
 const SESSION = 'me'; // single private stream id for v1; replaced by real session later
 
+// The library is loaded once and filtered client-side, so request the whole
+// collection. The cap is high enough to cover a large home library; tracks,
+// albums and artists must share the same ceiling or a track whose album fell
+// outside the cap would be dropped from the grouped view.
+const LIBRARY_LIMIT = 100000;
+
 export async function listTracks(search = '') {
-  const r = await fetch(`/api/tracks?search=${encodeURIComponent(search)}`);
+  const r = await fetch(`/api/tracks?search=${encodeURIComponent(search)}&limit=${LIBRARY_LIMIT}`);
   return r.json();
 }
 export async function requestTrack(trackId) {
@@ -18,12 +24,6 @@ export function audioURL(trackId) {
 }
 
 export const HOUSE = 'house';
-
-export async function requestTo(streamId, trackId) {
-  const body = new URLSearchParams({ kind: 'track', id: String(trackId) });
-  const r = await fetch(`/api/streams/${streamId}/requests`, { method: 'POST', body });
-  return r.json();
-}
 
 export async function getQueue(streamId) {
   const r = await fetch(`/api/streams/${streamId}`);
@@ -89,3 +89,32 @@ export function subscribeEvents(streamId, onEvent) {
   };
   return () => es.close();
 }
+
+export async function listArtists(search = '') {
+  const r = await fetch(`/api/artists?search=${encodeURIComponent(search)}&limit=${LIBRARY_LIMIT}`);
+  return r.json();
+}
+export async function listAlbums(search = '') {
+  const r = await fetch(`/api/albums?search=${encodeURIComponent(search)}&limit=${LIBRARY_LIMIT}`);
+  return r.json();
+}
+
+// requestTo sends the requester name and a kind (track|album|artist).
+export async function requestTo(streamId, id, { kind = 'track', by = 'You' } = {}) {
+  const body = new URLSearchParams({ kind, id: String(id), by });
+  const r = await fetch(`/api/streams/${streamId}/requests`, { method: 'POST', body });
+  return r.json();
+}
+
+export async function removeRequest(streamId, trackId) {
+  const r = await fetch(`/api/streams/${streamId}/requests/${trackId}`, { method: 'DELETE' });
+  return r.json();
+}
+
+export async function setShuffle(streamId, on) {
+  const body = new URLSearchParams({ value: on ? 'true' : 'false' });
+  const r = await fetch(`/api/streams/${streamId}/shuffle`, { method: 'POST', body });
+  return r.json();
+}
+
+export function albumCoverURL(albumId) { return `/api/albums/${albumId}/cover`; }

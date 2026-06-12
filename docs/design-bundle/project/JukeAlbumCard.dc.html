@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div onClick="{{ onCardClick }}" style="position:relative; background:var(--bg-surface); background-image:var(--scanline); border:1px solid var(--border-default); border-radius:var(--radius-lg); overflow:hidden; cursor:pointer; transition:border-color var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);" style-hover="border-color:var(--neon-magenta); transform:translateY(-2px);">
+  <div style="position:relative; aspect-ratio:1 / 1; background:{{ cover }};">
+    <span style="position:absolute; top:9px; left:10px; font-family:var(--font-mono); font-size:9px; letter-spacing:0.18em; color:rgba(246,243,235,0.62); text-transform:uppercase;">Art</span>
+    <span style="position:absolute; left:50%; top:48%; transform:translate(-50%,-50%); font-family:var(--font-display); font-weight:700; font-size:72px; line-height:1; color:rgba(255,255,255,0.15);">{{ initial }}</span>
+    <button aria-label="Request album" onClick="{{ onRequest }}" style="position:absolute; right:10px; bottom:10px; width:32px; height:32px; border-radius:var(--radius-md); border:1.5px solid var(--neon-magenta); background:var(--neon-magenta); color:var(--text-on-accent); font-size:19px; line-height:1; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; box-shadow:var(--shadow-sm);" style-hover="background:var(--neon-magenta-bright);">+</button>
+  </div>
+  <div style="padding:11px 13px 13px;">
+    <div style="font-family:var(--font-sans); font-weight:600; font-size:14px; color:var(--text-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ title }}</div>
+    <div style="font-family:var(--font-sans); font-size:13px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px;">{{ artist }}</div>
+    <div style="font-family:var(--font-mono); font-size:10px; letter-spacing:0.13em; color:var(--text-faint); margin-top:9px; text-transform:uppercase;">{{ meta }}</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:200,&quot;height&quot;:214},&quot;title&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Midnight Loop&quot;},&quot;artist&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Neon Saito&quot;},&quot;meta&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;9 tracks · 2087&quot;},&quot;initial&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;M&quot;},&quot;cover&quot;:{&quot;editor&quot;:null,&quot;default&quot;:&quot;radial-gradient(circle at 28% 22%, rgba(255,255,255,0.16), transparent 46%), linear-gradient(150deg, #0b2e3a 0%, #1aa6c2 100%)&quot;}}"></script>
+</body>
+</html>

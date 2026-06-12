@@ -1,0 +1,80 @@
+/* Exit 66 Jukebox — Color System
+   Neon-noir: deep blue-black surfaces lit by jukebox neon.
+   Base ramps first, semantic aliases below. */
+
+:root {
+  /* ---- INK · backgrounds (cool blue-black) ---- */
+  --ink-980: #06060B;
+  --ink-950: #08080F;
+  --ink-900: #0B0B14;
+  --ink-850: #10101B;
+  --ink-800: #161622;
+  --ink-750: #1C1C2B;
+  --ink-700: #232334;
+  --ink-650: #2C2C40;
+  --ink-600: #38384F;
+
+  /* ---- HAIRLINES ---- */
+  --line-soft: rgba(245, 242, 234, 0.07);
+  --line: rgba(245, 242, 234, 0.12);
+  --line-strong: rgba(245, 242, 234, 0.20);
+
+  /* ---- PAPER · text on dark (warm whites/greys) ---- */
+  --paper-100: #F6F3EB;
+  --paper-200: #D7D3E0;
+  --paper-300: #ABA8BD;
+  --paper-400: #7E7B92;
+  --paper-500: #5A5870;
+
+  /* ---- NEON · brand accents ---- */
+  /* Magenta — the primary jukebox neon */
+  --neon-magenta-bright: #FF52A2;
+  --neon-magenta: #FF2E88;
+  --neon-magenta-deep: #D11468;
+  /* Cyan — electric secondary */
+  --neon-cyan-bright: #6BEBFF;
+  --neon-cyan: #1FE0FF;
+  --neon-cyan-deep: #0FA8C4;
+  /* Amber — Route 66 warmth, highway sign */
+  --neon-amber-bright: #FFC85C;
+  --neon-amber: #FFB02E;
+  --neon-amber-deep: #D98A12;
+  /* Violet — tertiary */
+  --neon-violet: #8A6CFF;
+  --neon-violet-deep: #5E3FD6;
+
+  /* ---- STATUS ---- */
+  --status-success: #3DF59B;
+  --status-success-deep: #16B86C;
+  --status-warning: #FFB02E;
+  --status-danger: #FF4D5E;
+  --status-danger-deep: #D42234;
+
+  /* ---- SEMANTIC ALIASES ---- */
+  --bg-base: var(--ink-950);
+  --bg-sunken: var(--ink-980);
+  --bg-surface: var(--ink-850);
+  --bg-surface-raised: var(--ink-800);
+  --bg-surface-hover: var(--ink-750);
+  --bg-inset: var(--ink-900);
+
+  --text-strong: var(--paper-100);
+  --text-body: var(--paper-200);
+  --text-muted: var(--paper-300);
+  --text-faint: var(--paper-400);
+  --text-disabled: var(--paper-500);
+
+  --border-subtle: var(--line-soft);
+  --border-default: var(--line);
+  --border-strong: var(--line-strong);
+
+  --accent: var(--neon-magenta);
+  --accent-hover: var(--neon-magenta-bright);
+  --accent-press: var(--neon-magenta-deep);
+  --accent-2: var(--neon-cyan);
+  --accent-3: var(--neon-amber);
+
+  --text-on-accent: #0B0B14;
+
+  --focus-ring: var(--neon-cyan);
+}
