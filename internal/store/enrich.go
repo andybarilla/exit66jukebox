@@ -85,30 +85,31 @@ func ApplyEnrichment(db *sql.DB, e Enrichment) error {
 	if _, err := tx.Exec(`UPDATE track SET mbid = ? WHERE id = ?`, e.RecordingMBID, e.TrackID); err != nil {
 		return err
 	}
-	if e.ArtistMBID != "" {
-		if _, err := tx.Exec(
-			`UPDATE artist SET mbid = ? WHERE id = ? AND mbid = ''`, e.ArtistMBID, e.ArtistID); err != nil {
-			return err
-		}
-	}
-	if e.ReleaseMBID != "" {
-		if _, err := tx.Exec(
-			`UPDATE album SET mbid = ? WHERE id = ? AND mbid = ''`, e.ReleaseMBID, e.AlbumID); err != nil {
-			return err
-		}
-	}
 
-	// Artist rename: only if currently the placeholder and no name collision
-	// (artist.name is UNIQUE).
-	if e.NewArtist != "" {
-		var cur string
-		if err := tx.QueryRow(`SELECT name FROM artist WHERE id = ?`, e.ArtistID).Scan(&cur); err != nil {
-			return err
+	// Scan collapses every untagged track onto one shared "Unknown Artist" /
+	// "Unknown Album" row, so a placeholder row may be referenced by tracks that
+	// are actually different artists/albums. Stamping or renaming it from one
+	// track's match would mis-attribute its siblings. So a placeholder row is
+	// only touched when this track is its sole reference; a real (non-placeholder)
+	// name is safe to stamp regardless of how many tracks share it (they are
+	// genuinely that artist/album). Row *splitting* is out of scope (#38).
+
+	// Artist.
+	var curArtist string
+	if err := tx.QueryRow(`SELECT name FROM artist WHERE id = ?`, e.ArtistID).Scan(&curArtist); err != nil {
+		return err
+	}
+	if safe, err := safeToTouch(tx, curArtist == placeholderArtist, "artist_id", e.ArtistID); err != nil {
+		return err
+	} else if safe {
+		if e.ArtistMBID != "" {
+			if _, err := tx.Exec(`UPDATE artist SET mbid = ? WHERE id = ? AND mbid = ''`, e.ArtistMBID, e.ArtistID); err != nil {
+				return err
+			}
 		}
-		if cur == placeholderArtist {
+		if curArtist == placeholderArtist && e.NewArtist != "" {
 			var clash int
-			if err := tx.QueryRow(
-				`SELECT count(*) FROM artist WHERE name = ? AND id != ?`, e.NewArtist, e.ArtistID).Scan(&clash); err != nil {
+			if err := tx.QueryRow(`SELECT count(*) FROM artist WHERE name = ? AND id != ?`, e.NewArtist, e.ArtistID).Scan(&clash); err != nil {
 				return err
 			}
 			if clash == 0 {
@@ -119,13 +120,20 @@ func ApplyEnrichment(db *sql.DB, e Enrichment) error {
 		}
 	}
 
-	// Album rename: only if placeholder and no collision (UNIQUE(name, artist_id)).
-	if e.NewAlbum != "" {
-		var cur string
-		if err := tx.QueryRow(`SELECT name FROM album WHERE id = ?`, e.AlbumID).Scan(&cur); err != nil {
-			return err
+	// Album (UNIQUE is on name + artist_id).
+	var curAlbum string
+	if err := tx.QueryRow(`SELECT name FROM album WHERE id = ?`, e.AlbumID).Scan(&curAlbum); err != nil {
+		return err
+	}
+	if safe, err := safeToTouch(tx, curAlbum == placeholderAlbum, "album_id", e.AlbumID); err != nil {
+		return err
+	} else if safe {
+		if e.ReleaseMBID != "" {
+			if _, err := tx.Exec(`UPDATE album SET mbid = ? WHERE id = ? AND mbid = ''`, e.ReleaseMBID, e.AlbumID); err != nil {
+				return err
+			}
 		}
-		if cur == placeholderAlbum {
+		if curAlbum == placeholderAlbum && e.NewAlbum != "" {
 			var clash int
 			if err := tx.QueryRow(
 				`SELECT count(*) FROM album WHERE name = ? AND artist_id = ? AND id != ?`,
@@ -154,6 +162,22 @@ func ApplyEnrichment(db *sql.DB, e Enrichment) error {
 	}
 
 	return tx.Commit()
+}
+
+// safeToTouch reports whether an artist/album row may be stamped or renamed. A
+// real (non-placeholder) name is always safe. A placeholder row is safe only
+// when a single track references it (refCol is "artist_id" or "album_id"),
+// since the scanner shares one placeholder row across all untagged tracks.
+func safeToTouch(tx *sql.Tx, placeholder bool, refCol string, id int64) (bool, error) {
+	if !placeholder {
+		return true, nil
+	}
+	var refs int
+	// refCol is a fixed local literal, never user input.
+	if err := tx.QueryRow(`SELECT count(*) FROM track WHERE `+refCol+` = ?`, id).Scan(&refs); err != nil {
+		return false, err
+	}
+	return refs <= 1, nil
 }
 
 // SetAlbumCover records a cached cover-image path on an album.

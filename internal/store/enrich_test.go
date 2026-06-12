@@ -162,6 +162,54 @@ func TestApplyEnrichmentUniqueCollisionKeepsMBID(t *testing.T) {
 	}
 }
 
+func TestApplyEnrichmentSkipsSharedPlaceholderRow(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+
+	// Two untagged tracks collapse onto one shared "Unknown Artist"/"Unknown
+	// Album" row (scan keys artist by name, album by name+artist). Enriching one
+	// must not rename or stamp the shared row, or it mis-attributes the sibling.
+	arID, alID, trA := seedEnrichTrack(t, db, "Unknown Artist", "Unknown Album", "a.mp3", "/m/a.mp3")
+	resB, err := db.Exec(
+		`INSERT INTO track(path, mod_time, size, title, artist_id, album_id) VALUES('/m/b.mp3', 1, 1, 'b.mp3', ?, ?)`,
+		arID, alID)
+	if err != nil {
+		t.Fatalf("track B: %v", err)
+	}
+	trB, _ := resB.LastInsertId()
+
+	e := Enrichment{
+		TrackID: trA, ArtistID: arID, AlbumID: alID, Path: "/m/a.mp3",
+		RecordingMBID: "rec1", ArtistMBID: "art1", ReleaseMBID: "rel1",
+		NewTitle: "Karma Police", NewArtist: "Radiohead", NewAlbum: "OK Computer",
+	}
+	if err := ApplyEnrichment(db, e); err != nil {
+		t.Fatalf("ApplyEnrichment: %v", err)
+	}
+
+	// The shared artist/album row is untouched (name + mbid).
+	var name, mbid string
+	db.QueryRow(`SELECT name, mbid FROM artist WHERE id = ?`, arID).Scan(&name, &mbid)
+	if name != "Unknown Artist" || mbid != "" {
+		t.Errorf("shared artist = %q/%q, want Unknown Artist/'' (untouched)", name, mbid)
+	}
+	db.QueryRow(`SELECT name, mbid FROM album WHERE id = ?`, alID).Scan(&name, &mbid)
+	if name != "Unknown Album" || mbid != "" {
+		t.Errorf("shared album = %q/%q, want Unknown Album/'' (untouched)", name, mbid)
+	}
+	// But the per-track recording mbid and title still apply to track A only.
+	var title string
+	db.QueryRow(`SELECT mbid, title FROM track WHERE id = ?`, trA).Scan(&mbid, &title)
+	if mbid != "rec1" || title != "Karma Police" {
+		t.Errorf("track A = %q/%q, want rec1/Karma Police", mbid, title)
+	}
+	// Track B is left entirely for its own future match.
+	db.QueryRow(`SELECT mbid, title FROM track WHERE id = ?`, trB).Scan(&mbid, &title)
+	if mbid != "" || title != "b.mp3" {
+		t.Errorf("sibling track B = %q/%q, want ''/b.mp3 (unaffected)", mbid, title)
+	}
+}
+
 func TestApplyEnrichmentIdempotent(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()
