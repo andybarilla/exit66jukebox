@@ -14,6 +14,18 @@ export function fmt(sec) {
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
+// compareNames orders artist/album names by library alphabetization rules:
+// a leading "The"/"A"/"An" article and any leading punctuation are dropped from
+// the sort key, and comparison is case- and accent-insensitive with natural
+// numeric ordering ("Album 2" before "Album 10").
+const ARTICLE = /^(the|a|an)\s+/i;
+function sortName(s) {
+  return (s || '').replace(/^[^\p{L}\p{N}]+/u, '').replace(ARTICLE, '');
+}
+export function compareNames(a, b) {
+  return sortName(a).localeCompare(sortName(b), undefined, { sensitivity: 'base', numeric: true });
+}
+
 // albumLetter maps a stable album index to A, B, … Z, AA, AB … (base-26).
 export function albumLetter(index) {
   let n = index, out = '';
