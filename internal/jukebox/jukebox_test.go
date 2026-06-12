@@ -1,6 +1,7 @@
 package jukebox
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
@@ -74,5 +75,75 @@ func TestRequestAllowsRepeatWhenWindowZero(t *testing.T) {
 	jb.Next("s") // play it -> goes to history
 	if got, _ := jb.Request("s", id); got != Requested {
 		t.Fatalf("window=0 should allow immediate repeat, got %v", got)
+	}
+}
+
+func TestStartStationFillsEmptyQueue(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	jb := New(db, Config{HistoryWindow: 5})
+	jb.EnsureStream("s", "private")
+	for i := 0; i < 20; i++ {
+		store.UpsertTrack(db, model.Track{
+			Path: fmt.Sprintf("/m/%d.mp3", i), Title: fmt.Sprintf("T%d", i), Genre: "Rock",
+		}, "Band", "Album")
+	}
+
+	if err := jb.StartStation("s", "Rock", 3, 10); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	q, _ := jb.Queue("s")
+	if len(q) != 10 {
+		t.Fatalf("expected immediate fill of 10, got %d", len(q))
+	}
+}
+
+func TestNextRefillsBelowThreshold(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	jb := New(db, Config{HistoryWindow: 0}) // disable fairness to keep counting simple
+	jb.EnsureStream("s", "private")
+	for i := 0; i < 30; i++ {
+		store.UpsertTrack(db, model.Track{
+			Path: fmt.Sprintf("/m/%d.mp3", i), Title: fmt.Sprintf("T%d", i), Genre: "Rock",
+		}, "Band", "Album")
+	}
+	jb.StartStation("s", "Rock", 3, 10) // fills to 10
+
+	// Pop down to the threshold boundary. After popping to <3, Next refills.
+	for i := 0; i < 8; i++ {
+		if _, ok := jb.Next("s"); !ok {
+			t.Fatalf("unexpected empty queue at pop %d", i)
+		}
+	}
+	n, _ := store.QueueLen(db, "s")
+	if n < 3 {
+		t.Fatalf("expected queue refilled to >=3 after draining, got %d", n)
+	}
+}
+
+func TestStopStationStopsRefill(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	jb := New(db, Config{HistoryWindow: 0})
+	jb.EnsureStream("s", "private")
+	for i := 0; i < 30; i++ {
+		store.UpsertTrack(db, model.Track{
+			Path: fmt.Sprintf("/m/%d.mp3", i), Title: fmt.Sprintf("T%d", i), Genre: "Rock",
+		}, "Band", "Album")
+	}
+	jb.StartStation("s", "Rock", 3, 10)
+	if err := jb.StopStation("s"); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	// Drain fully; with no station, queue must reach 0 and stay there.
+	for {
+		if _, ok := jb.Next("s"); !ok {
+			break
+		}
+	}
+	n, _ := store.QueueLen(db, "s")
+	if n != 0 {
+		t.Fatalf("expected drained queue to stay empty after stop, got %d", n)
 	}
 }
