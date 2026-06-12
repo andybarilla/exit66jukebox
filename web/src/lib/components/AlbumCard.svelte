@@ -1,8 +1,9 @@
 <script>
+  import { keyActivate } from '../format.js';
   let { title, artist, meta, initial, cover = null, gradient = null, onOpen, onRequest } = $props();
   let artFailed = $state(false);
 </script>
-<div class="card" onclick={onOpen} style="position:relative; background:var(--bg-surface); background-image:var(--scanline); border:1px solid var(--border-default); border-radius:var(--radius-lg); overflow:hidden; cursor:pointer; transition:border-color var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);">
+<div class="card" role="button" tabindex="0" onclick={onOpen} onkeydown={keyActivate(onOpen)} style="position:relative; background:var(--bg-surface); background-image:var(--scanline); border:1px solid var(--border-default); border-radius:var(--radius-lg); overflow:hidden; cursor:pointer; transition:border-color var(--dur) var(--ease-out), transform var(--dur) var(--ease-out);">
   <div style="position:relative; aspect-ratio:1/1; overflow:hidden; background:{gradient};">
     {#if cover && !artFailed}
       <img src={cover} alt="" onerror={() => (artFailed = true)} style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover;" />

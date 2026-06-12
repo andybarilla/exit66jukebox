@@ -1,3 +1,11 @@
+// keyActivate wraps a click handler so Enter/Space also fire it, for
+// role="button" divs that can't be real <button>s (they nest buttons).
+export function keyActivate(fn) {
+  return (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(e); }
+  };
+}
+
 // fmt formats seconds as m:ss (matches the design's NowPlayingBar).
 export function fmt(sec) {
   if (sec == null || isNaN(sec)) return '0:00';

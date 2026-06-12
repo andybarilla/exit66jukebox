@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { createStore } from './lib/store.svelte.js';
   import { audioURL, houseStreamURL, nextTrack } from './lib/api.js';
-  import { fmt } from './lib/format.js';
+  import { fmt, keyActivate } from './lib/format.js';
   import TopBar from './lib/components/TopBar.svelte';
   import Tabs from './lib/components/Tabs.svelte';
   import AlbumGrid from './lib/components/AlbumGrid.svelte';
@@ -29,21 +29,36 @@
   const streamLabel = $derived(s.stream === 'house' ? 'House' : 'Personal');
   const chip = $derived(`${streamLabel} · ${s.listeners}`);
 
+  // Attempt playback and let the audio element's play/pause events drive the
+  // `playing` flag. A blocked autoplay rejects without firing 'pause', so the
+  // catch reconciles the transport (shows Play) instead of lying that it's on.
+  function tryPlay() {
+    audio?.play().catch(() => { playing = false; });
+  }
+
   // ---- personal (me) playback: client audio drives now-playing ----
+  let advancing = false; // guard: stream-switch and the queued-while-idle effect
+                         // can both fire; one pop per advance.
   async function advancePersonal() {
-    const r = await nextTrack(); // GET /api/streams/me/next (pops server-side)
-    if (r && r.ok && r.track) {
-      s.setNowPlaying('me', normalize(r.track));
-      s.setProgress('me', 0);
-      audio.src = audioURL(r.track.id);
-      if (playing) audio.play().catch(() => {});
-    } else {
-      s.setNowPlaying('me', null);
-      playing = false;
+    if (advancing) return;
+    advancing = true;
+    try {
+      const r = await nextTrack(); // GET /api/streams/me/next (pops server-side)
+      if (r && r.ok && r.track) {
+        s.setNowPlaying('me', normalize(r.track));
+        s.setProgress('me', 0);
+        audio.src = audioURL(r.track.id);
+        if (playing) tryPlay();
+      } else {
+        s.setNowPlaying('me', null);
+        playing = false;
+      }
+      // The pop removed the track server-side; personal has no SSE, so refresh
+      // the queue ourselves to keep "up next" in sync.
+      s.refreshQueue('me');
+    } finally {
+      advancing = false;
     }
-    // The pop removed the track server-side; personal has no SSE, so refresh
-    // the queue ourselves to keep "up next" in sync.
-    s.refreshQueue('me');
   }
   function normalize(t) {
     // mirror store.normalizeNP via exported helper if present; minimal inline:
@@ -54,19 +69,20 @@
     if (!audio) return;
     if (s.stream === 'house') {
       audio.src = houseStreamURL();
-      if (playing) audio.play().catch(() => {});
+      if (playing) tryPlay();
     } else if (!s.nowPlaying) {
       advancePersonal();
     } else {
       audio.src = audioURL(s.nowPlaying.id);
-      if (playing) audio.play().catch(() => {});
+      if (playing) tryPlay();
     }
   }
 
+  // Act on the element's real state, not a flag that autoplay may have
+  // desynced — otherwise the first click after a blocked autoplay is inverted.
   function togglePlay() {
-    playing = !playing;
     if (!audio) return;
-    if (playing) audio.play().catch(() => {}); else audio.pause();
+    if (audio.paused) { playing = true; tryPlay(); } else audio.pause();
   }
   function onNext() {
     if (s.stream === 'me') advancePersonal();
@@ -95,7 +111,13 @@
         s.setProgress(s.stream, s.progress + 1);
       }
     }, 1000);
-    if (audio) audio.addEventListener('ended', () => { if (s.stream === 'me') advancePersonal(); });
+    if (audio) {
+      audio.addEventListener('ended', () => { if (s.stream === 'me') advancePersonal(); });
+      // Reflect the element's real state so the transport never lies about
+      // whether sound is coming out (autoplay block, stall, manual pause).
+      audio.addEventListener('play', () => { playing = true; });
+      audio.addEventListener('pause', () => { playing = false; });
+    }
   });
   onDestroy(() => {
     clearInterval(tickTimer);
@@ -108,6 +130,16 @@
   let lastStream = 'house';
   $effect(() => {
     if (s.stream !== lastStream) { lastStream = s.stream; playing = true; applyStreamAudio(); }
+  });
+
+  // Personal is client-driven: a track queued while nothing is playing must
+  // kick playback off itself. (House is server-driven and needs no nudge — the
+  // hub pops the queue on its own.)
+  $effect(() => {
+    if (s.stream === 'me' && !s.nowPlaying && s.queue.length > 0) {
+      playing = true; // queuing into an idle stream is an intent to play
+      advancePersonal();
+    }
   });
 
   // Load discover data when switching to the discover tab.
@@ -207,7 +239,7 @@
   <!-- PHONE LINEUP SHEET -->
   {#if s.isPhone && s.lineupOpen}
     <div style="position:absolute; inset:0; z-index:75; display:flex; flex-direction:column; justify-content:flex-end;">
-      <div onclick={() => s.closeLineup()} style="position:absolute; inset:0; background:rgba(6,6,11,0.72); backdrop-filter:blur(6px);"></div>
+      <div role="button" tabindex="-1" aria-label="Close" onclick={() => s.closeLineup()} onkeydown={keyActivate(() => s.closeLineup())} style="position:absolute; inset:0; background:rgba(6,6,11,0.72); backdrop-filter:blur(6px);"></div>
       <div style="position:relative; height:74vh; background:var(--bg-surface); background-image:var(--scanline); border-top:1.5px solid var(--neon-magenta); border-radius:var(--radius-lg) var(--radius-lg) 0 0; padding:18px; box-shadow:var(--shadow-xl); display:flex; box-sizing:border-box;">
         <Lineup streamLabel={streamLabel} listeners={s.listeners} shuffle={s.shuffle}
           onToggleShuffle={(v) => s.toggleShuffle(v)} np={np} npPct={npPct}

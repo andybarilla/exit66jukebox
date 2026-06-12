@@ -6,3 +6,6 @@
 # Local jukebox dev artifacts
 exit66jukebox
 *.db
+
+# Playwright MCP debug artifacts
+.playwright-mcp/

@@ -1,11 +1,11 @@
 <script>
   import TrackRow from './TrackRow.svelte';
-  import { fmt } from '../format.js';
+  import { fmt, keyActivate } from '../format.js';
   let { album = null, nowPlayingId = null, onClose, onRequestAll, onAddTrack } = $props();
 </script>
 {#if album}
-  <div onclick={onClose} style="position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(6,6,11,0.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);">
-    <div role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}
+  <div role="button" tabindex="-1" aria-label="Close" onclick={(e) => { if (e.target === e.currentTarget) onClose(); }} onkeydown={keyActivate(onClose)} style="position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(6,6,11,0.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);">
+    <div role="dialog" aria-modal="true" tabindex="-1"
       style="width:100%; max-width:460px; background:var(--bg-surface-raised); background-image:var(--scanline); border:1px solid var(--border-strong); border-radius:var(--radius-xl); box-shadow:var(--shadow-xl); overflow:hidden;">
       <div style="height:3px; background:linear-gradient(90deg, var(--neon-magenta), var(--neon-cyan));"></div>
       <div style="padding:var(--space-7);">
