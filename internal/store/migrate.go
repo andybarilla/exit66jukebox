@@ -29,5 +29,18 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`UPDATE track SET added_at = mod_time WHERE added_at = 0`); err != nil {
 		return err
 	}
+	// mbid columns for MusicBrainz enrichment (#38). Table names are a fixed
+	// local list, not user input; ALTER TABLE cannot use ? for identifiers.
+	for _, t := range []string{"artist", "album", "track"} {
+		has, err := columnExists(db, t, "mbid")
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := db.Exec("ALTER TABLE " + t + " ADD COLUMN mbid TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
