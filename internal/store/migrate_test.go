@@ -68,6 +68,38 @@ func TestMigrateAddsColumnToTableMissingIt(t *testing.T) {
 	}
 }
 
+func TestMigrateAddsMbidColumns(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Simulate a pre-#38 database: drop mbid from each table so the ALTER runs.
+	for _, tbl := range []string{"artist", "album", "track"} {
+		if _, err := db.Exec("ALTER TABLE " + tbl + " DROP COLUMN mbid"); err != nil {
+			t.Fatalf("drop mbid from %s: %v", tbl, err)
+		}
+		if has, _ := columnExists(db, tbl, "mbid"); has {
+			t.Fatalf("precondition failed: %s.mbid still present after drop", tbl)
+		}
+	}
+
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	for _, tbl := range []string{"artist", "album", "track"} {
+		if has, _ := columnExists(db, tbl, "mbid"); !has {
+			t.Fatalf("expected %s.mbid added by migrate", tbl)
+		}
+	}
+
+	// Re-running migrate must be a no-op.
+	if err := migrate(db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+}
+
 func TestMigrateBackfillsFromModTime(t *testing.T) {
 	db, err := Open(":memory:")
 	if err != nil {

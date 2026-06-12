@@ -4,6 +4,7 @@ package model
 type Artist struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
+	Mbid string `json:"-"`
 }
 
 // Album belongs to one artist and may carry a cover image path.
@@ -12,6 +13,7 @@ type Album struct {
 	Name     string `json:"name"`
 	ArtistID int64  `json:"artist_id"`
 	Cover    string `json:"-"`
+	Mbid     string `json:"-"`
 }
 
 // Track is one audio file plus its indexed tags.
@@ -27,6 +29,7 @@ type Track struct {
 	Genre     string `json:"genre"`
 	Duration  int    `json:"duration"`
 	PlayCount int    `json:"play_count"`
+	Mbid      string `json:"-"`
 }
 
 // Stream owns a queue + fairness config. Kind is "private" or "shared".

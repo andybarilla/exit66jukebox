@@ -1,12 +1,14 @@
 CREATE TABLE IF NOT EXISTS artist (
     id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE
+    name TEXT NOT NULL UNIQUE,
+    mbid TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS album (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     name      TEXT NOT NULL,
     artist_id INTEGER NOT NULL REFERENCES artist(id),
     cover     TEXT NOT NULL DEFAULT '',
+    mbid      TEXT NOT NULL DEFAULT '',
     UNIQUE(name, artist_id)
 );
 CREATE TABLE IF NOT EXISTS track (
@@ -21,7 +23,8 @@ CREATE TABLE IF NOT EXISTS track (
     genre      TEXT NOT NULL DEFAULT '',
     duration   INTEGER NOT NULL DEFAULT 0,
     play_count INTEGER NOT NULL DEFAULT 0,
-    added_at   INTEGER NOT NULL DEFAULT 0
+    added_at   INTEGER NOT NULL DEFAULT 0,
+    mbid       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_track_artist ON track(artist_id);
 CREATE INDEX IF NOT EXISTS idx_track_album  ON track(album_id);
