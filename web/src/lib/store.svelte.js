@@ -4,7 +4,7 @@ import {
   discoverGenres, discoverRediscover, discoverRecent,
   getStation, startStation as apiStartStation, stopStation as apiStopStation,
 } from './api.js';
-import { albumLetter, toneFor, gradientFor } from './format.js';
+import { albumLetter, toneFor, gradientFor, compareNames } from './format.js';
 
 const ME = 'me';
 
@@ -46,7 +46,9 @@ export function createStore() {
     const [rawTracks, rawAlbums, rawArtists] = await Promise.all([
       listTracks(''), listAlbums(''), listArtists(''),
     ]);
-    // group tracks by album, assign stable letters by album order
+    // group tracks by album, assigning crate-wall letters in alphabetical
+    // order — sort first so the A/B/C… codes run alphabetically too.
+    rawAlbums.sort((x, y) => compareNames(x.name, y.name));
     const albumById = new Map();
     rawAlbums.forEach((al, i) => albumById.set(al.id, {
       id: al.id, name: al.name, artistId: al.artist_id,
@@ -86,7 +88,7 @@ export function createStore() {
     artists = [...byArtist.values()].map((a) => ({
       ...a, albumCount: a.albums.length, trackCount: a.tracks.length,
       initial: (a.name[0] || '?').toUpperCase(),
-    }));
+    })).sort((x, y) => compareNames(x.name, y.name));
     tracksByCode = codeMap;
   }
 
