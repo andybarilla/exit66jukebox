@@ -3,6 +3,7 @@ import {
   setShuffle, subscribeEvents, coverURL, albumCoverURL, HOUSE,
   discoverGenres, discoverRediscover, discoverRecent,
   getStation, startStation as apiStartStation, stopStation as apiStopStation,
+  scanStatus,
 } from './api.js';
 import { albumLetter, toneFor, gradientFor, compareNames } from './format.js';
 
@@ -22,6 +23,7 @@ export function createStore() {
   // library
   let albums = $state([]);      // {id,name,artistId,artistName,letter,tone,tracks:[{...,code}]}
   let artists = $state([]);     // {id,name,albumCount,trackCount,tone,tracks:[...]}
+  let scan = $state(null);      // /api/scan snapshot {running,added,...} | null
   let tracksByCode = $state({});
 
   // per-stream live state
@@ -90,6 +92,25 @@ export function createStore() {
       initial: (a.name[0] || '?').toUpperCase(),
     })).sort((x, y) => compareNames(x.name, y.name));
     tracksByCode = codeMap;
+  }
+
+  // Poll /api/scan while a scan is in flight. When it finishes (running flips
+  // true→false) reload the library once so the new tracks appear without a
+  // manual refresh. Idle when no scan is running, so it's cheap to start.
+  let _scanTimer = null;
+  let _scanWasRunning = false;
+  async function pollScan() {
+    let snap = null;
+    try { snap = await scanStatus(); } catch { snap = null; }
+    scan = snap;
+    const running = !!(snap && snap.running);
+    if (_scanWasRunning && !running) await loadLibrary();
+    _scanWasRunning = running;
+    _scanTimer = running ? setTimeout(pollScan, 1500) : null;
+  }
+  function startScanPolling() {
+    if (_scanTimer) return;
+    pollScan();
   }
 
   async function refreshQueue(s) {
@@ -177,6 +198,7 @@ export function createStore() {
 
     get albums() { return albums; },
     get artists() { return artists; },
+    get scan() { return scan; },
 
     // Personal is always "just you": the `me` stream has no broadcast hub, so
     // the backend reports 0 listeners for it. Never let that 0 surface here.
@@ -216,6 +238,7 @@ export function createStore() {
     // ----- actions -----
     async init() {
       await loadLibrary();
+      startScanPolling();
       await Promise.all([refreshQueue('house'), refreshQueue('me')]);
       // Pre-load discover genres (lists load on tab activation via loadDiscover).
       discoverGenres().then((g) => { discoverGenreList = Array.isArray(g) ? g : []; }).catch(() => {});
@@ -228,7 +251,10 @@ export function createStore() {
         }
       });
     },
-    teardown() { if (_esHouse) { _esHouse(); _esHouse = null; } },
+    teardown() {
+      if (_esHouse) { _esHouse(); _esHouse = null; }
+      if (_scanTimer) { clearTimeout(_scanTimer); _scanTimer = null; }
+    },
 
     setStream(s) {
       if (s === stream) return;

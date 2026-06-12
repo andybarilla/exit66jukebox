@@ -23,6 +23,14 @@ export function audioURL(trackId) {
   return `/api/tracks/${trackId}/audio`;
 }
 
+// scanStatus reports library-scan progress, or null when scanning isn't
+// available (no library configured → 503).
+export async function scanStatus() {
+  const r = await fetch('/api/scan');
+  if (!r.ok) return null;
+  return r.json(); // {running, added, updated, skipped, failed}
+}
+
 export const HOUSE = 'house';
 
 export async function getQueue(streamId) {

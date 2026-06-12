@@ -1,8 +1,18 @@
 <script>
   import SearchInput from './SearchInput.svelte';
   import Avatar from './Avatar.svelte';
-  let { isPhone = false, query = '', onSearch, streamChipLabel = '', onToggleStream } = $props();
+  import { scanIndicator } from '../scan.js';
+  let { isPhone = false, query = '', onSearch, streamChipLabel = '', onToggleStream, scan = null } = $props();
+  let ind = $derived(scanIndicator(scan));
 </script>
+
+{#snippet scanChip()}
+  {#if ind.visible}
+    <span title="Library scan in progress" style="display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid var(--neon-cyan); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; color:var(--neon-cyan); white-space:nowrap;">
+      <span class="scan-pulse" style="width:7px; height:7px; border-radius:50%; background:var(--neon-cyan);"></span>{ind.text}
+    </span>
+  {/if}
+{/snippet}
 {#if !isPhone}
   <header style="height:62px; flex:none; display:flex; align-items:center; gap:24px; padding:0 24px; border-bottom:1px solid var(--border-default); background:var(--ink-950); z-index:5;">
     <div style="display:flex; align-items:center; gap:11px; flex:none;">
@@ -13,6 +23,7 @@
       <SearchInput value={query} onInput={onSearch} placeholder="Search the crate — artist, album, track, or slot code…" />
     </div>
     <div style="display:flex; align-items:center; gap:14px; flex:none;">
+      {@render scanChip()}
       <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid var(--border-default); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{streamChipLabel} listening</span>
       <Avatar name="You" ring="cyan" size="sm" />
     </div>
@@ -27,5 +38,11 @@
       <button onclick={onToggleStream} style="display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--bg-surface); font-family:var(--font-mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-body); cursor:pointer; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{streamChipLabel}</button>
     </div>
     <SearchInput value={query} onInput={onSearch} placeholder="Search the crate…" />
+    {@render scanChip()}
   </header>
 {/if}
+
+<style>
+  .scan-pulse { animation: scan-pulse 1.1s ease-in-out infinite; }
+  @keyframes scan-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+</style>
