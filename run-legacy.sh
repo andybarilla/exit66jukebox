@@ -5,10 +5,19 @@
 # Usage:  ./run-legacy.sh [music-dir]
 #   music-dir defaults to ~/Dropbox/Music/legacy (mounted read-only at /music).
 #
-# The jukebox has no preload config — after it starts, register a library to scan:
+# Each run starts a CLEAN container, so the scanned-library list resets every time.
+# The jukebox has no preload config — after it starts, register libraries to scan:
 #   curl -X POST http://localhost:8080/rest/library \
 #        --data-urlencode action=add --data-urlencode path=/music/<artist-or-subdir>
 # Watch progress: docker logs -f exit66-legacy   (look for "Completed scanning")
+#
+# To reproduce the 12-artist set used for the comparison screenshots:
+#   for a in "10 Years" "AC_DC" "Adele" "Aerosmith" "AFI" "Alice In Chains" \
+#            "Amy Winehouse" "Annie Lennox" "Arcade Fire" "Arctic Monkeys" \
+#            "Audioslave" "A Perfect Circle"; do
+#     curl -s -X POST http://localhost:8080/rest/library \
+#          --data-urlencode action=add --data-urlencode "path=/music/$a"
+#   done
 #
 # Note: the bundled 2009-era myid3 tag reader only decodes ISO-8859-1/UTF-8 ID3
 # frames. UTF-16-tagged files (e.g. Bandcamp downloads) scan as "[Unknown Album]".
