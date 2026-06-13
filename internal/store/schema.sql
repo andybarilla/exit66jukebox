@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS history (
     played_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_history_stream ON history(stream_id, played_at);
+CREATE TABLE IF NOT EXISTS scrobble_queue (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    service    TEXT NOT NULL,            -- 'listenbrainz' | 'lastfm'
+    track_id   INTEGER NOT NULL,
+    played_at  INTEGER NOT NULL,         -- unix seconds (the listen timestamp)
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scrobble_service ON scrobble_queue(service, id);
 CREATE TABLE IF NOT EXISTS station (
     stream_id TEXT PRIMARY KEY REFERENCES stream(id),
     genre     TEXT NOT NULL,
