@@ -15,9 +15,9 @@ import (
 
 func seedAPILibrary(t *testing.T, srv *Server) {
 	t.Helper()
-	store.UpsertTrack(srv.db, model.Track{Path: "/m/ct.mp3", Title: "Come Together", TrackNo: 1}, "The Beatles", "Abbey Road")
-	store.UpsertTrack(srv.db, model.Track{Path: "/m/sm.mp3", Title: "Something", TrackNo: 2}, "The Beatles", "Abbey Road")
-	store.UpsertTrack(srv.db, model.Track{Path: "/m/mn.mp3", Title: "Money", TrackNo: 1}, "ABBA", "Arrival")
+	store.UpsertTrack(srv.db, model.Track{Path: "/m/ct.mp3", Title: "Come Together", TrackNo: 1}, "The Beatles", "", "Abbey Road")
+	store.UpsertTrack(srv.db, model.Track{Path: "/m/sm.mp3", Title: "Something", TrackNo: 2}, "The Beatles", "", "Abbey Road")
+	store.UpsertTrack(srv.db, model.Track{Path: "/m/mn.mp3", Title: "Money", TrackNo: 1}, "ABBA", "", "Arrival")
 }
 
 func get(t *testing.T, srv *Server, path string) *httptest.ResponseRecorder {

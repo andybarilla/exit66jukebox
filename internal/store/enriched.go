@@ -23,8 +23,14 @@ ranked_album AS (
     LEFT JOIN track_counts tc ON tc.album_id = a.id
 )`
 
+// The displayed artist name comes from the track's own artist (ta), not the
+// album's album-artist (r.artist_name) — so a compilation track shows its own
+// performer while the album card stays titled by its album-artist.
 const trackSelectCols = `t.id, t.title, t.artist_id, t.album_id, t.track_no,
-	t.genre, t.duration, t.play_count, r.rank, r.album_name, r.artist_name`
+	t.genre, t.duration, t.play_count, r.rank, r.album_name, ta.name`
+
+// trackArtistJoin attaches each track's own artist for its displayed name.
+const trackArtistJoin = ` JOIN artist ta ON ta.id = t.artist_id`
 
 // scanEnrichedTrack reads a track row joined to ranked_album and fills in the
 // derived code/tone.
@@ -83,7 +89,7 @@ func ListTracksEnriched(db *sql.DB, search string, limit, offset int) ([]model.E
 	args = append(args, pageLimit(limit), offset)
 	rows, err := db.Query(albumRankCTE+`
 		SELECT `+trackSelectCols+`
-		FROM track t JOIN ranked_album r ON r.album_id = t.album_id
+		FROM track t JOIN ranked_album r ON r.album_id = t.album_id`+trackArtistJoin+`
 		`+where+`
 		ORDER BY r.rank, t.track_no, t.title
 		LIMIT ? OFFSET ?`, args...)
@@ -117,7 +123,7 @@ func trackFilter(search string) (string, []any) {
 func TracksByAlbumEnriched(db *sql.DB, albumID int64) ([]model.EnrichedTrack, error) {
 	rows, err := db.Query(albumRankCTE+`
 		SELECT `+trackSelectCols+`
-		FROM track t JOIN ranked_album r ON r.album_id = t.album_id
+		FROM track t JOIN ranked_album r ON r.album_id = t.album_id`+trackArtistJoin+`
 		WHERE t.album_id = ?
 		ORDER BY t.track_no, t.title`, albumID)
 	if err != nil {
@@ -147,27 +153,75 @@ func EnrichTracks(db *sql.DB, tracks []model.Track) ([]model.EnrichedTrack, erro
 	if err != nil {
 		return nil, err
 	}
+	// Displayed artist is each track's own artist, not its album's album-artist.
+	artists, err := artistNames(db, distinctArtistIDs(tracks))
+	if err != nil {
+		return nil, err
+	}
 	for i, t := range tracks {
 		e := model.EnrichedTrack{Track: t}
+		if name, ok := artists[t.ArtistID]; ok {
+			e.ArtistName = name
+		} else {
+			e.ArtistName = "Unknown"
+		}
 		if info, ok := ranks[t.AlbumID]; ok {
 			e.Code = slotCode(info.rank, t.TrackNo)
 			e.Tone = tone(info.rank)
 			e.AlbumName = info.albumName
-			e.ArtistName = info.artistName
 		} else {
 			e.Code = "··"
 			e.Tone = tones[1]
-			e.ArtistName = "Unknown"
 		}
 		out[i] = e
 	}
 	return out, nil
 }
 
+// distinctArtistIDs returns the unique track artist ids in tracks.
+func distinctArtistIDs(tracks []model.Track) []int64 {
+	seen := make(map[int64]bool)
+	var ids []int64
+	for _, t := range tracks {
+		if !seen[t.ArtistID] {
+			seen[t.ArtistID] = true
+			ids = append(ids, t.ArtistID)
+		}
+	}
+	return ids
+}
+
+// artistNames maps a set of artist ids to their names.
+func artistNames(db *sql.DB, ids []int64) (map[int64]string, error) {
+	out := make(map[int64]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := db.Query(
+		`SELECT id, name FROM artist WHERE id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
+}
+
 type rankInfo struct {
-	rank       int
-	albumName  string
-	artistName string
+	rank      int
+	albumName string
 }
 
 func distinctAlbumIDs(tracks []model.Track) []int64 {
@@ -183,7 +237,7 @@ func distinctAlbumIDs(tracks []model.Track) []int64 {
 }
 
 // albumRanks returns each album's global rank (same sort_key, id ordering the
-// window query uses) plus its names, for a set of album ids.
+// window query uses) plus its name, for a set of album ids.
 func albumRanks(db *sql.DB, albumIDs []int64) (map[int64]rankInfo, error) {
 	out := make(map[int64]rankInfo, len(albumIDs))
 	if len(albumIDs) == 0 {
@@ -195,10 +249,10 @@ func albumRanks(db *sql.DB, albumIDs []int64) (map[int64]rankInfo, error) {
 		args[i] = id
 	}
 	rows, err := db.Query(`
-		SELECT a.id, a.name, ar.name,
+		SELECT a.id, a.name,
 		       (SELECT count(*) FROM album b
 		        WHERE b.sort_key < a.sort_key OR (b.sort_key = a.sort_key AND b.id < a.id)) AS rank
-		FROM album a JOIN artist ar ON ar.id = a.artist_id
+		FROM album a
 		WHERE a.id IN (`+placeholders+`)`, args...)
 	if err != nil {
 		return nil, err
@@ -207,7 +261,7 @@ func albumRanks(db *sql.DB, albumIDs []int64) (map[int64]rankInfo, error) {
 	for rows.Next() {
 		var id int64
 		var info rankInfo
-		if err := rows.Scan(&id, &info.albumName, &info.artistName, &info.rank); err != nil {
+		if err := rows.Scan(&id, &info.albumName, &info.rank); err != nil {
 			return nil, err
 		}
 		out[id] = info
@@ -223,9 +277,9 @@ func ListArtistsEnriched(db *sql.DB, search string, limit, offset int) ([]model.
 		       (SELECT count(*) FROM album al WHERE al.artist_id = ar.id),
 		       (SELECT count(*) FROM track t WHERE t.artist_id = ar.id)
 		FROM artist ar
-		WHERE ar.name LIKE ?
+		WHERE ar.name LIKE ? AND ar.name <> ?
 		ORDER BY ar.sort_key, ar.id
-		LIMIT ? OFFSET ?`, "%"+search+"%", pageLimit(limit), offset)
+		LIMIT ? OFFSET ?`, "%"+search+"%", VariousArtists, pageLimit(limit), offset)
 	if err != nil {
 		return nil, err
 	}
@@ -272,6 +326,8 @@ func CountTracks(db *sql.DB, search string) (int, error) {
 // CountArtists counts artists matching search.
 func CountArtists(db *sql.DB, search string) (int, error) {
 	var n int
-	err := db.QueryRow(`SELECT count(*) FROM artist WHERE name LIKE ?`, "%"+search+"%").Scan(&n)
+	err := db.QueryRow(
+		`SELECT count(*) FROM artist WHERE name LIKE ? AND name <> ?`,
+		"%"+search+"%", VariousArtists).Scan(&n)
 	return n, err
 }
