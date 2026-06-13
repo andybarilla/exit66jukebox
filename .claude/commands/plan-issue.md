@@ -13,7 +13,7 @@ Argument: `$ARGUMENTS`
 
 - If a number was given, load it: `gh issue view $ARGUMENTS --json number,title,body,labels,url`.
 - If empty, list Backlog issues and ask the user which to plan:
-  `gh project item-list 2 --owner andybarilla --format json` and filter to `status == "Backlog"`.
+  `gh project item-list 2 --owner andybarilla --limit 200 --format json` and filter to `status == "Backlog"`.
   Print the candidates (number + title) and stop for the user to pick one.
 
 ## 2. Investigate
@@ -72,7 +72,7 @@ split out. Ask for a yes / edits. Do not proceed until approved.
     --jq '.data.node.options[] | select(.name=="Ready") | .id')
   # If the issue isn't on the board yet, add it first:
   gh project item-add 2 --owner andybarilla --url <issue-url>
-  ITEM_ID=$(gh project item-list 2 --owner andybarilla --format json \
+  ITEM_ID=$(gh project item-list 2 --owner andybarilla --limit 200 --format json \
     --jq '.items[] | select(.content.number==<n>) | .id')
   gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \
     --field-id "$FIELD_ID" --single-select-option-id "$READY_OPT"
