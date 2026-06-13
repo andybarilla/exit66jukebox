@@ -107,6 +107,14 @@ func TestScanSubnetRespectsConcurrencyCap(t *testing.T) {
 	}
 }
 
+func TestProbeSonosFailsClosedOnNoConnect(t *testing.T) {
+	// Nothing listens on :1400 here, so the dial gate rejects fast without ever
+	// attempting a descriptor fetch.
+	if _, ok := probeSonos("127.0.0.1", 50*time.Millisecond); ok {
+		t.Fatalf("probeSonos should fail when no host answers on :1400")
+	}
+}
+
 func TestScanSubnetOrderedByHostOctet(t *testing.T) {
 	probe := func(ip string) (Device, bool) {
 		switch ip {

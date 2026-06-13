@@ -36,10 +36,10 @@ func subnet24(ip string) (string, bool) {
 
 // scanSubnet probes hosts .1–.254 of prefix concurrently (at most cap in flight)
 // using probe, returning the verified devices ordered by ascending host octet.
-func scanSubnet(prefix string, cap int, probe func(ip string) (Device, bool)) []Device {
+func scanSubnet(prefix string, concurrency int, probe func(ip string) (Device, bool)) []Device {
 	results := make([]Device, 255) // index by host octet; .0 unused
 	found := make([]bool, 255)
-	sem := make(chan struct{}, cap)
+	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	for host := 1; host <= 254; host++ {
 		wg.Add(1)
