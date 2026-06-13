@@ -1,13 +1,14 @@
 import {
-  listTracks, listAlbums, listArtists, getQueue, requestTo, removeRequest,
+  listTracks, listAlbums, listArtists, albumTracks, getQueue, requestTo, removeRequest,
   setShuffle, subscribeEvents, coverURL, albumCoverURL, HOUSE,
   discoverGenres, discoverRediscover, discoverRecent,
   getStation, startStation as apiStartStation, stopStation as apiStopStation,
   scanStatus,
 } from './api.js';
-import { albumLetter, toneFor, gradientFor, compareNames } from './format.js';
+import { gradientFor } from './format.js';
+import { createPager } from './pager.js';
 
-const ME = 'me';
+const PAGE_SIZE = 100;
 
 export function createStore() {
   let tab = $state('albums');
@@ -15,16 +16,23 @@ export function createStore() {
   let stream = $state('house');           // 'house' (shared) | 'me' (personal)
   let isPhone = $state(false);
   let lineupOpen = $state(false);
-  let detailAlbumId = $state(null);
+  let detailAlbum = $state(null);          // {id,name,artistName,tracks:[...]} | null
   let shuffle = $state({ house: false, me: false }); // per-stream, mirrors backend
   let displayName = $state(localStorage.getItem('e66.name') || 'You');
   let toasts = $state([]);
 
-  // library
-  let albums = $state([]);      // {id,name,artistId,artistName,letter,tone,tracks:[{...,code}]}
-  let artists = $state([]);     // {id,name,albumCount,trackCount,tone,tracks:[...]}
+  // Browse state per tab. Slot codes/tones/names are carried by the backend on
+  // each row (#53), so the client no longer holds or groups the whole library.
+  // Each tab fetches windowed pages on demand and appends as the user scrolls.
+  // Seed loading:true so the first paint (before init's scanStatus round-trip and
+  // first fetch resolve) shows an empty list, not a flash of the "No matches"
+  // empty state, which is gated on !loading.
+  let view = $state({
+    albums: { items: [], total: 0, loading: true },
+    artists: { items: [], total: 0, loading: true },
+    tracks: { items: [], total: 0, loading: true },
+  });
   let scan = $state(null);      // /api/scan snapshot {running,added,...} | null
-  let tracksByCode = $state({});
 
   // per-stream live state
   let nowPlaying = $state({ house: null, me: null });
@@ -41,61 +49,92 @@ export function createStore() {
 
   let _uid = 0;
   let _esHouse = null;
-  let tracksById = {}; // id -> enriched track, so the lineup/now-playing reuse
-                       // the exact same slot code + tone the crate computed.
 
-  async function loadLibrary() {
-    const [rawTracks, rawAlbums, rawArtists] = await Promise.all([
-      listTracks(''), listAlbums(''), listArtists(''),
-    ]);
-    // group tracks by album, assigning crate-wall letters in alphabetical
-    // order — sort first so the A/B/C… codes run alphabetically too.
-    rawAlbums.sort((x, y) => compareNames(x.name, y.name));
-    const albumById = new Map();
-    rawAlbums.forEach((al, i) => albumById.set(al.id, {
-      id: al.id, name: al.name, artistId: al.artist_id,
-      letter: albumLetter(i), tone: toneFor(i), tracks: [],
-    }));
-    const artistName = new Map(rawArtists.map((a) => [a.id, a.name]));
-    const codeMap = {};
-    for (const t of rawTracks) {
-      const al = albumById.get(t.album_id);
-      if (!al) continue;
-      const code = al.letter + (t.track_no || al.tracks.length + 1);
-      const enriched = {
-        ...t, code, tone: al.tone, albumName: al.name,
-        artistName: artistName.get(t.artist_id) || 'Unknown',
-        cover: coverURL(t.id), gradient: gradientFor(t.id),
-      };
-      al.tracks.push(enriched);
-      codeMap[code] = enriched;
-      tracksById[t.id] = enriched;
-    }
-    const albumList = [...albumById.values()].map((al) => ({
-      ...al, artistName: artistName.get(al.artistId) || 'Unknown',
-      cover: albumCoverURL(al.id), gradient: gradientFor(al.id),
-      initial: (al.name[0] || '?').toUpperCase(),
-    }));
-    // artist groupings
-    const byArtist = new Map();
-    for (const al of albumList) {
-      if (!byArtist.has(al.artistId)) byArtist.set(al.artistId, {
-        id: al.artistId, name: al.artistName, tone: al.tone,
-        gradient: gradientFor(1000 + al.artistId), albums: [], tracks: [],
-      });
-      const g = byArtist.get(al.artistId);
-      g.albums.push(al); g.tracks.push(...al.tracks);
-    }
-    albums = albumList;
-    artists = [...byArtist.values()].map((a) => ({
-      ...a, albumCount: a.albums.length, trackCount: a.tracks.length,
-      initial: (a.name[0] || '?').toUpperCase(),
-    })).sort((x, y) => compareNames(x.name, y.name));
-    tracksByCode = codeMap;
+  const pagers = {
+    albums: createPager((q, off, lim) => listAlbums(q, off, lim), PAGE_SIZE),
+    artists: createPager((q, off, lim) => listArtists(q, off, lim), PAGE_SIZE),
+    tracks: createPager((q, off, lim) => listTracks(q, off, lim), PAGE_SIZE),
+  };
+  // The search a tab's loaded items currently reflect, so switching tabs only
+  // refetches when the query changed since that tab last loaded.
+  const loadedQuery = { albums: null, artists: null, tracks: null };
+  let _searchTimer = null;
+
+  function isBrowseTab(t) { return t === 'albums' || t === 'artists' || t === 'tracks'; }
+
+  // sync copies a pager's snapshot into reactive state so getters update.
+  function sync(t) {
+    const p = pagers[t];
+    view[t] = { items: p.items, total: p.total, loading: p.loading };
+  }
+
+  // reloadActive resets the active browse tab to page 0 for the current query.
+  async function reloadActive() {
+    clearTimeout(_searchTimer); _searchTimer = null;
+    if (!isBrowseTab(tab)) return;
+    const t = tab;
+    const p = pagers[t];
+    sync(t);                       // reflect loading=true immediately
+    const start = p.reset(query);
+    sync(t);
+    await start;
+    loadedQuery[t] = query;
+    sync(t);
+  }
+
+  // ensureLoaded loads the active tab if its data does not match the current
+  // query yet (first visit or a search happened while it was inactive).
+  function ensureLoaded() {
+    if (tab === 'discover') return;
+    if (loadedQuery[tab] !== query) reloadActive();
+    else sync(tab);
+  }
+
+  function scheduleSearch() {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(reloadActive, 250);
+  }
+
+  // loadMore appends the next page of the active tab; returns whether it grew
+  // (so the list component's viewport-fill loop knows when to stop).
+  async function loadMore() {
+    if (!isBrowseTab(tab)) return false;
+    const t = tab;
+    const grew = await pagers[t].loadMore();
+    sync(t);
+    return grew;
+  }
+
+  // ---- display mappers: backend rows -> the shape the components expect ----
+  function mapTrack(t) {
+    return {
+      id: t.id, title: t.title, duration: t.duration || 0,
+      code: t.code || '··', tone: t.tone || 'magenta',
+      artistName: t.artist_name || 'Unknown', albumName: t.album_name || '',
+      cover: coverURL(t.id), gradient: gradientFor(t.id),
+    };
+  }
+  function mapAlbum(a) {
+    return {
+      id: a.id, name: a.name, artistName: a.artist_name || 'Unknown',
+      letter: a.letter, tone: a.tone || 'magenta',
+      meta: `${a.track_count} track${a.track_count === 1 ? '' : 's'}`,
+      initial: (a.name?.[0] || '?').toUpperCase(),
+      cover: albumCoverURL(a.id), gradient: gradientFor(a.id),
+    };
+  }
+  function mapArtist(a) {
+    return {
+      id: a.id, name: a.name,
+      albumCount: a.album_count, trackCount: a.track_count,
+      meta: `${a.album_count} album${a.album_count === 1 ? '' : 's'} · ${a.track_count} track${a.track_count === 1 ? '' : 's'}`,
+      initial: (a.name?.[0] || '?').toUpperCase(),
+      gradient: gradientFor(1000 + a.id),
+    };
   }
 
   // Poll /api/scan while a scan is in flight. When it finishes (running flips
-  // true→false) reload the library once so the new tracks appear without a
+  // true→false) reload the active tab so new tracks/counts appear without a
   // manual refresh. Idle when no scan is running, so it's cheap to start.
   let _scanTimer = null;
   let _scanWasRunning = false;
@@ -104,7 +143,11 @@ export function createStore() {
     try { snap = await scanStatus(); } catch { snap = null; }
     scan = snap;
     const running = !!(snap && snap.running);
-    if (_scanWasRunning && !running) await loadLibrary();
+    if (_scanWasRunning && !running) {
+      // Force the active tab to refetch (its loadedQuery is stale post-scan).
+      loadedQuery.albums = loadedQuery.artists = loadedQuery.tracks = null;
+      ensureLoaded();
+    }
     _scanWasRunning = running;
     _scanTimer = running ? setTimeout(pollScan, 1500) : null;
   }
@@ -119,44 +162,14 @@ export function createStore() {
     if (typeof r.listeners === 'number') listeners[s] = r.listeners;
   }
 
-  // backend queue items are {track:{...}, requested_by} for /me, but the house
-  // SSE/queue may send bare tracks; normalize both.
+  // Queue items are {track:{...enriched...}, requested_by} for /me; the house
+  // SSE/queue may send a bare enriched track. Both carry backend code/tone/names.
   function normalizeQueued(item) {
     const t = item.track || item;
-    const code = codeForTrack(t);
     return {
       uid: ++_uid, id: t.id, title: t.title,
-      artistName: nameForArtist(t.artist_id), albumName: albumNameFor(t.album_id),
-      code, tone: toneForTrack(t), requester: item.requested_by || '',
-      cover: coverURL(t.id), gradient: gradientFor(t.id),
-    };
-  }
-  function codeForTrack(t) {
-    if (tracksById[t.id]) return tracksById[t.id].code;
-    const al = albums.find((a) => a.id === t.album_id);
-    return al ? al.letter + (t.track_no || 1) : '··';
-  }
-  function toneForTrack(t) {
-    if (tracksById[t.id]) return tracksById[t.id].tone;
-    const al = albums.find((a) => a.id === t.album_id);
-    return al ? al.tone : 'magenta';
-  }
-  function nameForArtist(id) {
-    const a = artists.find((x) => x.id === id);
-    return a ? a.name : 'Unknown';
-  }
-  function albumNameFor(id) {
-    const al = albums.find((a) => a.id === id);
-    return al ? al.name : '';
-  }
-
-  // Enrich a raw discover track (id,title,artist_id,album_id,track_no,duration…)
-  // with the same display fields TrackList/TrackRow expect.
-  function enrichDiscover(t) {
-    return {
-      id: t.id, title: t.title, duration: t.duration || 0,
-      code: codeForTrack(t), artistName: nameForArtist(t.artist_id),
-      albumName: albumNameFor(t.album_id), tone: toneForTrack(t),
+      artistName: t.artist_name || 'Unknown', albumName: t.album_name || '',
+      code: t.code || '··', tone: t.tone || 'magenta', requester: item.requested_by || '',
       cover: coverURL(t.id), gradient: gradientFor(t.id),
     };
   }
@@ -165,8 +178,8 @@ export function createStore() {
     const [rd, rc] = await Promise.all([
       discoverRediscover(genre), discoverRecent(genre),
     ]);
-    discoverRediscoverRows = (Array.isArray(rd) ? rd : []).map(enrichDiscover);
-    discoverRecentRows = (Array.isArray(rc) ? rc : []).map(enrichDiscover);
+    discoverRediscoverRows = (Array.isArray(rd) ? rd : []).map(mapTrack);
+    discoverRecentRows = (Array.isArray(rc) ? rc : []).map(mapTrack);
   }
 
   async function loadStation() {
@@ -180,24 +193,20 @@ export function createStore() {
     setTimeout(() => { toasts = toasts.filter((t) => t.id !== id); }, 3400);
   }
 
-  // ----- derived (getters) -----
-  function match(s) { const q = query.trim().toLowerCase(); return !q || String(s).toLowerCase().includes(q); }
-
   return {
     // primitive state accessors
-    get tab() { return tab; }, set tab(v) { tab = v; },
-    get query() { return query; }, set query(v) { query = v; },
+    get tab() { return tab; },
+    set tab(v) { tab = v; ensureLoaded(); },
+    get query() { return query; },
+    set query(v) { query = v; scheduleSearch(); },
     get stream() { return stream; },
     get isPhone() { return isPhone; }, set isPhone(v) { isPhone = v; },
     get lineupOpen() { return lineupOpen; }, set lineupOpen(v) { lineupOpen = v; },
-    get detailAlbumId() { return detailAlbumId; },
     get shuffle() { return shuffle[stream]; },
     get displayName() { return displayName; },
     set displayName(v) { displayName = v; localStorage.setItem('e66.name', v); },
     get toasts() { return toasts; },
 
-    get albums() { return albums; },
-    get artists() { return artists; },
     get scan() { return scan; },
 
     // Personal is always "just you": the `me` stream has no broadcast hub, so
@@ -207,25 +216,20 @@ export function createStore() {
     get nowPlaying() { return nowPlaying[stream]; },
     get progress() { return progress[stream]; },
 
-    // filtered library
-    get albumCards() {
-      return albums.filter((a) => match(a.name) || match(a.artistName))
-        .map((a) => ({ ...a, meta: `${a.tracks.length} tracks` }));
-    },
-    get artistRows() {
-      return artists.filter((a) => match(a.name))
-        .map((a) => ({ ...a, meta: `${a.albumCount} albums · ${a.trackCount} tracks` }));
-    },
-    get trackRows() {
-      const all = albums.flatMap((a) => a.tracks);
-      return all.filter((t) => match(t.title) || match(t.artistName) || match(t.albumName) || match(t.code));
-    },
+    // browse views (already filtered server-side; just map to display shape)
+    get albumCards() { return view.albums.items.map(mapAlbum); },
+    get artistRows() { return view.artists.items.map(mapArtist); },
+    get trackRows() { return view.tracks.items.map(mapTrack); },
+
+    // currentCount is the server total ("N in the crate"); loading distinguishes
+    // "still fetching" from "genuinely empty" so the empty state doesn't flash.
     get currentCount() {
-      if (this.tab === 'albums') return this.albumCards.length;
-      if (this.tab === 'artists') return this.artistRows.length;
-      if (this.tab === 'discover') return discoverRediscoverRows.length + discoverRecentRows.length;
-      return this.trackRows.length;
+      if (tab === 'discover') return discoverRediscoverRows.length + discoverRecentRows.length;
+      return isBrowseTab(tab) ? view[tab].total : 0;
     },
+    get loading() { return isBrowseTab(tab) ? view[tab].loading : false; },
+
+    loadMore() { return loadMore(); },
 
     // discover accessors
     get discoverGenres() { return discoverGenreList; },
@@ -233,20 +237,19 @@ export function createStore() {
     get discoverRediscover() { return discoverRediscoverRows; },
     get discoverRecent() { return discoverRecentRows; },
     get discoverStation() { return discoverStation; },
-    get detailAlbum() { return albums.find((a) => a.id === detailAlbumId) || null; },
+    get detailAlbum() { return detailAlbum; },
 
     // ----- actions -----
     async init() {
-      // Seed scan state before the (slow, at 20k) initial load so a scan that
-      // finishes *during* loadLibrary is still seen as a true→false transition
-      // by the first poll, triggering the reload that pulls in the last tracks.
+      // Seed scan state before the initial load so a scan that finishes *during*
+      // the first fetch is still seen as a true→false transition by the first
+      // poll, triggering the reload that pulls in the last tracks.
       const s0 = await scanStatus().catch(() => null);
       scan = s0;
       _scanWasRunning = !!(s0 && s0.running);
-      await loadLibrary();
+      await reloadActive();        // first page of the active (albums) tab
       startScanPolling();
       await Promise.all([refreshQueue('house'), refreshQueue('me')]);
-      // Pre-load discover genres (lists load on tab activation via loadDiscover).
       discoverGenres().then((g) => { discoverGenreList = Array.isArray(g) ? g : []; }).catch(() => {});
       _esHouse = subscribeEvents(HOUSE, (e) => {
         if (e.type === 'now-playing') {
@@ -260,13 +263,12 @@ export function createStore() {
     teardown() {
       if (_esHouse) { _esHouse(); _esHouse = null; }
       if (_scanTimer) { clearTimeout(_scanTimer); _scanTimer = null; }
+      if (_searchTimer) { clearTimeout(_searchTimer); _searchTimer = null; }
     },
 
     setStream(s) {
       if (s === stream) return;
       stream = s;
-      // Each stream keeps its own shuffle flag (UI + backend); switching just
-      // reveals the target stream's flag — don't push the old one onto it.
       pushToast('cyan', 'Stream', s === 'house'
         ? 'Tuned in to the house stream — everyone hears this.'
         : 'Switched to your personal stream.');
@@ -278,12 +280,22 @@ export function createStore() {
       await setShuffle(stream, shuffle[stream]);
     },
 
-    // Re-fetch a stream's queue (+ listeners) from the backend.
     refreshQueue(s) { return refreshQueue(s); },
 
-    openAlbum(id) { detailAlbumId = id; },
-    closeAlbum() { detailAlbumId = null; },
-    openArtist(a) { tab = 'tracks'; query = a.name; },
+    // Open the album dialog, fetching its tracks on demand. A sequence guard
+    // drops a stale response if a different album is opened before it resolves.
+    async openAlbum(card) {
+      const id = card.id;
+      detailAlbum = { id, name: card.name, artistName: card.artistName, tracks: [] };
+      const rows = await albumTracks(id);
+      if (detailAlbum && detailAlbum.id === id) {
+        detailAlbum = { ...detailAlbum, tracks: rows.map(mapTrack) };
+      }
+    },
+    closeAlbum() { detailAlbum = null; },
+    // openArtist jumps to the Tracks tab filtered by the artist name. Set state
+    // directly and reload immediately (no debounce) for a snappy jump.
+    openArtist(a) { tab = 'tracks'; query = a.name; reloadActive(); },
     openLineup() { lineupOpen = true; },
     closeLineup() { lineupOpen = false; },
     onResize() { const ph = window.innerWidth < 760; isPhone = ph; if (!ph) lineupOpen = false; },
@@ -341,20 +353,22 @@ export function createStore() {
     setProgress(s, sec) { progress[s] = sec; },
     setNowPlaying(s, np) { nowPlaying[s] = np; },
 
+    // npMeta maps an enriched track (from /next) to now-playing display fields.
     npMeta(t) {
       return {
-        code: codeForTrack(t), artistName: nameForArtist(t.artist_id),
-        albumName: albumNameFor(t.album_id), tone: toneForTrack(t),
+        code: t.code || '··', artistName: t.artist_name || 'Unknown',
+        albumName: t.album_name || '', tone: t.tone || 'magenta',
         cover: coverURL(t.id), gradient: gradientFor(t.id),
       };
     },
   };
 
+  // normalizeNP maps an enriched now-playing track (SSE/`/next`) to display shape.
   function normalizeNP(t) {
     return {
-      id: t.id, title: t.title, code: codeForTrack(t),
-      artistName: nameForArtist(t.artist_id), albumName: albumNameFor(t.album_id),
-      tone: toneForTrack(t), duration: t.duration || 0,
+      id: t.id, title: t.title, code: t.code || '··',
+      artistName: t.artist_name || 'Unknown', albumName: t.album_name || '',
+      tone: t.tone || 'magenta', duration: t.duration || 0,
       cover: coverURL(t.id), gradient: gradientFor(t.id),
     };
   }

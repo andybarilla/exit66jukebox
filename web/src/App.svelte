@@ -179,17 +179,17 @@
             onStartStation={(g) => s.startStation(g)}
             onStopStation={() => s.stopStation()}
           />
-        {:else if s.currentCount === 0}
+        {:else if !s.loading && s.currentCount === 0}
           <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; padding:70px 20px;">
             <div style="font-family:var(--font-display); font-weight:700; font-size:18px; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-muted);">No matches on this side</div>
             <div style="font-family:var(--font-sans); font-size:14px; color:var(--text-faint); max-width:300px;">Nothing in the crate matches that. Try another artist, album, or slot code.</div>
           </div>
         {:else if s.tab === 'albums'}
-          <AlbumGrid cards={s.albumCards} onOpen={(a) => s.openAlbum(a.id)} onRequest={(a) => s.requestAlbum(a)} />
+          <AlbumGrid cards={s.albumCards} onOpen={(a) => s.openAlbum(a)} onRequest={(a) => s.requestAlbum(a)} onLoadMore={() => s.loadMore()} />
         {:else if s.tab === 'artists'}
-          <ArtistList rows={s.artistRows} onOpen={(a) => s.openArtist(a)} onRequest={(a) => s.requestArtist(a)} />
+          <ArtistList rows={s.artistRows} onOpen={(a) => s.openArtist(a)} onRequest={(a) => s.requestArtist(a)} onLoadMore={() => s.loadMore()} />
         {:else}
-          <TrackList tracks={s.trackRows} nowPlayingId={np?.id} onAdd={(t) => s.requestTrack(t)} />
+          <TrackList tracks={s.trackRows} nowPlayingId={np?.id} onAdd={(t) => s.requestTrack(t)} onLoadMore={() => s.loadMore()} />
         {/if}
       </div>
     </main>

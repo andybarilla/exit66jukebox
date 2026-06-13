@@ -1,14 +1,30 @@
 const SESSION = 'me'; // single private stream id for v1; replaced by real session later
 
-// The library is loaded once and filtered client-side, so request the whole
-// collection. The cap is high enough to cover a large home library; tracks,
-// albums and artists must share the same ceiling or a track whose album fell
-// outside the cap would be dropped from the grouped view.
-const LIBRARY_LIMIT = 100000;
+// listPage fetches one page of a browse list, returning the rows plus the
+// unpaged total from X-Total-Count (falling back to the page length when the
+// header is absent so the caller's paging still terminates).
+async function listPage(path, search, offset, limit) {
+  const r = await fetch(
+    `${path}?search=${encodeURIComponent(search)}&offset=${offset}&limit=${limit}`);
+  const body = await r.json();
+  const items = Array.isArray(body) ? body : [];
+  const raw = r.headers.get('X-Total-Count');
+  const total = raw == null || raw === '' ? NaN : Number(raw);
+  return { items, total: Number.isFinite(total) ? total : items.length };
+}
 
-export async function listTracks(search = '') {
-  const r = await fetch(`/api/tracks?search=${encodeURIComponent(search)}&limit=${LIBRARY_LIMIT}`);
-  return r.json();
+export const listTracks = (search = '', offset = 0, limit = 100) =>
+  listPage('/api/tracks', search, offset, limit);
+export const listAlbums = (search = '', offset = 0, limit = 100) =>
+  listPage('/api/albums', search, offset, limit);
+export const listArtists = (search = '', offset = 0, limit = 100) =>
+  listPage('/api/artists', search, offset, limit);
+
+// albumTracks returns one album's enriched tracks for the album dialog.
+export async function albumTracks(albumId) {
+  const r = await fetch(`/api/albums/${albumId}/tracks`);
+  const body = await r.json();
+  return Array.isArray(body) ? body : [];
 }
 export async function requestTrack(trackId) {
   const body = new URLSearchParams({ kind: 'track', id: String(trackId) });
@@ -96,15 +112,6 @@ export function subscribeEvents(streamId, onEvent) {
     try { onEvent(JSON.parse(m.data)); } catch (_) {}
   };
   return () => es.close();
-}
-
-export async function listArtists(search = '') {
-  const r = await fetch(`/api/artists?search=${encodeURIComponent(search)}&limit=${LIBRARY_LIMIT}`);
-  return r.json();
-}
-export async function listAlbums(search = '') {
-  const r = await fetch(`/api/albums?search=${encodeURIComponent(search)}&limit=${LIBRARY_LIMIT}`);
-  return r.json();
 }
 
 // requestTo sends the requester name and a kind (track|album|artist).
