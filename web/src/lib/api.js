@@ -87,6 +87,13 @@ export async function discoverGenres() {
   const r = await fetch('/api/discover/genres');
   return r.json(); // [{genre, count}]
 }
+// discoverRecommended returns externally-sourced recommendations mapped to local
+// tracks (enriched). Empty when no service is configured or none mapped yet.
+export async function discoverRecommended() {
+  const r = await fetch('/api/discover/recommended');
+  const body = await r.json();
+  return Array.isArray(body) ? body : [];
+}
 export async function getStation(streamId) {
   const r = await fetch(`/api/streams/${streamId}/station`);
   return r.json(); // {stream_id, genre, threshold, batch} or {}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { listTracks, listAlbums, listArtists } from './api.js';
+import { listTracks, listAlbums, listArtists, discoverRecommended } from './api.js';
 
 function mockFetch(items, totalHeader) {
   global.fetch = vi.fn(async (url) => ({
@@ -35,5 +35,20 @@ describe('paged list api', () => {
     const r = await listArtists('', 0, 50);
     expect(r.items).toEqual([]);
     expect(r.total).toBe(0);
+  });
+});
+
+describe('discoverRecommended', () => {
+  it('GETs the recommended endpoint and returns the array body', async () => {
+    global.fetch = vi.fn(async () => ({ json: async () => [{ id: 7 }] }));
+    const r = await discoverRecommended();
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/discover/recommended');
+    expect(r).toEqual([{ id: 7 }]);
+  });
+
+  it('tolerates a non-array body', async () => {
+    global.fetch = vi.fn(async () => ({ json: async () => ({ error: 'x' }) }));
+    const r = await discoverRecommended();
+    expect(r).toEqual([]);
   });
 });

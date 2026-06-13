@@ -1,7 +1,7 @@
 import {
   listTracks, listAlbums, listArtists, albumTracks, getQueue, requestTo, removeRequest,
   setShuffle, subscribeEvents, coverURL, albumCoverURL, HOUSE,
-  discoverGenres, discoverRediscover, discoverRecent,
+  discoverGenres, discoverRediscover, discoverRecent, discoverRecommended,
   getStation, startStation as apiStartStation, stopStation as apiStopStation,
   scanStatus,
 } from './api.js';
@@ -45,6 +45,7 @@ export function createStore() {
   let discoverSelectedGenre = $state('');
   let discoverRediscoverRows = $state([]);
   let discoverRecentRows = $state([]);
+  let discoverRecommendedRows = $state([]); // external recs mapped to local tracks
   let discoverStation = $state(null);     // {stream_id, genre, threshold, batch} | null
 
   let _uid = 0;
@@ -195,6 +196,13 @@ export function createStore() {
     discoverStation = r?.genre ? r : null;
   }
 
+  // Recommendations are externally sourced (not genre-filtered), so they load
+  // once with the Discover tab rather than on every genre change.
+  async function loadRecommended() {
+    const rec = await discoverRecommended();
+    discoverRecommendedRows = (Array.isArray(rec) ? rec : []).map(mapTrack);
+  }
+
   function pushToast(tone, title, message) {
     const id = ++_uid;
     toasts = [...toasts, { id, tone, title, message }];
@@ -232,7 +240,7 @@ export function createStore() {
     // currentCount is the server total ("N in the crate"); loading distinguishes
     // "still fetching" from "genuinely empty" so the empty state doesn't flash.
     get currentCount() {
-      if (tab === 'discover') return discoverRediscoverRows.length + discoverRecentRows.length;
+      if (tab === 'discover') return discoverRecommendedRows.length + discoverRediscoverRows.length + discoverRecentRows.length;
       return isBrowseTab(tab) ? view[tab].total : 0;
     },
     get loading() { return isBrowseTab(tab) ? view[tab].loading : false; },
@@ -244,6 +252,7 @@ export function createStore() {
     get discoverSelectedGenre() { return discoverSelectedGenre; },
     get discoverRediscover() { return discoverRediscoverRows; },
     get discoverRecent() { return discoverRecentRows; },
+    get discoverRecommended() { return discoverRecommendedRows; },
     get discoverStation() { return discoverStation; },
     get detailAlbum() { return detailAlbum; },
 
@@ -336,7 +345,7 @@ export function createStore() {
     async loadDiscover() {
       const genres = await discoverGenres();
       discoverGenreList = Array.isArray(genres) ? genres : [];
-      await Promise.all([loadDiscoverLists(discoverSelectedGenre), loadStation()]);
+      await Promise.all([loadDiscoverLists(discoverSelectedGenre), loadRecommended(), loadStation()]);
     },
     async setDiscoverGenre(genre) {
       discoverSelectedGenre = genre;

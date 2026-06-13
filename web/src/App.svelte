@@ -173,6 +173,7 @@
             onGenre={(g) => s.setDiscoverGenre(g)}
             rediscover={s.discoverRediscover}
             recent={s.discoverRecent}
+            recommended={s.discoverRecommended}
             nowPlayingId={np?.id}
             onAdd={(t) => s.requestTrack(t)}
             station={s.discoverStation}
