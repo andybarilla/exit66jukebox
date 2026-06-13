@@ -1,0 +1,28 @@
+# Build + run the legacy Java/Jetty/HSQLDB Exit 66 Jukebox (git tag legacy/java-v5).
+# Build context must be the legacy/java-v5 source tree — use ./run-legacy.sh, which
+# extracts the tag into a temp context and builds with this file.
+#
+# Compile directly with javac/jar: the Ant build's `init` target requires IzPack
+# (a Windows installer compiler) that isn't needed to produce the runnable jar.
+FROM eclipse-temurin:8-jdk AS build
+WORKDIR /app
+COPY src ./src
+COPY lib ./lib
+RUN set -eux; \
+    CP=$(echo lib/*.jar | tr ' ' ':'); \
+    mkdir build; \
+    find src -name '*.java' > sources.txt; \
+    javac -encoding UTF-8 -cp "$CP" -d build @sources.txt; \
+    printf 'Main-Class: com.exit66.jukebox.Exit66Jukebox\nClass-Path: hsqldb.jar jakarta-regexp-1.5.jar jetty-all-7.4.2.v20110526.jar jorbis-0.0.17.jar servlet-api-2.5.jar sharedlib.jar myid3.jar\n' > manifest.txt; \
+    jar cfm exit66jb.jar manifest.txt -C build .
+
+FROM eclipse-temurin:8-jre
+WORKDIR /app
+COPY --from=build /app/exit66jb.jar ./exit66jb.jar
+COPY lib/*.jar ./
+COPY web ./web
+# Pre-seed options: non-privileged port, sound server off (headless, no audio device).
+RUN printf 'webserverport=8080\nusesoundserver=0\n' > exit66jb.opt
+EXPOSE 8080
+# `console` => headless server (no AWT system-tray GUI); `nolog` => logs to stdout.
+CMD ["java", "-jar", "exit66jb.jar", "console", "nolog"]
