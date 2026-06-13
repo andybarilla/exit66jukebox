@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   listTracks, listAlbums, listArtists, discoverRecommended,
-  getSonosVolume, setSonosVolume, addManualSonos, nextHouse,
+  getSonosVolume, setSonosVolume, addManualSonos, nextHouse, getConfig,
 } from './api.js';
 
 function mockFetch(items, totalHeader) {
@@ -90,5 +90,14 @@ describe('sonos volume + manual ip', () => {
     global.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
     await nextHouse();
     expect(global.fetch.mock.calls[0][0]).toBe('/api/streams/house/next');
+  });
+});
+
+describe('getConfig', () => {
+  it('GETs /api/config and returns the parsed body', async () => {
+    global.fetch = vi.fn(async () => ({ json: async () => ({ mute_local_on_cast: true }) }));
+    const r = await getConfig();
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/config');
+    expect(r).toEqual({ mute_local_on_cast: true });
   });
 });
