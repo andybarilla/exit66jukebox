@@ -136,6 +136,60 @@ func TestDrainIgnoresUnwiredService(t *testing.T) {
 	}
 }
 
+type disabledSub struct{ calls int }
+
+func (d *disabledSub) Submit(ctx context.Context, listens []external.Listen) error {
+	d.calls++
+	return external.ErrServiceDisabled
+}
+
+// A submitter that reports ErrServiceDisabled must not have its rows bumped or
+// deleted, and the cycle must not count as a failure (so the shared backoff
+// doesn't penalize other services). Rows stay queued for a later re-auth.
+func TestDrainServiceDisabledLeavesRowsNoFailure(t *testing.T) {
+	db, trackID := newScrobbleDB(t)
+	defer db.Close()
+	store.EnqueueScrobble(db, []string{"lastfm"}, trackID, 1000)
+
+	sub := &disabledSub{}
+	d := NewDrainer(db, map[string]Submitter{"lastfm": sub}, 50)
+	if failed := d.DrainOnce(context.Background()); failed {
+		t.Fatal("disabled service must not count as a drain failure")
+	}
+	rows, _ := store.ScrobbleBatch(db, "lastfm", 50)
+	if len(rows) != 1 {
+		t.Fatalf("disabled service must retain rows, got %d", len(rows))
+	}
+	if rows[0].Attempts != 0 {
+		t.Fatalf("disabled service must not bump attempts, got %d", rows[0].Attempts)
+	}
+}
+
+// A disabled Last.fm in the same cycle as a healthy ListenBrainz must not drag
+// the healthy one: ListenBrainz still drains and the cycle reports no failure.
+func TestDrainDisabledDoesNotBlockHealthyService(t *testing.T) {
+	db, trackID := newScrobbleDB(t)
+	defer db.Close()
+	store.EnqueueScrobble(db, []string{"listenbrainz", "lastfm"}, trackID, 1000)
+
+	lb := &fakeSub{}
+	d := NewDrainer(db, map[string]Submitter{"listenbrainz": lb, "lastfm": &disabledSub{}}, 50)
+	if failed := d.DrainOnce(context.Background()); failed {
+		t.Fatal("healthy + disabled cycle should report no failure")
+	}
+	if len(lb.batches) != 1 {
+		t.Fatalf("listenbrainz should have drained, got %d batches", len(lb.batches))
+	}
+	lbRows, _ := store.ScrobbleBatch(db, "listenbrainz", 50)
+	if len(lbRows) != 0 {
+		t.Fatalf("listenbrainz rows should be drained, got %d", len(lbRows))
+	}
+	lfRows, _ := store.ScrobbleBatch(db, "lastfm", 50)
+	if len(lfRows) != 1 {
+		t.Fatalf("lastfm rows should be retained, got %d", len(lfRows))
+	}
+}
+
 func TestNextInterval(t *testing.T) {
 	base := nextInterval(baseInterval, 0)
 	if base != baseInterval {
