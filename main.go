@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -23,6 +26,13 @@ import (
 )
 
 func main() {
+	// One-time Last.fm authorization, before flag parsing (the subcommand name is
+	// not a flag). Remaining args (e.g. -db) are parsed normally.
+	if len(os.Args) > 1 && os.Args[1] == "lastfm-auth" {
+		runLastfmAuth(os.Args[2:])
+		return
+	}
+
 	cfg, err := config.Parse(os.Args[1:])
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -40,14 +50,25 @@ func main() {
 	// enrichment + scrobbling). Scrobble services are configured from env; a
 	// service with no credentials stays disabled and the app runs as before.
 	extClient := external.New("exit66jukebox/0.1 (+https://github.com/andybarilla/exit66jukebox)", time.Second)
-	var lb *external.ListenBrainz
-	var enabledServices []string
 	submitters := map[string]scrobble.Submitter{}
+	// nowPlayers receive a fire-and-forget notification on each track start.
+	var nowPlayers []nowPlayer
+	var lb *external.ListenBrainz
 	if cfg.Services.ListenBrainzEnabled() {
 		lb = external.NewListenBrainz(extClient, cfg.Services.ListenBrainzToken)
 		submitters["listenbrainz"] = lb
-		enabledServices = append(enabledServices, "listenbrainz")
+		nowPlayers = append(nowPlayers, lb)
 		log.Print("ListenBrainz scrobbling enabled")
+	}
+	// Last.fm is enabled only when configured AND a session key was persisted by
+	// `exit66 lastfm-auth`; otherwise the client is nil (disabled / pending auth).
+	lfm := newLastfm(extClient, db, cfg.Services)
+	if lfm != nil {
+		submitters["lastfm"] = lfm
+		nowPlayers = append(nowPlayers, lfm)
+		log.Print("Last.fm scrobbling enabled")
+	} else if cfg.Services.LastfmConfigured() {
+		log.Print("Last.fm configured but not authorized; run `exit66 lastfm-auth`")
 	}
 
 	// Initial scan in the background so the server comes up immediately. The
@@ -96,8 +117,10 @@ func main() {
 	// network work (now-playing) is fire-and-forget so it never stalls playback.
 	houseNP := api.NewNowPlaying()
 	rootCtx := context.Background()
+	// Services are resolved per call, not captured once: Last.fm can self-disable
+	// at runtime (error 9), and nothing should be enqueued for it after that.
 	enqueue := func(trackID, playedAt int64) error {
-		return store.EnqueueScrobble(db, enabledServices, trackID, playedAt)
+		return store.EnqueueScrobble(db, activeScrobbleServices(cfg.Services.ListenBrainzEnabled(), lfm), trackID, playedAt)
 	}
 	settle := func() {
 		prev, offset, ok := houseNP.Current()
@@ -131,13 +154,18 @@ func main() {
 		settle()
 		playing = true
 		houseNP.Set(tr)
-		// Now-playing is fire-and-forget — never queued, never retried.
-		if lb != nil {
+		// Now-playing is fire-and-forget — never queued, never retried — and fans
+		// out to every enabled service (ListenBrainz, Last.fm).
+		if len(nowPlayers) > 0 {
 			id := tr.ID
 			go func() {
-				if m, ok, err := store.ScrobbleMetadata(db, id); err == nil && ok {
-					_ = lb.NowPlaying(rootCtx, external.ListenMeta{
-						ArtistName: m.ArtistName, TrackName: m.TrackName, ReleaseName: m.ReleaseName})
+				m, ok, err := store.ScrobbleMetadata(db, id)
+				if err != nil || !ok {
+					return
+				}
+				meta := external.ListenMeta{ArtistName: m.ArtistName, TrackName: m.TrackName, ReleaseName: m.ReleaseName}
+				for _, np := range nowPlayers {
+					_ = np.NowPlaying(rootCtx, meta)
 				}
 			}()
 		}
@@ -182,4 +210,87 @@ func main() {
 	if err := http.ListenAndServe(cfg.Addr, srv.Handler()); err != nil {
 		log.Fatalf("server: %v", err)
 	}
+}
+
+// nowPlayer is anything that accepts a fire-and-forget now-playing notification.
+// Both ListenBrainz and Last.fm clients satisfy it.
+type nowPlayer interface {
+	NowPlaying(context.Context, external.ListenMeta) error
+}
+
+// newLastfm builds a Last.fm client only when it is both configured (env creds)
+// and authorized (a persisted session key). It returns nil otherwise — disabled
+// or pending `exit66 lastfm-auth`. On an invalid session at runtime the client
+// clears its service_auth row, reverting cleanly to pending-auth.
+func newLastfm(c *external.Client, db *sql.DB, svc config.Services) *external.Lastfm {
+	if !svc.LastfmConfigured() {
+		return nil
+	}
+	key, _, ok, err := store.GetServiceAuth(db, "lastfm")
+	if err != nil {
+		log.Printf("lastfm: reading session: %v", err)
+		return nil
+	}
+	if !ok {
+		return nil
+	}
+	lfm := external.NewLastfm(c, svc.LastfmAPIKey, svc.LastfmAPISecret, key)
+	lfm.SetOnDisabled(func() {
+		if err := store.DeleteServiceAuth(db, "lastfm"); err != nil {
+			log.Printf("lastfm: clearing invalid session: %v", err)
+		}
+	})
+	return lfm
+}
+
+// activeScrobbleServices is the live set of services to enqueue for, recomputed
+// each call so a Last.fm self-disable (error 9) stops enqueueing immediately.
+func activeScrobbleServices(listenBrainz bool, lfm *external.Lastfm) []string {
+	var svcs []string
+	if listenBrainz {
+		svcs = append(svcs, "listenbrainz")
+	}
+	if lfm != nil && lfm.Authorized() {
+		svcs = append(svcs, "lastfm")
+	}
+	return svcs
+}
+
+// runLastfmAuth performs the one-time desktop auth flow: getToken, prompt the
+// user to approve in a browser, getSession, and persist the session key.
+func runLastfmAuth(args []string) {
+	cfg, err := config.Parse(args)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	if !cfg.Services.LastfmConfigured() {
+		log.Fatal("set EXIT66_LASTFM_API_KEY and EXIT66_LASTFM_API_SECRET first")
+	}
+	db, err := store.Open(cfg.DBPath)
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	c := external.New("exit66jukebox/0.1 (+https://github.com/andybarilla/exit66jukebox)", time.Second)
+	lfm := external.NewLastfm(c, cfg.Services.LastfmAPIKey, cfg.Services.LastfmAPISecret, "")
+	ctx := context.Background()
+
+	token, err := lfm.GetToken(ctx)
+	if err != nil {
+		log.Fatalf("lastfm getToken: %v", err)
+	}
+	fmt.Println("Open this URL in a browser and approve access:")
+	fmt.Println("  " + lfm.AuthorizeURL(token))
+	fmt.Print("Press Enter once you have approved... ")
+	bufio.NewReader(os.Stdin).ReadString('\n')
+
+	key, username, err := lfm.GetSession(ctx, token)
+	if err != nil {
+		log.Fatalf("lastfm getSession: %v", err)
+	}
+	if err := store.PutServiceAuth(db, "lastfm", key, username); err != nil {
+		log.Fatalf("persist session: %v", err)
+	}
+	fmt.Printf("Last.fm authorized as %s.\n", username)
 }
