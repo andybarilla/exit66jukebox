@@ -1,14 +1,20 @@
 <script>
   import { toneGradient } from '../format.js';
   let { position = 1, title = 'Untitled', artist = 'Unknown', code = 'A6',
-        requester = '', tone = 'magenta', onRemove } = $props();
+        cover = null, gradient = null, requester = '', tone = 'magenta', onRemove } = $props();
+  let artFailed = $state(false);
+  const tile = $derived(gradient || toneGradient(tone));
   const initials = $derived(requester.split(' ').map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase());
 </script>
 <div class="qi" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:var(--radius-md); background:var(--bg-surface); border:1px solid var(--border-default); transition:background var(--dur) var(--ease-out);">
   <span style="color:var(--text-disabled); font-size:14px; letter-spacing:-2px; flex:none;">⋮⋮</span>
   <span style="font-family:var(--font-mono); font-size:15px; font-weight:700; color:var(--neon-cyan); width:22px; text-align:center; flex:none;">{position}</span>
-  <div style="width:38px; height:38px; flex:none; border-radius:var(--radius-sm); background:{toneGradient(tone)}; display:flex; align-items:flex-end; padding:4px; box-sizing:border-box;">
-    <span style="font-family:var(--font-mono); font-size:8px; font-weight:700; color:rgba(255,255,255,0.85);">{code}</span>
+  <div style="position:relative; width:38px; height:38px; flex:none; border-radius:var(--radius-sm); overflow:hidden; background:{tile}; display:flex; align-items:flex-end; padding:4px; box-sizing:border-box;">
+    {#if cover && !artFailed}
+      <img src={cover} alt="" onerror={() => (artFailed = true)} style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover;" />
+    {:else}
+      <span style="font-family:var(--font-mono); font-size:8px; font-weight:700; color:rgba(255,255,255,0.85);">{code}</span>
+    {/if}
   </div>
   <div style="flex:1; min-width:0;">
     <div style="font-family:var(--font-sans); font-weight:600; font-size:14px; color:var(--text-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{title}</div>
