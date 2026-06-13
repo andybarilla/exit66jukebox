@@ -126,7 +126,8 @@ func (l *ListenBrainz) Recommendations(ctx context.Context, user string, count i
 			} `json:"mbids"`
 		} `json:"payload"`
 	}
-	if err := l.c.getJSON(ctx, u, &resp); err != nil {
+	if err := l.c.getJSONAuth(ctx, u,
+		map[string]string{"Authorization": "Token " + l.token}, &resp); err != nil {
 		return nil, err
 	}
 	out := make([]RecRecording, len(resp.Payload.MBIDs))

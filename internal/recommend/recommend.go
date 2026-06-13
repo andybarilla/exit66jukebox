@@ -84,11 +84,8 @@ func (r *Runner) Get() []model.EnrichedTrack {
 // to local tracks, dedupe, enrich, and store. Used by Get's background goroutine
 // and directly in tests.
 func (r *Runner) Refresh(ctx context.Context) {
-	tracks := r.gather(ctx)
+	tracks := r.gather(ctx) // always non-nil (empty slice when no sources match)
 	r.mu.Lock()
-	if r.cache == nil {
-		r.cache = []model.EnrichedTrack{}
-	}
 	r.cache = tracks
 	r.lastRefresh = r.now()
 	r.mu.Unlock()

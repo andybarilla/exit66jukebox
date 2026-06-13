@@ -51,10 +51,11 @@ func TestListenBrainzUsernameInvalidToken(t *testing.T) {
 }
 
 func TestListenBrainzRecommendations(t *testing.T) {
-	var gotPath, gotQuery string
+	var gotPath, gotQuery, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
+		gotAuth = r.Header.Get("Authorization")
 		w.Write([]byte(`{"payload":{"mbids":[
 			{"recording_mbid":"rec-1","score":0.91},
 			{"recording_mbid":"rec-2","score":0.42}
@@ -75,6 +76,11 @@ func TestListenBrainzRecommendations(t *testing.T) {
 	}
 	if gotQuery != "count=25" {
 		t.Errorf("query = %q, want count=25", gotQuery)
+	}
+	// The token is sent as a fail-safe: harmless on a public endpoint, required
+	// if ListenBrainz gates per-user recommendations behind auth.
+	if gotAuth != "Token tok" {
+		t.Errorf("auth = %q, want Token tok", gotAuth)
 	}
 	if len(recs) != 2 {
 		t.Fatalf("recs = %d, want 2", len(recs))
