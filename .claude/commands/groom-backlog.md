@@ -18,9 +18,12 @@ Argument: `$ARGUMENTS`
 - If empty, groom every `Backlog` item:
 
   ```bash
-  gh project item-list 2 --owner andybarilla --format json \
+  gh project item-list 2 --owner andybarilla --limit 200 --format json \
     --jq '[.items[] | select(.status=="Backlog") | .content.number] | sort'
   ```
+
+  `--limit 200` is required: the default caps at 30 items, and `Done` items will
+  otherwise bury the Backlog (the board has 40+ items total).
 
 ## 2. Ensure the `groomed` label exists
 
@@ -59,7 +62,7 @@ Do the `/plan-issue` `small`-tier procedure:
    FIELD_ID=PVTSSF_lAHOAFtOQM4BaYspzhVQr60
    READY_OPT=$(gh api graphql -f query='query{node(id:"'$FIELD_ID'"){... on ProjectV2SingleSelectField{options{id name}}}}' \
      --jq '.data.node.options[] | select(.name=="Ready") | .id')
-   ITEM_ID=$(gh project item-list 2 --owner andybarilla --format json \
+   ITEM_ID=$(gh project item-list 2 --owner andybarilla --limit 200 --format json \
      --jq '.items[] | select(.content.number==<n>) | .id')
    gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" \
      --field-id "$FIELD_ID" --single-select-option-id "$READY_OPT"
