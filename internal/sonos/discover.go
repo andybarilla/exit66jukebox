@@ -122,6 +122,20 @@ func parseDeviceName(b []byte) string {
 	return d.Device.FriendlyName
 }
 
+// DescriptorURL is the device-description endpoint of a Sonos player, used to
+// verify a manually-entered IP actually serves a Sonos device.
+func DescriptorURL(ip string) string {
+	return "http://" + ip + ":1400/xml/device_description.xml"
+}
+
+// Verify GETs a device descriptor and returns the room name. ok is false if the
+// host doesn't answer as a Sonos (no descriptor / no name), so a manual IP is
+// only trusted when it actually serves a Sonos descriptor.
+func Verify(descriptorURL string) (name string, ok bool) {
+	name = fetchName(descriptorURL)
+	return name, name != ""
+}
+
 func fetchName(location string) string {
 	if location == "" {
 		return ""
