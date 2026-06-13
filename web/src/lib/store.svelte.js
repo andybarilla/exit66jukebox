@@ -160,6 +160,14 @@ export function createStore() {
     const r = await getQueue(s);
     queues[s] = (r.queue || []).map(normalizeQueued);
     if (typeof r.listeners === 'number') listeners[s] = r.listeners;
+    // Seed now-playing on first load / after a reconnect so a client tuning in
+    // mid-track shows the current track immediately instead of waiting for the
+    // next SSE event. Only when local state is still empty, so we never fight a
+    // live `now-playing` event or the running progress tick once they take over.
+    if (r.now_playing && nowPlaying[s] == null) {
+      nowPlaying[s] = normalizeNP(r.now_playing.track);
+      progress[s] = r.now_playing.offset_seconds || 0;
+    }
   }
 
   // Queue items are {track:{...enriched...}, requested_by} for /me; the house
