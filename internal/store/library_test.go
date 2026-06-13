@@ -17,11 +17,11 @@ func TestUpsertTrackIsIdempotent(t *testing.T) {
 		Path: "/music/a.mp3", ModTime: 100, Size: 2048,
 		Title: "Song A", TrackNo: 1, Genre: "Rock", Duration: 180,
 	}
-	id1, err := UpsertTrack(db, tr, "The Band", "First Album")
+	id1, err := UpsertTrack(db, tr, "The Band", "", "First Album")
 	if err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
-	id2, err := UpsertTrack(db, tr, "The Band", "First Album")
+	id2, err := UpsertTrack(db, tr, "The Band", "", "First Album")
 	if err != nil {
 		t.Fatalf("second upsert: %v", err)
 	}
@@ -39,9 +39,9 @@ func TestUpsertTrackIsIdempotent(t *testing.T) {
 func TestListTracksSearchAndPage(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()
-	UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "Blue Sky"}, "A", "X")
-	UpsertTrack(db, model.Track{Path: "/m/2.mp3", Title: "Red Moon"}, "B", "Y")
-	UpsertTrack(db, model.Track{Path: "/m/3.mp3", Title: "Blue Moon"}, "C", "Z")
+	UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "Blue Sky"}, "A", "", "X")
+	UpsertTrack(db, model.Track{Path: "/m/2.mp3", Title: "Red Moon"}, "B", "", "Y")
+	UpsertTrack(db, model.Track{Path: "/m/3.mp3", Title: "Blue Moon"}, "C", "", "Z")
 
 	all, err := ListTracks(db, "", 10, 0)
 	if err != nil {

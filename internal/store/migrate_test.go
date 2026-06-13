@@ -100,6 +100,60 @@ func TestMigrateAddsMbidColumns(t *testing.T) {
 	}
 }
 
+// TestMigrateForcesRescanOnVersionBump verifies a stored library_version behind
+// currentLibraryVersion zeroes every track's mod_time/size (so the next scan
+// re-reads all files) and stamps the new version.
+func TestMigrateForcesRescanOnVersionBump(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Seed an indexed track and rewind the library version to mimic a pre-#32 DB.
+	if _, err := db.Exec(`INSERT INTO artist(name) VALUES('A')`); err != nil {
+		t.Fatalf("artist: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO album(name, artist_id) VALUES('X', 1)`); err != nil {
+		t.Fatalf("album: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO track(path, mod_time, size, title, artist_id, album_id)
+		 VALUES('/m/a.mp3', 111, 222, 'A', 1, 1)`); err != nil {
+		t.Fatalf("track: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM meta WHERE key = 'library_version'`); err != nil {
+		t.Fatalf("reset version: %v", err)
+	}
+
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	var mt, sz int64
+	db.QueryRow(`SELECT mod_time, size FROM track WHERE path='/m/a.mp3'`).Scan(&mt, &sz)
+	if mt != 0 || sz != 0 {
+		t.Fatalf("expected mod_time/size zeroed to force re-scan, got %d/%d", mt, sz)
+	}
+	var v int
+	db.QueryRow(`SELECT value FROM meta WHERE key='library_version'`).Scan(&v)
+	if v != currentLibraryVersion {
+		t.Fatalf("expected library_version stamped to %d, got %d", currentLibraryVersion, v)
+	}
+
+	// Re-running migrate is a no-op: the stamp prevents re-zeroing.
+	if _, err := db.Exec(`UPDATE track SET mod_time=999, size=999`); err != nil {
+		t.Fatalf("restamp: %v", err)
+	}
+	if err := migrate(db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	db.QueryRow(`SELECT mod_time FROM track WHERE path='/m/a.mp3'`).Scan(&mt)
+	if mt != 999 {
+		t.Fatalf("expected second migrate to leave mod_time untouched, got %d", mt)
+	}
+}
+
 func TestMigrateBackfillsFromModTime(t *testing.T) {
 	db, err := Open(":memory:")
 	if err != nil {

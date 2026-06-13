@@ -56,7 +56,7 @@ func TestEnrichStartReturnsStatusAndFlipsRunning(t *testing.T) {
 func TestServeCoverFallsBackToCachedCover(t *testing.T) {
 	srv := newTestServer(t)
 	// Track file does not exist => no embedded art => fall back to album cover.
-	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/no/such/file.mp3", Title: "X"}, "A", "B")
+	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/no/such/file.mp3", Title: "X"}, "A", "", "B")
 	tr, _, _ := store.GetTrack(srv.db, id)
 
 	cover := filepath.Join(t.TempDir(), "cover.png")

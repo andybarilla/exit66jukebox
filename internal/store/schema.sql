@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS track (
 CREATE INDEX IF NOT EXISTS idx_track_artist ON track(artist_id);
 CREATE INDEX IF NOT EXISTS idx_track_album  ON track(album_id);
 
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS stream (
     id   TEXT PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',

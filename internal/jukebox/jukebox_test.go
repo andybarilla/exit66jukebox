@@ -11,7 +11,7 @@ import (
 func TestRequestRejectsDuplicateAndRecent(t *testing.T) {
 	db, _ := store.Open(":memory:")
 	defer db.Close()
-	id, _ := store.UpsertTrack(db, model.Track{Path: "/m/a.mp3", Title: "A"}, "Band", "Album")
+	id, _ := store.UpsertTrack(db, model.Track{Path: "/m/a.mp3", Title: "A"}, "Band", "", "Album")
 
 	jb := New(db, Config{HistoryWindow: 5})
 	jb.EnsureStream("sess1", "private")
@@ -45,8 +45,8 @@ func TestNextEmptyQueue(t *testing.T) {
 func TestRequestAlbumQueuesAllTracks(t *testing.T) {
 	db, _ := store.Open(":memory:")
 	defer db.Close()
-	store.UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "One", TrackNo: 1}, "Band", "LP")
-	store.UpsertTrack(db, model.Track{Path: "/m/2.mp3", Title: "Two", TrackNo: 2}, "Band", "LP")
+	store.UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "One", TrackNo: 1}, "Band", "", "LP")
+	store.UpsertTrack(db, model.Track{Path: "/m/2.mp3", Title: "Two", TrackNo: 2}, "Band", "", "LP")
 
 	var albumID int64
 	db.QueryRow(`SELECT id FROM album WHERE name='LP'`).Scan(&albumID)
@@ -66,7 +66,7 @@ func TestRequestAlbumQueuesAllTracks(t *testing.T) {
 func TestRequestAllowsRepeatWhenWindowZero(t *testing.T) {
 	db, _ := store.Open(":memory:")
 	defer db.Close()
-	id, _ := store.UpsertTrack(db, model.Track{Path: "/m/z.mp3", Title: "Z"}, "B", "A")
+	id, _ := store.UpsertTrack(db, model.Track{Path: "/m/z.mp3", Title: "Z"}, "B", "", "A")
 	jb := New(db, Config{HistoryWindow: 0})
 	jb.EnsureStream("s", "private")
 	if got, _ := jb.Request("s", id, ""); got != Requested {
@@ -81,7 +81,7 @@ func TestRequestAllowsRepeatWhenWindowZero(t *testing.T) {
 func TestQueueReturnsRequester(t *testing.T) {
 	db, _ := store.Open(":memory:")
 	defer db.Close()
-	id, _ := store.UpsertTrack(db, model.Track{Path: "/m/a.mp3", Title: "A"}, "Band", "LP")
+	id, _ := store.UpsertTrack(db, model.Track{Path: "/m/a.mp3", Title: "A"}, "Band", "", "LP")
 	jb := New(db, Config{HistoryWindow: 0})
 	jb.EnsureStream("s", "private")
 	if _, err := jb.Request("s", id, "Mira"); err != nil {
@@ -102,7 +102,7 @@ func TestShuffleFlagDrivesNext(t *testing.T) {
 	jb := New(db, Config{HistoryWindow: 0})
 	jb.EnsureStream("s", "private")
 	for _, ti := range []string{"A", "B", "C"} {
-		id, _ := store.UpsertTrack(db, model.Track{Path: "/m/" + ti + ".mp3", Title: ti}, "Band", "LP")
+		id, _ := store.UpsertTrack(db, model.Track{Path: "/m/" + ti + ".mp3", Title: ti}, "Band", "", "LP")
 		jb.Request("s", id, "")
 	}
 	jb.SetShuffle("s", true)
@@ -126,7 +126,7 @@ func TestStartStationFillsEmptyQueue(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		store.UpsertTrack(db, model.Track{
 			Path: fmt.Sprintf("/m/%d.mp3", i), Title: fmt.Sprintf("T%d", i), Genre: "Rock",
-		}, "Band", "Album")
+		}, "Band", "", "Album")
 	}
 
 	if err := jb.StartStation("s", "Rock", 3, 10); err != nil {
@@ -146,7 +146,7 @@ func TestNextRefillsBelowThreshold(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		store.UpsertTrack(db, model.Track{
 			Path: fmt.Sprintf("/m/%d.mp3", i), Title: fmt.Sprintf("T%d", i), Genre: "Rock",
-		}, "Band", "Album")
+		}, "Band", "", "Album")
 	}
 	jb.StartStation("s", "Rock", 3, 10) // fills to 10
 
@@ -170,7 +170,7 @@ func TestStopStationStopsRefill(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		store.UpsertTrack(db, model.Track{
 			Path: fmt.Sprintf("/m/%d.mp3", i), Title: fmt.Sprintf("T%d", i), Genre: "Rock",
-		}, "Band", "Album")
+		}, "Band", "", "Album")
 	}
 	jb.StartStation("s", "Rock", 3, 10)
 	if err := jb.StopStation("s"); err != nil {
