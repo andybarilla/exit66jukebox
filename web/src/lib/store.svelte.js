@@ -24,10 +24,13 @@ export function createStore() {
   // Browse state per tab. Slot codes/tones/names are carried by the backend on
   // each row (#53), so the client no longer holds or groups the whole library.
   // Each tab fetches windowed pages on demand and appends as the user scrolls.
+  // Seed loading:true so the first paint (before init's scanStatus round-trip and
+  // first fetch resolve) shows an empty list, not a flash of the "No matches"
+  // empty state, which is gated on !loading.
   let view = $state({
-    albums: { items: [], total: 0, loading: false },
-    artists: { items: [], total: 0, loading: false },
-    tracks: { items: [], total: 0, loading: false },
+    albums: { items: [], total: 0, loading: true },
+    artists: { items: [], total: 0, loading: true },
+    tracks: { items: [], total: 0, loading: true },
   });
   let scan = $state(null);      // /api/scan snapshot {running,added,...} | null
 
