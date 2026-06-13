@@ -114,6 +114,27 @@ func TestQueueItemsEnriched(t *testing.T) {
 	}
 }
 
+func TestDiscoverEnriched(t *testing.T) {
+	srv := newTestServer(t)
+	seedAPILibrary(t, srv)
+	// No genre filter → "recent" returns the seeded tracks (added_at is set on
+	// upsert), so this asserts real enrichment rather than passing on an empty list.
+	rec := get(t, srv, "/api/discover/recent")
+	var tracks []model.EnrichedTrack
+	json.Unmarshal(rec.Body.Bytes(), &tracks)
+	if len(tracks) != 3 {
+		t.Fatalf("expected 3 discover rows, got %d (%s)", len(tracks), rec.Body.String())
+	}
+	for _, tr := range tracks {
+		if tr.Code == "" || tr.ArtistName == "" {
+			t.Fatalf("discover row not enriched: %+v", tr)
+		}
+		if tr.Title == "Money" && tr.Code != "B1" {
+			t.Errorf("Money code = %q, want B1", tr.Code)
+		}
+	}
+}
+
 func TestNextTrackEnriched(t *testing.T) {
 	srv := newTestServer(t)
 	seedAPILibrary(t, srv)
