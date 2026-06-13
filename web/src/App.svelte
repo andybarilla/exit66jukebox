@@ -153,7 +153,8 @@
 <div style="position:relative; height:100vh; width:100%; display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; background:var(--grid-glow), var(--bg-base); font-family:var(--font-sans); color:var(--text-body);">
 
   <TopBar isPhone={s.isPhone} query={s.query} onSearch={(v) => (s.query = v)}
-    streamChipLabel={chip} onToggleStream={() => s.toggleStream()} scan={s.scan} />
+    streamChipLabel={chip} onToggleStream={() => s.toggleStream()} scan={s.scan}
+    onToast={(tone, title, msg) => s.pushToast(tone, title, msg)} />
 
   <!-- BODY -->
   <div style="display:flex; flex:1; min-height:0;">

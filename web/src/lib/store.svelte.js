@@ -222,6 +222,7 @@ export function createStore() {
     get displayName() { return displayName; },
     set displayName(v) { displayName = v; localStorage.setItem('e66.name', v); },
     get toasts() { return toasts; },
+    pushToast,
 
     get scan() { return scan; },
 
