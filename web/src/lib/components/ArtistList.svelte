@@ -1,11 +1,16 @@
 <script>
   import { Virtualizer } from 'virtua/svelte';
   import { keyActivate } from '../format.js';
-  let { rows = [], onOpen, onRequest } = $props();
+  import { makeInfiniteScroll } from '../infinite.js';
+  let { rows = [], onOpen, onRequest, onLoadMore } = $props();
+
+  let vlist = $state();
+  const inf = makeInfiniteScroll(() => vlist, () => onLoadMore);
+  $effect(() => { rows.length; inf.fill(); });
 </script>
 <!-- fixed row height (46px avatar + padding/border + 8px gap) as an itemSize
      hint so virtua skips its estimation pass and windows from the first frame -->
-<Virtualizer data={rows} getKey={(ar) => ar.id} itemSize={80}>
+<Virtualizer bind:this={vlist} data={rows} getKey={(ar) => ar.id} itemSize={80} onscroll={inf.onScroll}>
   {#snippet children(ar)}
     <div style="padding-bottom:8px;">
       <div class="row" role="button" tabindex="0" onclick={() => onOpen(ar)} onkeydown={keyActivate(() => onOpen(ar))} style="display:flex; align-items:center; gap:14px; padding:12px 14px; border:1px solid var(--border-default); border-radius:var(--radius-md); background:var(--bg-surface); cursor:pointer; transition:border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);">
