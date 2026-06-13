@@ -3,6 +3,7 @@ package scrobble
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log"
 	"time"
 
@@ -107,6 +108,13 @@ func (d *Drainer) drainService(ctx context.Context, service string, sub Submitte
 		return nil
 	}
 	if err := sub.Submit(ctx, listens); err != nil {
+		// A self-disabled service (Last.fm after an invalid session key) is not a
+		// transient failure: leave its rows untouched for a later re-auth and do
+		// not back off the shared cycle on its behalf.
+		if errors.Is(err, external.ErrServiceDisabled) {
+			log.Printf("scrobble: %s disabled (re-auth needed); leaving %d rows queued", service, len(ids))
+			return nil
+		}
 		_ = store.BumpScrobbleAttempts(d.db, ids)
 		return err
 	}
