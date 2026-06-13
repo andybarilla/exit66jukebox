@@ -12,4 +12,6 @@ covers/
 .playwright-mcp/
 
 .env
+.claude/worktrees
+
 

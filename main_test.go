@@ -67,6 +67,33 @@ func TestActiveScrobbleServices(t *testing.T) {
 	}
 }
 
+// waitForClose returns true once the hub goroutine signals done, false if the
+// bounded timeout expires first (so shutdown can't hang on a stuck goroutine).
+func TestWaitForClose(t *testing.T) {
+	closed := make(chan struct{})
+	close(closed)
+	if !waitForClose(closed, 50*time.Millisecond) {
+		t.Error("already-closed channel should return true")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		close(done)
+	}()
+	if !waitForClose(done, time.Second) {
+		t.Error("channel closing before timeout should return true")
+	}
+
+	start := time.Now()
+	if waitForClose(make(chan struct{}), 20*time.Millisecond) {
+		t.Error("never-closing channel should return false at timeout")
+	}
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Errorf("timeout wait took %v, expected ~20ms", elapsed)
+	}
+}
+
 func eq(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
