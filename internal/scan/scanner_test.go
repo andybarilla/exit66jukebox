@@ -39,6 +39,34 @@ func TestScanIndexesAndIsIncremental(t *testing.T) {
 	}
 }
 
+// TestScanKeysAlbumByAlbumArtist verifies the scan pipeline keys the album by
+// its album-artist. The fixture carries no AlbumArtist tag, so the album-artist
+// falls back to the track artist and the album is keyed by it.
+func TestScanKeysAlbumByAlbumArtist(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	dir := t.TempDir()
+	src, _ := os.ReadFile("testdata/sample.mp3")
+	os.WriteFile(filepath.Join(dir, "a.mp3"), src, 0o644)
+
+	if _, err := Scan(db, []string{dir}, 1, nil); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	var albumArtist string
+	if err := db.QueryRow(
+		`SELECT ar.name FROM album a JOIN artist ar ON ar.id = a.artist_id LIMIT 1`,
+	).Scan(&albumArtist); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if albumArtist != "Test Artist" {
+		t.Fatalf("expected album keyed by fallback track artist %q, got %q",
+			"Test Artist", albumArtist)
+	}
+}
+
 func TestScanStoresDuration(t *testing.T) {
 	db, err := store.Open(":memory:")
 	if err != nil {

@@ -9,7 +9,7 @@ import (
 
 func seedTrack(t *testing.T, db *sql.DB, path, title, genre string, playCount int) int64 {
 	t.Helper()
-	id, err := UpsertTrack(db, model.Track{Path: path, Title: title, Genre: genre}, "Band", "Album")
+	id, err := UpsertTrack(db, model.Track{Path: path, Title: title, Genre: genre}, "Band", "", "Album")
 	if err != nil {
 		t.Fatalf("seed %s: %v", path, err)
 	}
@@ -109,7 +109,7 @@ func TestUpsertStampsAddedAt(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()
 
-	id, err := UpsertTrack(db, model.Track{Path: "/m/a.mp3", Title: "A"}, "Band", "Album")
+	id, err := UpsertTrack(db, model.Track{Path: "/m/a.mp3", Title: "A"}, "Band", "", "Album")
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}

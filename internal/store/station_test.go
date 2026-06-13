@@ -49,7 +49,7 @@ func TestQueueLen(t *testing.T) {
 	if n, _ := QueueLen(db, "s"); n != 0 {
 		t.Fatalf("expected empty queue len 0, got %d", n)
 	}
-	id, _ := UpsertTrack(db, model.Track{Path: "/m/a.mp3", Title: "A"}, "B", "X")
+	id, _ := UpsertTrack(db, model.Track{Path: "/m/a.mp3", Title: "A"}, "B", "", "X")
 	if err := Enqueue(db, "s", id, ""); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}

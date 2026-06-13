@@ -16,11 +16,76 @@ func seedLibrary(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	UpsertTrack(db, model.Track{Path: "/m/ct.mp3", Title: "Come Together", TrackNo: 1}, "The Beatles", "Abbey Road")
-	UpsertTrack(db, model.Track{Path: "/m/sm.mp3", Title: "Something", TrackNo: 2}, "The Beatles", "Abbey Road")
-	UpsertTrack(db, model.Track{Path: "/m/mn.mp3", Title: "Money Money", TrackNo: 1}, "ABBA", "Arrival")
-	UpsertTrack(db, model.Track{Path: "/m/zd.mp3", Title: "Zed", TrackNo: 1}, "Ziggy", "The Zoo")
+	UpsertTrack(db, model.Track{Path: "/m/ct.mp3", Title: "Come Together", TrackNo: 1}, "The Beatles", "", "Abbey Road")
+	UpsertTrack(db, model.Track{Path: "/m/sm.mp3", Title: "Something", TrackNo: 2}, "The Beatles", "", "Abbey Road")
+	UpsertTrack(db, model.Track{Path: "/m/mn.mp3", Title: "Money Money", TrackNo: 1}, "ABBA", "", "Arrival")
+	UpsertTrack(db, model.Track{Path: "/m/zd.mp3", Title: "Zed", TrackNo: 1}, "Ziggy", "", "The Zoo")
 	return db
+}
+
+// TestTracksByAlbumShowsPerTrackArtist verifies a compilation renders as one
+// album titled by its album-artist, while its dialog lists every track with
+// that track's own artist (not the album-artist).
+func TestTracksByAlbumShowsPerTrackArtist(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+	UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "One", TrackNo: 1}, "Artist A", VariousArtists, "Comp")
+	UpsertTrack(db, model.Track{Path: "/m/2.mp3", Title: "Two", TrackNo: 2}, "Artist B", VariousArtists, "Comp")
+
+	albums, _ := ListAlbumsEnriched(db, "", 50, 0)
+	if len(albums) != 1 {
+		t.Fatalf("expected 1 album card, got %d", len(albums))
+	}
+	if albums[0].ArtistName != VariousArtists {
+		t.Fatalf("expected album card titled by album-artist %q, got %q",
+			VariousArtists, albums[0].ArtistName)
+	}
+
+	tracks, err := TracksByAlbumEnriched(db, albums[0].ID)
+	if err != nil {
+		t.Fatalf("TracksByAlbumEnriched: %v", err)
+	}
+	got := map[string]string{}
+	for _, tr := range tracks {
+		got[tr.Title] = tr.ArtistName
+	}
+	if got["One"] != "Artist A" || got["Two"] != "Artist B" {
+		t.Fatalf("expected per-track artists, got %v", got)
+	}
+}
+
+// TestVariousArtistsHiddenFromArtists verifies the compilation album-artist does
+// not surface in the Artists browse or its count, while its album still lists.
+func TestVariousArtistsHiddenFromArtists(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+	UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "One"}, "Artist A", VariousArtists, "Comp")
+	UpsertTrack(db, model.Track{Path: "/m/2.mp3", Title: "Two"}, "Artist B", VariousArtists, "Comp")
+
+	artists, err := ListArtistsEnriched(db, "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListArtistsEnriched: %v", err)
+	}
+	for _, a := range artists {
+		if a.Name == VariousArtists {
+			t.Fatalf("Various Artists should be hidden from the Artists list")
+		}
+	}
+	if len(artists) != 2 {
+		t.Fatalf("expected only the 2 track artists, got %d", len(artists))
+	}
+
+	n, err := CountArtists(db, "")
+	if err != nil {
+		t.Fatalf("CountArtists: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected artist count 2 (Various Artists excluded), got %d", n)
+	}
+
+	if albums, _ := ListAlbumsEnriched(db, "", 50, 0); len(albums) != 1 {
+		t.Fatalf("expected the compilation album to still list, got %d", len(albums))
+	}
 }
 
 func TestListAlbumsEnriched(t *testing.T) {

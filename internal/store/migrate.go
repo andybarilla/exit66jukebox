@@ -2,6 +2,11 @@ package store
 
 import "database/sql"
 
+// currentLibraryVersion is bumped whenever the indexing rules change in a way
+// that stored columns can't re-derive, forcing a one-time full re-scan. v1:
+// albums re-keyed by album-artist (#32).
+const currentLibraryVersion = 1
+
 // columnExists reports whether a column is present on a table.
 func columnExists(db *sql.DB, table, col string) (bool, error) {
 	var n int
@@ -58,7 +63,31 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
-	return nil
+	return migrateLibraryVersion(db)
+}
+
+// migrateLibraryVersion forces a one-time full re-scan when the stored
+// library_version is behind currentLibraryVersion. Stored columns can't
+// re-derive album-artist grouping, so it zeroes every track's mod_time/size:
+// the next scan re-reads all files and re-points each track to its
+// album-artist-keyed album. Orphaned per-track-artist albums are pruned after
+// that scan (see PruneOrphans). A fresh DB has no tracks, so the UPDATE is a
+// no-op and the version is simply stamped.
+func migrateLibraryVersion(db *sql.DB) error {
+	var v int
+	// Missing row scans nothing and leaves v at 0 (older than any real version).
+	db.QueryRow(`SELECT value FROM meta WHERE key = 'library_version'`).Scan(&v)
+	if v >= currentLibraryVersion {
+		return nil
+	}
+	if _, err := db.Exec(`UPDATE track SET mod_time = 0, size = 0`); err != nil {
+		return err
+	}
+	_, err := db.Exec(
+		`INSERT INTO meta(key, value) VALUES('library_version', ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		currentLibraryVersion)
+	return err
 }
 
 // backfillSortKeys recomputes sort_key in Go for every row in table whose key is

@@ -43,7 +43,7 @@ func TestArtistsEndpointReturnsJSON(t *testing.T) {
 
 func TestRequestRecordsRequesterAndStreamReturnsIt(t *testing.T) {
 	srv := newTestServer(t)
-	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "Album")
+	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}, "by": {"Mira"}}
 	req := httptest.NewRequest(http.MethodPost, "/api/streams/sess/requests",
@@ -67,7 +67,7 @@ func TestRequestRecordsRequesterAndStreamReturnsIt(t *testing.T) {
 
 func TestGetStreamNowPlayingWhenPlaying(t *testing.T) {
 	srv := newTestServer(t)
-	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "Album")
+	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 	np := NewNowPlaying()
 	tr, _, _ := store.GetTrack(srv.db, id)
 	np.Set(tr)
@@ -112,7 +112,7 @@ func TestGetStreamNowPlayingNullForUntrackedStream(t *testing.T) {
 
 func TestRequestThenNextRoundTrip(t *testing.T) {
 	srv := newTestServer(t)
-	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "Album")
+	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}}
 	req := httptest.NewRequest(http.MethodPost, "/api/streams/sess/requests",

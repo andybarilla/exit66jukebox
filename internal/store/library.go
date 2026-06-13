@@ -37,9 +37,19 @@ func upsertAlbum(q execQuerier, name string, artistID int64) (int64, error) {
 	return id, err
 }
 
+// VariousArtists is the conventional album-artist name for compilations. It
+// backs album cards and the album dialog but is hidden from the Artists browse.
+const VariousArtists = "Various Artists"
+
 // UpsertTrack inserts or updates a track by its path, creating the artist and
-// album rows as needed. Returns the track id.
-func UpsertTrack(db *sql.DB, t model.Track, artistName, albumName string) (int64, error) {
+// album rows as needed. The album is keyed by its album-artist (albumArtist,
+// falling back to artistName when empty), while the track keeps its own
+// artistName — so a compilation collapses to one album while each track still
+// shows its own performer. Returns the track id.
+func UpsertTrack(db *sql.DB, t model.Track, artistName, albumArtist, albumName string) (int64, error) {
+	if albumArtist == "" {
+		albumArtist = artistName
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return 0, err
@@ -50,7 +60,11 @@ func UpsertTrack(db *sql.DB, t model.Track, artistName, albumName string) (int64
 	if err != nil {
 		return 0, err
 	}
-	albumID, err := upsertAlbum(tx, albumName, artistID)
+	albumArtistID, err := upsertArtist(tx, albumArtist)
+	if err != nil {
+		return 0, err
+	}
+	albumID, err := upsertAlbum(tx, albumName, albumArtistID)
 	if err != nil {
 		return 0, err
 	}
@@ -74,6 +88,24 @@ func UpsertTrack(db *sql.DB, t model.Track, artistName, albumName string) (int64
 		return 0, err
 	}
 	return id, nil
+}
+
+// PruneOrphans deletes albums with no tracks, then artists referenced by
+// neither a track nor an album. Albums are pruned first so an artist that only
+// backed now-empty albums becomes prunable too. Called after a scan to clear
+// the per-track-artist album/artist rows left behind by album-artist re-keying.
+func PruneOrphans(db *sql.DB) error {
+	if _, err := db.Exec(
+		`DELETE FROM album WHERE id NOT IN (SELECT DISTINCT album_id FROM track)`,
+	); err != nil {
+		return err
+	}
+	_, err := db.Exec(
+		`DELETE FROM artist
+		 WHERE id NOT IN (SELECT DISTINCT artist_id FROM track)
+		   AND id NOT IN (SELECT DISTINCT artist_id FROM album)`,
+	)
+	return err
 }
 
 // TrackStamp returns the stored mod_time and size for a path, or ok=false if
