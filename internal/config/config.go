@@ -20,15 +20,26 @@ type Config struct {
 // list. A service with no credentials is simply disabled.
 type Services struct {
 	ListenBrainzToken string
+	LastfmAPIKey      string
+	LastfmAPISecret   string
 }
 
 // ListenBrainzEnabled reports whether a ListenBrainz token is configured.
 func (s Services) ListenBrainzEnabled() bool { return s.ListenBrainzToken != "" }
 
+// LastfmConfigured reports whether both Last.fm credentials are present. Full
+// Last.fm enablement also requires a persisted session key (a service_auth row)
+// in the database, not config — this only covers the env half.
+func (s Services) LastfmConfigured() bool {
+	return s.LastfmAPIKey != "" && s.LastfmAPISecret != ""
+}
+
 // servicesFromEnv reads service credentials from the environment.
 func servicesFromEnv() Services {
 	return Services{
 		ListenBrainzToken: os.Getenv("EXIT66_LISTENBRAINZ_TOKEN"),
+		LastfmAPIKey:      os.Getenv("EXIT66_LASTFM_API_KEY"),
+		LastfmAPISecret:   os.Getenv("EXIT66_LASTFM_API_SECRET"),
 	}
 }
 
