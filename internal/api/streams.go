@@ -41,7 +41,7 @@ func (s *Server) nextTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.publishQueueChanged(id)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "track": tr})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "track": s.enrichOne(tr)})
 }
 
 func (s *Server) request(w http.ResponseWriter, r *http.Request) {

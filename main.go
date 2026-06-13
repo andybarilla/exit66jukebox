@@ -15,6 +15,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/external"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
+	"github.com/andybarilla/exit66jukebox/internal/model"
 	"github.com/andybarilla/exit66jukebox/internal/scan"
 	"github.com/andybarilla/exit66jukebox/internal/store"
 	"github.com/andybarilla/exit66jukebox/internal/web"
@@ -84,7 +85,11 @@ func main() {
 			return "", false
 		}
 		playing = true
-		houseBus.Publish(events.Event{Type: "now-playing", Data: tr})
+		if enriched, err := store.EnrichTracks(db, []model.Track{tr}); err == nil && len(enriched) > 0 {
+			houseBus.Publish(events.Event{Type: "now-playing", Data: enriched[0]})
+		} else {
+			houseBus.Publish(events.Event{Type: "now-playing", Data: tr})
+		}
 		// The pop removed this track from the queue; tell listeners so their
 		// "up next" view doesn't keep showing the now-playing track.
 		houseBus.Publish(events.Event{Type: "queue-changed", Data: houseID})
