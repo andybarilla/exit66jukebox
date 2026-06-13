@@ -117,7 +117,21 @@ func (c *Client) doRequest(ctx context.Context, method, url string, newBody func
 
 // getJSON GETs url and decodes the JSON body into v.
 func (c *Client) getJSON(ctx context.Context, url string, v any) error {
-	resp, err := c.do(ctx, url)
+	return c.getJSONAuth(ctx, url, nil, v)
+}
+
+// getJSONAuth GETs url with the supplied headers (e.g. Authorization) and
+// decodes the JSON body into v.
+func (c *Client) getJSONAuth(ctx context.Context, url string, headers map[string]string, v any) error {
+	var set func(http.Header)
+	if len(headers) > 0 {
+		set = func(h http.Header) {
+			for k, val := range headers {
+				h.Set(k, val)
+			}
+		}
+	}
+	resp, err := c.doRequest(ctx, http.MethodGet, url, nil, set)
 	if err != nil {
 		return err
 	}

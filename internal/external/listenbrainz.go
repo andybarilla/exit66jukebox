@@ -1,6 +1,11 @@
 package external
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"strconv"
+)
 
 const listenBrainzBaseURL = "https://api.listenbrainz.org"
 
@@ -77,4 +82,56 @@ func (l *ListenBrainz) Submit(ctx context.Context, listens []Listen) error {
 func (l *ListenBrainz) post(ctx context.Context, body lbSubmit) error {
 	return l.c.postJSON(ctx, l.baseURL+"/1/submit-listens",
 		map[string]string{"Authorization": "Token " + l.token}, body, nil)
+}
+
+// Username resolves the token's owner via GET /1/validate-token. The
+// recommendation endpoint is keyed by username, so this derives it from the
+// existing token rather than requiring separate config. It errors when the
+// token is invalid.
+func (l *ListenBrainz) Username(ctx context.Context) (string, error) {
+	var out struct {
+		Valid    bool   `json:"valid"`
+		UserName string `json:"user_name"`
+	}
+	if err := l.c.getJSONAuth(ctx, l.baseURL+"/1/validate-token",
+		map[string]string{"Authorization": "Token " + l.token}, &out); err != nil {
+		return "", err
+	}
+	if !out.Valid || out.UserName == "" {
+		return "", fmt.Errorf("listenbrainz: token invalid")
+	}
+	return out.UserName, nil
+}
+
+// RecRecording is one collaborative-filtered recommendation: a recording MBID
+// and its confidence score. ListenBrainz returns MBIDs only (no names), so the
+// caller maps these to local tracks by track.mbid.
+type RecRecording struct {
+	RecordingMBID string
+	Score         float64
+}
+
+// Recommendations fetches up to count collaborative-filtered recording
+// recommendations for user, in descending score order.
+func (l *ListenBrainz) Recommendations(ctx context.Context, user string, count int) ([]RecRecording, error) {
+	q := url.Values{}
+	q.Set("count", strconv.Itoa(count))
+	u := l.baseURL + "/1/cf/recommendation/user/" + url.PathEscape(user) + "/recording?" + q.Encode()
+
+	var resp struct {
+		Payload struct {
+			MBIDs []struct {
+				RecordingMBID string  `json:"recording_mbid"`
+				Score         float64 `json:"score"`
+			} `json:"mbids"`
+		} `json:"payload"`
+	}
+	if err := l.c.getJSON(ctx, u, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]RecRecording, len(resp.Payload.MBIDs))
+	for i, m := range resp.Payload.MBIDs {
+		out[i] = RecRecording{RecordingMBID: m.RecordingMBID, Score: m.Score}
+	}
+	return out, nil
 }
