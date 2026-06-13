@@ -60,6 +60,12 @@ CREATE TABLE IF NOT EXISTS scrobble_queue (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_scrobble_service ON scrobble_queue(service, id);
+CREATE TABLE IF NOT EXISTS service_auth (
+    service     TEXT PRIMARY KEY,   -- 'lastfm'
+    session_key TEXT NOT NULL,
+    username    TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS station (
     stream_id TEXT PRIMARY KEY REFERENCES stream(id),
     genre     TEXT NOT NULL,
