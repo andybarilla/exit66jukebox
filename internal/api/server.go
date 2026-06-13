@@ -25,9 +25,9 @@ type Server struct {
 	hubs       map[string]*broadcast.Hub
 	buses      map[string]*events.Bus
 	nowPlaying map[string]*NowPlaying // current-track trackers for shared streams
-	enrich     *enrich.Runner    // nil until SetEnrichRunner; endpoints 503 while nil
-	recommend  *recommend.Runner // nil until SetRecommendRunner; endpoint returns [] while nil
-	scan       *scan.Progress    // nil until SetScanProgress (no library); endpoint 503 while nil
+	enrich     *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
+	recommend  *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
+	scan       *scan.Progress         // nil until SetScanProgress (no library); endpoint 503 while nil
 
 	// sonosIPs is the allowlist of IPs from the most recent discovery; casts are
 	// restricted to it so an arbitrary ip can't be used to make the server POST
