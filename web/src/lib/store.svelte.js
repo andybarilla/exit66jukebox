@@ -110,6 +110,7 @@ export function createStore() {
   function mapTrack(t) {
     return {
       id: t.id, title: t.title, duration: t.duration || 0,
+      trackNo: t.track_no || 0,
       code: t.code || '··', tone: t.tone || 'magenta',
       artistName: t.artist_name || 'Unknown', albumName: t.album_name || '',
       cover: coverURL(t.id), gradient: gradientFor(t.id),
