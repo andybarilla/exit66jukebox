@@ -17,7 +17,10 @@
 <!-- zero-height sentinel measures the grid's available width without affecting
      the scroll container Virtualizer attaches to (its parent) -->
 <div bind:clientWidth={width} style="height:0;"></div>
-<Virtualizer data={rows} getKey={(row) => row[0].id}>
+<!-- a static row-height estimate (square art + text + gap); virtua can't read
+     the measured width at store-creation time, so this just seeds the initial
+     window and is re-measured per row after mount -->
+<Virtualizer data={rows} getKey={(row) => row[0].id} itemSize={240}>
   {#snippet children(row)}
     <div style="display:grid; grid-template-columns:repeat({cols}, minmax(0, 1fr)); gap:{GAP}px; padding-bottom:{GAP}px;">
       {#each row as a (a.id)}

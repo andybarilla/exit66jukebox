@@ -3,7 +3,9 @@
   import { keyActivate } from '../format.js';
   let { rows = [], onOpen, onRequest } = $props();
 </script>
-<Virtualizer data={rows} getKey={(ar) => ar.id}>
+<!-- fixed row height (46px avatar + padding/border + 8px gap) as an itemSize
+     hint so virtua skips its estimation pass and windows from the first frame -->
+<Virtualizer data={rows} getKey={(ar) => ar.id} itemSize={80}>
   {#snippet children(ar)}
     <div style="padding-bottom:8px;">
       <div class="row" role="button" tabindex="0" onclick={() => onOpen(ar)} onkeydown={keyActivate(() => onOpen(ar))} style="display:flex; align-items:center; gap:14px; padding:12px 14px; border:1px solid var(--border-default); border-radius:var(--radius-md); background:var(--bg-surface); cursor:pointer; transition:border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);">

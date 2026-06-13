@@ -12,10 +12,8 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "svelte": "^5.55.5",
+    "virtua": "^0.49.1",
     "vite": "^8.0.12",
     "vitest": "^4.1.8"
-  },
-  "dependencies": {
-    "virtua": "^0.49.1"
   }
 }
