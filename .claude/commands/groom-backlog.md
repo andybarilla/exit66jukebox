@@ -25,7 +25,7 @@ Argument: `$ARGUMENTS`
   `--limit 200` is required: the default caps at 30 items, and `Done` items will
   otherwise bury the Backlog (the board has 40+ items total).
 
-## 2. Ensure the `groomed` label exists
+## 2. Ensure the `groomed` and `groom-followup` labels exist
 
 Run once up front (creates only if missing):
 
@@ -34,6 +34,10 @@ gh label list --repo andybarilla/exit66jukebox --json name --jq '.[].name' \
   | grep -qx groomed \
   || gh label create groomed --repo andybarilla/exit66jukebox \
        --color BFD4F2 --description "Auto-planned to Ready by /groom-backlog (not human-reviewed)"
+gh label list --repo andybarilla/exit66jukebox --json name --jq '.[].name' \
+  | grep -qx groom-followup \
+  || gh label create groom-followup --repo andybarilla/exit66jukebox \
+       --color FBCA04 --description "Groomed but needs a human decision before planning (see Groomer notes)"
 ```
 
 ## 3. Triage each issue
@@ -87,8 +91,10 @@ Touches architecture, needs a design choice, or demoted from Bucket 1.
    Run \`/plan-issue <n>\` to turn this into a Ready plan."
    ```
 
-2. Leave the board item in `Backlog`. Do NOT add `small`/`needs-spec`/`groomed` —
-   `/plan-issue` decides tier later. `groomed` means "auto-planned and in Ready" only.
+2. Stamp the follow-up label so it's findable later:
+   `gh issue edit <n> --add-label groom-followup`. Leave the board item in `Backlog`.
+   Do NOT add `small`/`needs-spec`/`groomed` — `/plan-issue` (or `/groom-followup`)
+   decides tier later. `groomed` means "auto-planned and in Ready" only.
 
 ### Bucket 3 — Out of scope → skip
 
