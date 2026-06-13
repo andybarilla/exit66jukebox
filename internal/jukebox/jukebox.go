@@ -33,10 +33,11 @@ type Config struct {
 	HistoryWindow int // how many recent plays block a re-request
 }
 
-// QueuedTrack is a queued track plus who requested it.
+// QueuedTrack is a queued track plus who requested it. The track is enriched
+// (slot code, tone, names) so the client can render it without the whole library.
 type QueuedTrack struct {
-	Track       model.Track `json:"track"`
-	RequestedBy string      `json:"requested_by"`
+	Track       model.EnrichedTrack `json:"track"`
+	RequestedBy string              `json:"requested_by"`
 }
 
 // Jukebox applies fairness rules over the store. Safe for concurrent use because
@@ -173,17 +174,27 @@ func (j *Jukebox) refill(streamID string) {
 	}
 }
 
-// Queue returns the queued tracks in play order.
+// Queue returns the queued tracks in play order, enriched with slot codes.
 func (j *Jukebox) Queue(streamID string) ([]QueuedTrack, error) {
 	rows, err := store.QueueWithRequester(j.db, streamID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]QueuedTrack, 0, len(rows))
+	tracks := make([]model.Track, 0, len(rows))
+	keep := make([]store.QueuedRow, 0, len(rows))
 	for _, r := range rows {
 		if tr, _, ok := store.GetTrack(j.db, r.TrackID); ok {
-			out = append(out, QueuedTrack{Track: tr, RequestedBy: r.RequestedBy})
+			tracks = append(tracks, tr)
+			keep = append(keep, r)
 		}
+	}
+	enriched, err := store.EnrichTracks(j.db, tracks)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]QueuedTrack, len(enriched))
+	for i, et := range enriched {
+		out[i] = QueuedTrack{Track: et, RequestedBy: keep[i].RequestedBy}
 	}
 	return out, nil
 }

@@ -19,10 +19,15 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request, orderBy string
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if list == nil {
-		list = []model.Track{}
+	enriched, err := store.EnrichTracks(s.db, list)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	if enriched == nil {
+		enriched = []model.EnrichedTrack{}
+	}
+	writeJSON(w, http.StatusOK, enriched)
 }
 
 func (s *Server) discoverRediscover(w http.ResponseWriter, r *http.Request) {

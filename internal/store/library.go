@@ -13,7 +13,8 @@ type execQuerier interface {
 
 func upsertArtist(q execQuerier, name string) (int64, error) {
 	if _, err := q.Exec(
-		`INSERT INTO artist(name) VALUES(?) ON CONFLICT(name) DO NOTHING`, name,
+		`INSERT INTO artist(name, sort_key) VALUES(?, ?) ON CONFLICT(name) DO NOTHING`,
+		name, normalizeSortKey(name),
 	); err != nil {
 		return 0, err
 	}
@@ -24,8 +25,8 @@ func upsertArtist(q execQuerier, name string) (int64, error) {
 
 func upsertAlbum(q execQuerier, name string, artistID int64) (int64, error) {
 	if _, err := q.Exec(
-		`INSERT INTO album(name, artist_id) VALUES(?, ?)
-		 ON CONFLICT(name, artist_id) DO NOTHING`, name, artistID,
+		`INSERT INTO album(name, artist_id, sort_key) VALUES(?, ?, ?)
+		 ON CONFLICT(name, artist_id) DO NOTHING`, name, artistID, normalizeSortKey(name),
 	); err != nil {
 		return 0, err
 	}

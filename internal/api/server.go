@@ -85,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tracks/{id}/audio", s.trackAudio)
 	mux.HandleFunc("GET /api/tracks/{id}/cover", s.trackCover)
 	mux.HandleFunc("GET /api/albums/{id}/cover", s.albumCover)
+	mux.HandleFunc("GET /api/albums/{id}/tracks", s.albumTracks)
 	mux.HandleFunc("GET /stream/", s.streamAudio)
 	mux.HandleFunc("GET /api/streams/{id}/events", s.streamEvents)
 	mux.HandleFunc("GET /api/sonos/devices", s.sonosDevices)
