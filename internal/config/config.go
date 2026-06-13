@@ -1,6 +1,9 @@
 package config
 
-import "flag"
+import (
+	"flag"
+	"os"
+)
 
 // Config holds runtime options sourced from flags.
 type Config struct {
@@ -9,6 +12,24 @@ type Config struct {
 	Roots         multiFlag
 	HistoryWindow int
 	ScanWorkers   int
+	Services      Services
+}
+
+// Services holds external-service credentials. They are read from the
+// environment, never from flags: a token passed as -flag leaks via the process
+// list. A service with no credentials is simply disabled.
+type Services struct {
+	ListenBrainzToken string
+}
+
+// ListenBrainzEnabled reports whether a ListenBrainz token is configured.
+func (s Services) ListenBrainzEnabled() bool { return s.ListenBrainzToken != "" }
+
+// servicesFromEnv reads service credentials from the environment.
+func servicesFromEnv() Services {
+	return Services{
+		ListenBrainzToken: os.Getenv("EXIT66_LISTENBRAINZ_TOKEN"),
+	}
 }
 
 type multiFlag []string
@@ -34,5 +55,6 @@ func Parse(args []string) (Config, error) {
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
+	c.Services = servicesFromEnv()
 	return c, nil
 }
