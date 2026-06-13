@@ -38,3 +38,31 @@ type Stream struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
 }
+
+// EnrichedTrack is a Track plus the self-describing display fields the client
+// used to derive from the whole in-memory library: the crate-wall slot code
+// (album letter + track number), its tone, and the album/artist names.
+type EnrichedTrack struct {
+	Track
+	Code       string `json:"code"`
+	Tone       string `json:"tone"`
+	AlbumName  string `json:"album_name"`
+	ArtistName string `json:"artist_name"`
+}
+
+// EnrichedAlbum is an Album plus its globally-ranked crate-wall letter/tone, the
+// artist name, and its track count.
+type EnrichedAlbum struct {
+	Album
+	Letter     string `json:"letter"`
+	Tone       string `json:"tone"`
+	ArtistName string `json:"artist_name"`
+	TrackCount int    `json:"track_count"`
+}
+
+// EnrichedArtist is an Artist plus its album and track counts.
+type EnrichedArtist struct {
+	Artist
+	AlbumCount int `json:"album_count"`
+	TrackCount int `json:"track_count"`
+}
