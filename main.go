@@ -70,12 +70,17 @@ func main() {
 	// next pops the house queue and publishes now-playing; returns the file path
 	// for the broadcaster. Called repeatedly; publishes a null now-playing once
 	// when the stream transitions from playing to idle (empty queue).
+	// houseNP tracks the current house track so a client connecting mid-track can
+	// seed its now-playing view immediately (GET /api/streams/house) instead of
+	// waiting for the next SSE event. Written here, read by the API server.
+	houseNP := api.NewNowPlaying()
 	playing := false
 	next := func() (string, bool) {
 		tr, ok := jb.Next(houseID)
 		if !ok {
 			if playing {
 				playing = false
+				houseNP.Clear()
 				houseBus.Publish(events.Event{Type: "now-playing", Data: nil})
 			}
 			return "", false
@@ -85,6 +90,7 @@ func main() {
 			return "", false
 		}
 		playing = true
+		houseNP.Set(tr)
 		if enriched, err := store.EnrichTracks(db, []model.Track{tr}); err == nil && len(enriched) > 0 {
 			houseBus.Publish(events.Event{Type: "now-playing", Data: enriched[0]})
 		} else {
@@ -105,7 +111,7 @@ func main() {
 	}
 	srv := api.NewServer(db, jb, uiFS)
 	srv.SetListenAddr(cfg.Addr)
-	srv.RegisterStream(houseID, houseHub, houseBus)
+	srv.RegisterStream(houseID, houseHub, houseBus, houseNP)
 	srv.SetScanProgress(scanProgress)
 
 	// MusicBrainz/Cover Art Archive enrichment, triggered via POST /api/enrich.
