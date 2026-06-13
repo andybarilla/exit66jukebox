@@ -14,7 +14,7 @@ import (
 
 func TestDiscoverRediscoverEndpoint(t *testing.T) {
 	srv := newTestServer(t)
-	store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "A", Genre: "Rock"}, "B", "X")
+	store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "A", Genre: "Rock"}, "B", "", "X")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/discover/rediscover?genre=Rock", nil)
 	rec := httptest.NewRecorder()
@@ -33,7 +33,7 @@ func TestDiscoverRediscoverEndpoint(t *testing.T) {
 
 func TestDiscoverGenresEndpoint(t *testing.T) {
 	srv := newTestServer(t)
-	store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "A", Genre: "Rock"}, "B", "X")
+	store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "A", Genre: "Rock"}, "B", "", "X")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/discover/genres", nil)
 	rec := httptest.NewRecorder()
@@ -46,7 +46,7 @@ func TestDiscoverGenresEndpoint(t *testing.T) {
 func TestStationStartGetStopEndpoints(t *testing.T) {
 	srv := newTestServer(t)
 	for _, p := range []string{"/m/1.mp3", "/m/2.mp3", "/m/3.mp3"} {
-		store.UpsertTrack(srv.db, model.Track{Path: p, Title: p, Genre: "Rock"}, "B", "X")
+		store.UpsertTrack(srv.db, model.Track{Path: p, Title: p, Genre: "Rock"}, "B", "", "X")
 	}
 
 	// Start

@@ -96,7 +96,7 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 					Duration: probeDuration(j.path),
 				}
 				mu.Lock()
-				_, err = store.UpsertTrack(db, tr, meta.Artist, meta.Album)
+				_, err = store.UpsertTrack(db, tr, meta.Artist, meta.AlbumArtistOrFallback(), meta.Album)
 				mu.Unlock()
 				if err != nil {
 					p.failed.Add(1)
@@ -111,6 +111,12 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 		}()
 	}
 	wg.Wait()
+
+	// Re-pointing tracks to album-artist-keyed albums leaves the old
+	// per-track-artist album (and its artist) orphaned; clear them.
+	if err := store.PruneOrphans(db); err != nil && walkErr == nil {
+		walkErr = err
+	}
 
 	snap := p.Snapshot()
 	res.Added = snap.Added

@@ -9,7 +9,7 @@ import (
 func TestUpsertPopulatesSortKey(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()
-	UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "Come Together", TrackNo: 1}, "The Beatles", "Abbey Road")
+	UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "Come Together", TrackNo: 1}, "The Beatles", "", "Abbey Road")
 
 	var albumKey, artistKey string
 	db.QueryRow(`SELECT sort_key FROM album WHERE name = 'Abbey Road'`).Scan(&albumKey)

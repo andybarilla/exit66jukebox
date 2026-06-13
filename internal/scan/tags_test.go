@@ -15,6 +15,15 @@ func TestReadTagsReturnsArtistAndTitle(t *testing.T) {
 	}
 }
 
+func TestAlbumArtistOrFallback(t *testing.T) {
+	if got := (Meta{Artist: "Track A", AlbumArtist: "Various Artists"}).AlbumArtistOrFallback(); got != "Various Artists" {
+		t.Errorf("with AlbumArtist tag: expected %q, got %q", "Various Artists", got)
+	}
+	if got := (Meta{Artist: "Track A"}).AlbumArtistOrFallback(); got != "Track A" {
+		t.Errorf("without AlbumArtist tag: expected fallback to track artist %q, got %q", "Track A", got)
+	}
+}
+
 func TestReadTagsUnknownFallback(t *testing.T) {
 	meta, err := ReadTags("testdata/sample.mp3")
 	if err != nil {
