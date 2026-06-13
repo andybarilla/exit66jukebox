@@ -6,6 +6,7 @@
 package external
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -68,14 +69,31 @@ func New(userAgent string, minInterval time.Duration) *Client {
 // do issues a rate-limited GET, retrying on 429/5xx up to maxRetries while
 // honoring Retry-After. The caller owns the returned body.
 func (c *Client) do(ctx context.Context, url string) (*http.Response, error) {
+	return c.doRequest(ctx, http.MethodGet, url, nil, nil)
+}
+
+// doRequest issues a rate-limited request, retrying on 429/5xx up to maxRetries
+// while honoring Retry-After. newBody, when non-nil, is called once per attempt
+// to produce a fresh body reader (retries re-read it); setHeaders, when non-nil,
+// adds request headers after the User-Agent. The caller owns the returned body.
+// This is the shared path for both GET and the JSON/form POSTs the scrobble
+// clients use.
+func (c *Client) doRequest(ctx context.Context, method, url string, newBody func() io.Reader, setHeaders func(http.Header)) (*http.Response, error) {
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		c.limiter.wait()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		var body io.Reader
+		if newBody != nil {
+			body = newBody()
+		}
+		req, err := http.NewRequestWithContext(ctx, method, url, body)
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("User-Agent", c.userAgent)
+		if setHeaders != nil {
+			setHeaders(req.Header)
+		}
 		resp, err := c.http.Do(req)
 		if err != nil {
 			lastErr = err
@@ -108,6 +126,36 @@ func (c *Client) getJSON(ctx context.Context, url string, v any) error {
 		return fmt.Errorf("%s: %s", url, resp.Status)
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, maxBodySize)).Decode(v)
+}
+
+// postJSON marshals payload, POSTs it as application/json through the same rate
+// limiter + retry/backoff as GETs, and decodes the response into out (skipped
+// when nil). headers carries per-service additions such as Authorization. Any
+// 2xx counts as success; the body factory lets retries re-send the payload.
+func (c *Client) postJSON(ctx context.Context, url string, headers map[string]string, payload, out any) error {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, url,
+		func() io.Reader { return bytes.NewReader(b) },
+		func(h http.Header) {
+			h.Set("Content-Type", "application/json")
+			for k, v := range headers {
+				h.Set(k, v)
+			}
+		})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("%s: %s", url, resp.Status)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, maxBodySize)).Decode(out)
 }
 
 // backoff sleeps before a retry: Retry-After when the server supplied one, else
