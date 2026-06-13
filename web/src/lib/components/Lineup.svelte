@@ -3,6 +3,10 @@
   import QueueItem from './QueueItem.svelte';
   let { streamLabel = 'House', listeners = 0, shuffle = false, onToggleShuffle,
         np = null, npPct = '0%', queue = [], isPhone = false, onClose, onRemove } = $props();
+  let npArtFailed = $state(false);
+  // Reset the fallback when the now-playing track changes so a prior failed
+  // load doesn't stick the code tile for the next track.
+  $effect(() => { np?.id; npArtFailed = false; });
 </script>
 <div style="display:flex; flex-direction:column; gap:13px; height:100%; min-height:0; box-sizing:border-box;">
   <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
@@ -21,7 +25,13 @@
   {#if np}
     <div style="border:1.5px solid var(--neon-cyan); box-shadow:var(--glow-cyan); border-radius:var(--radius-md); background:var(--bg-inset); padding:12px; display:flex; flex-direction:column; gap:10px; flex:none;">
       <div style="display:flex; align-items:center; gap:12px;">
-        <div style="width:46px; height:46px; flex:none; border-radius:var(--radius-sm); background:{np.gradient}; display:flex; align-items:flex-end; padding:5px; box-sizing:border-box; box-shadow:var(--glow-soft-cyan);"><span style="font-family:var(--font-mono); font-size:9px; font-weight:700; color:rgba(255,255,255,0.88);">{np.code}</span></div>
+        <div style="position:relative; width:46px; height:46px; flex:none; border-radius:var(--radius-sm); overflow:hidden; background:{np.gradient}; display:flex; align-items:flex-end; padding:5px; box-sizing:border-box; box-shadow:var(--glow-soft-cyan);">
+          {#if np.cover && !npArtFailed}
+            <img src={np.cover} alt="" onerror={() => (npArtFailed = true)} style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover;" />
+          {:else}
+            <span style="font-family:var(--font-mono); font-size:9px; font-weight:700; color:rgba(255,255,255,0.88);">{np.code}</span>
+          {/if}
+        </div>
         <div style="flex:1; min-width:0;">
           <div style="font-family:var(--font-mono); font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--neon-magenta); margin-bottom:3px; display:flex; align-items:center; gap:6px;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-magenta);"></span>Now playing</div>
           <div style="font-family:var(--font-sans); font-weight:600; font-size:14px; color:var(--text-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{np.title}</div>
@@ -49,7 +59,7 @@
     <div style="flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px; margin-right:-6px; padding-right:6px;">
       {#each queue as q, i (q.uid)}
         <QueueItem position={i + 1} code={q.code} title={q.title} artist={q.artistName}
-          requester={q.requester} tone={q.tone} onRemove={() => onRemove(q)} />
+          cover={q.cover} gradient={q.gradient} requester={q.requester} tone={q.tone} onRemove={() => onRemove(q)} />
       {/each}
     </div>
   {/if}

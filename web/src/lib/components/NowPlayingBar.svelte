@@ -4,6 +4,9 @@
         tone = 'magenta', current = 0, duration = 0, playing = false, volume = 70,
         onPlayPause, onPrev, onNext, onSeek, onVolume } = $props();
   let artFailed = $state(false);
+  // Reset the fallback when the cover changes so a prior failed load doesn't
+  // stick the code tile for the next track.
+  $effect(() => { cover; artFailed = false; });
   let scrub;
   const pct = $derived(duration ? Math.min(100, (current / duration) * 100) : 0);
   const tile = $derived(gradient || toneGradient(tone));
