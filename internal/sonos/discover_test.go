@@ -1,6 +1,11 @@
 package sonos
 
-import "testing"
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 const sampleSSDP = "HTTP/1.1 200 OK\r\n" +
 	"CACHE-CONTROL: max-age = 1800\r\n" +
@@ -38,5 +43,32 @@ func TestParseDeviceNamePrefersRoomName(t *testing.T) {
 	}
 	if got := parseDeviceName([]byte("not xml")); got != "" {
 		t.Fatalf("expected empty name on bad xml, got %q", got)
+	}
+}
+
+func TestDescriptorURL(t *testing.T) {
+	if got := DescriptorURL("10.0.0.7"); got != "http://10.0.0.7:1400/xml/device_description.xml" {
+		t.Fatalf("DescriptorURL = %q", got)
+	}
+}
+
+func TestVerifyReturnsRoomName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, sampleDesc)
+	}))
+	defer srv.Close()
+	name, ok := Verify(srv.URL)
+	if !ok || name != "Living Room" {
+		t.Fatalf("Verify = (%q, %v), want (Living Room, true)", name, ok)
+	}
+}
+
+func TestVerifyRejectsNonSonos(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "<html>not a sonos</html>")
+	}))
+	defer srv.Close()
+	if name, ok := Verify(srv.URL); ok {
+		t.Fatalf("Verify of non-Sonos = (%q, true), want ok=false", name)
 	}
 }

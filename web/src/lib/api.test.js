@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { listTracks, listAlbums, listArtists, discoverRecommended } from './api.js';
+import {
+  listTracks, listAlbums, listArtists, discoverRecommended,
+  getSonosVolume, setSonosVolume, addManualSonos, nextHouse,
+} from './api.js';
 
 function mockFetch(items, totalHeader) {
   global.fetch = vi.fn(async (url) => ({
@@ -50,5 +53,42 @@ describe('discoverRecommended', () => {
     global.fetch = vi.fn(async () => ({ json: async () => ({ error: 'x' }) }));
     const r = await discoverRecommended();
     expect(r).toEqual([]);
+  });
+});
+
+describe('sonos volume + manual ip', () => {
+  it('getSonosVolume GETs with the ip query param', async () => {
+    global.fetch = vi.fn(async () => ({ json: async () => ({ volume: 33 }) }));
+    const r = await getSonosVolume('192.168.1.5');
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/sonos/volume?ip=192.168.1.5');
+    expect(r.volume).toBe(33);
+  });
+
+  it('setSonosVolume POSTs ip + volume as form body', async () => {
+    global.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
+    await setSonosVolume('192.168.1.5', 80);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/sonos/volume');
+    expect(opts.method).toBe('POST');
+    expect(opts.body.get('ip')).toBe('192.168.1.5');
+    expect(opts.body.get('volume')).toBe('80');
+  });
+
+  it('addManualSonos resolves to {name, ip} on success', async () => {
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ name: 'Kitchen', ip: '192.168.1.7' }) }));
+    const r = await addManualSonos('192.168.1.7');
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/sonos/manual');
+    expect(r).toEqual({ name: 'Kitchen', ip: '192.168.1.7' });
+  });
+
+  it('addManualSonos throws when the server rejects the ip', async () => {
+    global.fetch = vi.fn(async () => ({ ok: false, json: async () => ({}) }));
+    await expect(addManualSonos('8.8.8.8')).rejects.toThrow();
+  });
+
+  it('nextHouse advances the house stream', async () => {
+    global.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
+    await nextHouse();
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/streams/house/next');
   });
 });

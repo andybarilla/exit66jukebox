@@ -74,6 +74,27 @@ export async function stopSonos(ip) {
   const r = await fetch('/api/sonos/stop', { method: 'POST', body: new URLSearchParams({ ip }) });
   return r.json();
 }
+export async function getSonosVolume(ip) {
+  const r = await fetch(`/api/sonos/volume?ip=${encodeURIComponent(ip)}`);
+  return r.json(); // { volume }
+}
+export async function setSonosVolume(ip, volume) {
+  const body = new URLSearchParams({ ip, volume: String(volume) });
+  const r = await fetch('/api/sonos/volume', { method: 'POST', body });
+  return r.json();
+}
+// addManualSonos registers a hand-entered Sonos IP for networks where SSDP
+// multicast is blocked; resolves to {name, ip} on success and throws otherwise.
+export async function addManualSonos(ip) {
+  const r = await fetch('/api/sonos/manual', { method: 'POST', body: new URLSearchParams({ ip }) });
+  if (!r.ok) throw new Error('not a Sonos device');
+  return r.json(); // { name, ip }
+}
+// nextHouse advances the shared house queue (the Sonos cast surface's Next).
+export async function nextHouse() {
+  const r = await fetch(`/api/streams/${HOUSE}/next`);
+  return r.json();
+}
 
 export async function discoverRediscover(genre = '') {
   const r = await fetch(`/api/discover/rediscover?genre=${encodeURIComponent(genre)}`);
