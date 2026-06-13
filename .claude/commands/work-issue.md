@@ -16,7 +16,7 @@ Argument: `$ARGUMENTS`
 - If empty, pick the **top of Ready** = the lowest issue number among `Ready` items:
 
   ```bash
-  gh project item-list 2 --owner andybarilla --format json \
+  gh project item-list 2 --owner andybarilla --limit 200 --format json \
     --jq '[.items[] | select(.status=="Ready") | .content.number] | min'
   ```
 
@@ -28,7 +28,7 @@ Load the issue: `gh issue view <n> --json number,title,body,labels,url,state`.
 Check the board status:
 
 ```bash
-gh project item-list 2 --owner andybarilla --format json \
+gh project item-list 2 --owner andybarilla --limit 200 --format json \
   --jq '.items[] | select(.content.number==<n>) | .status'
 ```
 
@@ -47,7 +47,7 @@ Refuse and stop if any of:
   FIELD_ID=PVTSSF_lAHOAFtOQM4BaYspzhVQr60
   OPT=$(gh api graphql -f query='query{node(id:"'$FIELD_ID'"){... on ProjectV2SingleSelectField{options{id name}}}}' \
     --jq '.data.node.options[] | select(.name=="In Progress") | .id')
-  ITEM_ID=$(gh project item-list 2 --owner andybarilla --format json \
+  ITEM_ID=$(gh project item-list 2 --owner andybarilla --limit 200 --format json \
     --jq '.items[] | select(.content.number==<n>) | .id')
   gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" --field-id "$FIELD_ID" --single-select-option-id "$OPT"
   ```
