@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/api"
@@ -117,7 +120,12 @@ func main() {
 	// threshold and enqueues it for every enabled service when it qualifies. Any
 	// network work (now-playing) is fire-and-forget so it never stalls playback.
 	houseNP := api.NewNowPlaying()
-	rootCtx := context.Background()
+	// Root context cancelled on SIGINT/SIGTERM. Threaded through every long-lived
+	// goroutine (scrobble drainer, now-playing fan-out, house hub) so Ctrl-C stops
+	// them cleanly. stop() is called at shutdown to restore default signal handling
+	// so a second signal force-exits instead of hanging.
+	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	// Services are resolved per call, not captured once: Last.fm can self-disable
 	// at runtime (error 9), and nothing should be enqueued for it after that.
 	enqueue := func(trackID, playedAt int64) error {
@@ -188,7 +196,13 @@ func main() {
 	}
 
 	houseHub := broadcast.NewHub(broadcast.FFmpegSource{}, next, silence)
-	go houseHub.Run(context.Background())
+	// hubDone closes once Run returns, after its in-flight play() unwinds and the
+	// ffmpeg child is killed via rc.Close(). main waits on it before exiting.
+	hubDone := make(chan struct{})
+	go func() {
+		defer close(hubDone)
+		houseHub.Run(rootCtx)
+	}()
 
 	uiFS, err := web.FS()
 	if err != nil {
@@ -226,8 +240,41 @@ func main() {
 	}
 
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)
-	if err := http.ListenAndServe(cfg.Addr, srv.Handler()); err != nil {
-		log.Fatalf("server: %v", err)
+	httpServer := &http.Server{Addr: cfg.Addr, Handler: srv.Handler()}
+	go func() {
+		// ListenAndServe returns ErrServerClosed on a graceful Shutdown; only a
+		// real bind/serve failure is fatal.
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("server: %v", err)
+		}
+	}()
+
+	<-rootCtx.Done()
+	// Restore default signal handling so a second SIGINT force-exits immediately
+	// instead of waiting on the shutdown sequence below.
+	stop()
+	log.Print("shutting down ...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("server shutdown: %v", err)
+	}
+	// Wait for the hub goroutine to unwind (killing the ffmpeg child) before
+	// exiting, but never hang on it past the bounded timeout.
+	if !waitForClose(hubDone, 5*time.Second) {
+		log.Print("hub did not stop in time; exiting anyway")
+	}
+}
+
+// waitForClose blocks until done is closed or timeout elapses, returning true if
+// done closed first. It bounds shutdown so a stuck goroutine cannot hang exit.
+func waitForClose(done <-chan struct{}, timeout time.Duration) bool {
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
 	}
 }
 
