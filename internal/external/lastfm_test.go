@@ -37,6 +37,30 @@ func newTestLastfm(t *testing.T, baseURL, sessionKey string) *Lastfm {
 	return l
 }
 
+// The api_sig sent on the wire must match a recomputation over the actual posted
+// params (minus api_sig/format) — proving post() signs the right set, the single
+// thing most likely to make real Last.fm reject every request.
+func TestLastfmAssembledRequestIsCorrectlySigned(t *testing.T) {
+	srv, _ := lfmServer(t, func(f map[string][]string) string {
+		params := map[string]string{}
+		for k, v := range f {
+			if k == "api_sig" || k == "format" {
+				continue
+			}
+			params[k] = v[0]
+		}
+		want := signParams(params, "api-secret")
+		if got := f["api_sig"][0]; got != want {
+			t.Errorf("api_sig = %q, want %q (over %v)", got, want, params)
+		}
+		return `{"nowplaying":{}}`
+	})
+	l := newTestLastfm(t, srv.URL, "sess")
+	if err := l.NowPlaying(context.Background(), ListenMeta{ArtistName: "A", TrackName: "T"}); err != nil {
+		t.Fatalf("NowPlaying: %v", err)
+	}
+}
+
 func TestLastfmNowPlaying(t *testing.T) {
 	srv, _ := lfmServer(t, func(f map[string][]string) string {
 		if got := f["method"]; len(got) != 1 || got[0] != "track.updateNowPlaying" {
