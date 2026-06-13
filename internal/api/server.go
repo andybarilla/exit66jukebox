@@ -14,6 +14,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/recommend"
 	"github.com/andybarilla/exit66jukebox/internal/scan"
+	"github.com/andybarilla/exit66jukebox/internal/sonos"
 )
 
 // Server holds dependencies and builds the HTTP handler.
@@ -31,18 +32,29 @@ type Server struct {
 
 	// sonosIPs is the allowlist of IPs from the most recent discovery; casts are
 	// restricted to it so an arbitrary ip can't be used to make the server POST
-	// to an internal host (SSRF). Guarded by sonosMu.
-	sonosMu  sync.Mutex
-	sonosIPs map[string]bool
+	// to an internal host (SSRF). sonosManual holds IPs added via /api/sonos/manual
+	// (ip→room name) so an SSDP-blocked network can still cast; manual IPs survive
+	// rediscovery and are allowed alongside discovered ones. Both guarded by sonosMu.
+	sonosMu     sync.Mutex
+	sonosIPs    map[string]bool
+	sonosManual map[string]string
+
+	// manualVerify confirms a manually-entered IP actually serves a Sonos
+	// descriptor before it's trusted (injectable for tests).
+	manualVerify func(ip string) (name string, ok bool)
 }
 
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 	return &Server{
 		db: db, jb: jb, ui: ui,
-		hubs:       make(map[string]*broadcast.Hub),
-		buses:      make(map[string]*events.Bus),
-		nowPlaying: make(map[string]*NowPlaying),
-		sonosIPs:   make(map[string]bool),
+		hubs:        make(map[string]*broadcast.Hub),
+		buses:       make(map[string]*events.Bus),
+		nowPlaying:  make(map[string]*NowPlaying),
+		sonosIPs:    make(map[string]bool),
+		sonosManual: make(map[string]string),
+		manualVerify: func(ip string) (string, bool) {
+			return sonos.Verify(sonos.DescriptorURL(ip))
+		},
 	}
 }
 
@@ -105,6 +117,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sonos/devices", s.sonosDevices)
 	mux.HandleFunc("POST /api/sonos/cast", s.sonosCast)
 	mux.HandleFunc("POST /api/sonos/stop", s.sonosStop)
+	mux.HandleFunc("GET /api/sonos/volume", s.sonosGetVolume)
+	mux.HandleFunc("POST /api/sonos/volume", s.sonosSetVolume)
+	mux.HandleFunc("POST /api/sonos/manual", s.sonosManualAdd)
 	mux.HandleFunc("GET /api/discover/rediscover", s.discoverRediscover)
 	mux.HandleFunc("GET /api/discover/recent", s.discoverRecent)
 	mux.HandleFunc("GET /api/discover/genres", s.discoverGenres)

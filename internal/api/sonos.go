@@ -3,6 +3,7 @@ package api
 import (
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/sonos"
@@ -41,11 +42,33 @@ func (s *Server) rememberDevices(devices []sonos.Device) {
 	s.sonosMu.Unlock()
 }
 
-// allowedSonos reports whether ip was seen in the most recent discovery.
+// allowedSonos reports whether ip was seen in the most recent discovery or was
+// added manually. Manual IPs live in a separate set so rediscovery can't wipe
+// them.
 func (s *Server) allowedSonos(ip string) bool {
 	s.sonosMu.Lock()
 	defer s.sonosMu.Unlock()
-	return s.sonosIPs[ip]
+	_, manual := s.sonosManual[ip]
+	return s.sonosIPs[ip] || manual
+}
+
+// deviceList merges the freshly discovered devices with the manually-added ones
+// so manual IPs stay visible and castable in the UI.
+func (s *Server) deviceList(discovered []sonos.Device) []sonos.Device {
+	s.sonosMu.Lock()
+	defer s.sonosMu.Unlock()
+	list := make([]sonos.Device, 0, len(discovered)+len(s.sonosManual))
+	seen := make(map[string]bool, len(discovered))
+	for _, d := range discovered {
+		list = append(list, d)
+		seen[d.IP] = true
+	}
+	for ip, name := range s.sonosManual {
+		if !seen[ip] {
+			list = append(list, sonos.Device{Name: name, IP: ip})
+		}
+	}
+	return list
 }
 
 // privateIPv4 rejects anything that isn't a routable private LAN IPv4 — blocks
@@ -94,7 +117,7 @@ func (s *Server) sonosDevices(w http.ResponseWriter, r *http.Request) {
 		devices = []sonos.Device{}
 	}
 	s.rememberDevices(devices)
-	writeJSON(w, http.StatusOK, devices)
+	writeJSON(w, http.StatusOK, s.deviceList(devices))
 }
 
 func (s *Server) sonosCast(w http.ResponseWriter, r *http.Request) {
@@ -119,4 +142,56 @@ func (s *Server) sonosStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) sonosGetVolume(w http.ResponseWriter, r *http.Request) {
+	ip, ok := s.castTarget(w, r)
+	if !ok {
+		return
+	}
+	vol, err := sonos.GetVolume(ip)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"volume": vol})
+}
+
+func (s *Server) sonosSetVolume(w http.ResponseWriter, r *http.Request) {
+	ip, ok := s.castTarget(w, r)
+	if !ok {
+		return
+	}
+	vol, _ := strconv.Atoi(r.FormValue("volume"))
+	if vol < 0 {
+		vol = 0
+	} else if vol > 100 {
+		vol = 100
+	}
+	if err := sonos.SetVolume(ip, vol); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// sonosManualAdd trusts a manually-entered IP only after confirming it's a
+// private LAN IPv4 AND actually serves a Sonos device descriptor — the same
+// two-part SSRF guard discovery relies on, for SSDP-blocked networks.
+func (s *Server) sonosManualAdd(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	ip := r.FormValue("ip")
+	if !privateIPv4(ip) {
+		writeErr(w, http.StatusBadRequest, "invalid ip")
+		return
+	}
+	name, ok := s.manualVerify(ip)
+	if !ok {
+		writeErr(w, http.StatusBadGateway, "not a Sonos device")
+		return
+	}
+	s.sonosMu.Lock()
+	s.sonosManual[ip] = name
+	s.sonosMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]string{"name": name, "ip": ip})
 }
