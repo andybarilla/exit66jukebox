@@ -88,7 +88,7 @@ Touches architecture, needs a design choice, or demoted from Bucket 1.
 
    **Recommended direction:** <one short paragraph>
 
-   Run \`/plan-issue <n>\` to turn this into a Ready plan."
+   Run \`/groom-followup\` (or \`/plan-issue <n>\`) to finish planning this issue."
    ```
 
 2. Stamp the follow-up label so it's findable later:
