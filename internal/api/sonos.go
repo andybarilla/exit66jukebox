@@ -4,7 +4,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/sonos"
 )
@@ -108,10 +107,12 @@ func (s *Server) castTarget(w http.ResponseWriter, r *http.Request) (string, boo
 }
 
 func (s *Server) sonosDevices(w http.ResponseWriter, r *http.Request) {
-	devices, err := sonos.Discover(2 * time.Second)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
+	// SSDP multicast is unreliable on some LANs (see #62). When it finds nothing —
+	// whether it returned cleanly empty or errored — fall back to a unicast /24
+	// scan rather than failing the request.
+	devices, _ := s.sonosDiscover()
+	if len(devices) == 0 {
+		devices = s.scanUnicast()
 	}
 	if devices == nil {
 		devices = []sonos.Device{}

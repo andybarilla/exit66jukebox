@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
@@ -42,6 +43,11 @@ type Server struct {
 	// manualVerify confirms a manually-entered IP actually serves a Sonos
 	// descriptor before it's trusted (injectable for tests).
 	manualVerify func(ip string) (name string, ok bool)
+
+	// sonosDiscover runs SSDP multicast discovery; scanUnicast is the unicast /24
+	// fallback used when SSDP finds nothing (both injectable for tests).
+	sonosDiscover func() ([]sonos.Device, error)
+	scanUnicast   func() []sonos.Device
 }
 
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
@@ -54,6 +60,12 @@ func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 		sonosManual: make(map[string]string),
 		manualVerify: func(ip string) (string, bool) {
 			return sonos.Verify(sonos.DescriptorURL(ip))
+		},
+		sonosDiscover: func() ([]sonos.Device, error) {
+			return sonos.Discover(2 * time.Second)
+		},
+		scanUnicast: func() []sonos.Device {
+			return sonos.ScanUnicast(sonos.OutboundIP(), 200*time.Millisecond)
 		},
 	}
 }

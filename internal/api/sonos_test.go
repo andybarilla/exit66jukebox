@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -111,6 +112,71 @@ func TestDeviceListMergesManual(t *testing.T) {
 	}
 	if names["192.168.1.5"] != "Den" || names["192.168.1.77"] != "Kitchen" {
 		t.Fatalf("deviceList = %v, want both discovered and manual", list)
+	}
+}
+
+func devicesJSON(t *testing.T, srv *Server) []sonos.Device {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/sonos/devices", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET devices: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var list []sonos.Device
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode devices: %v (%s)", err, rec.Body.String())
+	}
+	return list
+}
+
+func TestSonosDevicesFallsBackToScanWhenEmpty(t *testing.T) {
+	srv := newTestServer(t)
+	srv.sonosDiscover = func() ([]sonos.Device, error) { return nil, nil }
+	srv.scanUnicast = func() []sonos.Device { return []sonos.Device{{Name: "Kitchen", IP: "192.168.1.48"}} }
+
+	list := devicesJSON(t, srv)
+	if len(list) != 1 || list[0].IP != "192.168.1.48" {
+		t.Fatalf("devices = %v, want scanned Kitchen", list)
+	}
+	// The scanned IP must be on the cast allowlist, not just the UI list.
+	if !srv.allowedSonos("192.168.1.48") {
+		t.Fatalf("scanned ip should pass castTarget via the allowlist")
+	}
+}
+
+func TestSonosDevicesFallsBackOnDiscoverError(t *testing.T) {
+	srv := newTestServer(t)
+	srv.sonosDiscover = func() ([]sonos.Device, error) { return nil, errors.New("multicast dead") }
+	scanned := false
+	srv.scanUnicast = func() []sonos.Device {
+		scanned = true
+		return []sonos.Device{{Name: "Patio", IP: "192.168.1.53"}}
+	}
+
+	list := devicesJSON(t, srv) // must be 200, never 500
+	if !scanned {
+		t.Fatalf("scan should run when Discover errors with no devices")
+	}
+	if len(list) != 1 || list[0].IP != "192.168.1.53" {
+		t.Fatalf("devices = %v, want scanned Patio", list)
+	}
+}
+
+func TestSonosDevicesSkipsScanWhenDiscoverFindsDevices(t *testing.T) {
+	srv := newTestServer(t)
+	srv.sonosDiscover = func() ([]sonos.Device, error) {
+		return []sonos.Device{{Name: "Family Room", IP: "192.168.1.45"}}, nil
+	}
+	scanned := false
+	srv.scanUnicast = func() []sonos.Device { scanned = true; return nil }
+
+	list := devicesJSON(t, srv)
+	if scanned {
+		t.Fatalf("scan must not run when SSDP found devices")
+	}
+	if len(list) != 1 || list[0].IP != "192.168.1.45" {
+		t.Fatalf("devices = %v, want discovered Family Room", list)
 	}
 }
 
