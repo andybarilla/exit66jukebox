@@ -38,6 +38,21 @@ func (s *Server) discoverRecent(w http.ResponseWriter, r *http.Request) {
 	s.discover(w, r, "recent")
 }
 
+// discoverRecommended serves the external Recommended surface. It returns the
+// runner's cached recommendations (kicking an async refresh when stale) and an
+// empty list — never 503 — when no recommendation source is configured, so the
+// frontend always renders the section's empty state cleanly.
+func (s *Server) discoverRecommended(w http.ResponseWriter, r *http.Request) {
+	var list []model.EnrichedTrack
+	if s.recommend != nil {
+		list = s.recommend.Get()
+	}
+	if list == nil {
+		list = []model.EnrichedTrack{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
 func (s *Server) discoverGenres(w http.ResponseWriter, r *http.Request) {
 	list, err := store.GenreCounts(s.db)
 	if err != nil {

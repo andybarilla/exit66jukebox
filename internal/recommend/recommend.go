@@ -26,14 +26,16 @@ const (
 	tracksPerArtist = 3             // local tracks surfaced per matched similar artist
 )
 
-// lbRecommender is the slice of the ListenBrainz client the runner needs.
-type lbRecommender interface {
+// LBSource is the slice of the ListenBrainz client the runner needs. Exported
+// so callers can hold a true nil interface for a disabled source (a typed-nil
+// concrete pointer would read as non-nil and panic when called).
+type LBSource interface {
 	Username(ctx context.Context) (string, error)
 	Recommendations(ctx context.Context, user string, count int) ([]external.RecRecording, error)
 }
 
-// lastfmSimilar is the slice of the Last.fm client the runner needs.
-type lastfmSimilar interface {
+// LFSource is the slice of the Last.fm client the runner needs.
+type LFSource interface {
 	SimilarArtists(ctx context.Context, name, mbid string, limit int) ([]external.SimilarArtist, error)
 }
 
@@ -41,8 +43,8 @@ type lastfmSimilar interface {
 // lf are nil when their service is unconfigured.
 type Runner struct {
 	db  *sql.DB
-	lb  lbRecommender
-	lf  lastfmSimilar
+	lb  LBSource
+	lf  LFSource
 	now func() time.Time
 
 	mu          sync.Mutex
@@ -52,7 +54,7 @@ type Runner struct {
 }
 
 // NewRunner wires the runner. Pass nil for any unconfigured source.
-func NewRunner(db *sql.DB, lb lbRecommender, lf lastfmSimilar) *Runner {
+func NewRunner(db *sql.DB, lb LBSource, lf LFSource) *Runner {
 	return &Runner{db: db, lb: lb, lf: lf, now: time.Now}
 }
 

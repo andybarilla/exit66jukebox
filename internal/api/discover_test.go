@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
+	"github.com/andybarilla/exit66jukebox/internal/recommend"
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
@@ -81,5 +82,37 @@ func TestStationStartGetStopEndpoints(t *testing.T) {
 	}
 	if _, ok := store.GetStation(srv.db, "s"); ok {
 		t.Fatalf("expected station removed after stop")
+	}
+}
+
+func TestDiscoverRecommendedNoRunnerReturnsEmptyArray(t *testing.T) {
+	srv := newTestServer(t) // no recommend runner wired
+	req := httptest.NewRequest(http.MethodGet, "/api/discover/recommended", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (not 503)", rec.Code)
+	}
+	if strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("body = %q, want []", rec.Body.String())
+	}
+}
+
+func TestDiscoverRecommendedServesRunnerCache(t *testing.T) {
+	srv := newTestServer(t)
+	// A runner with no configured sources serves an empty (non-null) array.
+	srv.SetRecommendRunner(recommend.NewRunner(srv.db, nil, nil))
+	req := httptest.NewRequest(http.MethodGet, "/api/discover/recommended", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var got []model.EnrichedTrack
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rec.Body.String())
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %d tracks, want 0", len(got))
 	}
 }
