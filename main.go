@@ -19,6 +19,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/external"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/model"
+	"github.com/andybarilla/exit66jukebox/internal/recommend"
 	"github.com/andybarilla/exit66jukebox/internal/scan"
 	"github.com/andybarilla/exit66jukebox/internal/scrobble"
 	"github.com/andybarilla/exit66jukebox/internal/store"
@@ -206,6 +207,24 @@ func main() {
 	}
 	srv.SetEnrichRunner(enrich.NewRunner(db,
 		external.NewMusicBrainz(extClient), external.NewCoverArt(extClient), coversDir))
+
+	// External recommendations → Discovery (GET /api/discover/recommended). Each
+	// source is independent: ListenBrainz recs run whenever its token is set;
+	// Last.fm similar-artist uses an unsigned read (api_key only) and so is built
+	// from env creds directly, independent of the scrobble session-key auth flow.
+	var recLB recommend.LBSource
+	if lb != nil {
+		recLB = lb
+	}
+	var recLF recommend.LFSource
+	if cfg.Services.LastfmConfigured() {
+		recLF = external.NewLastfm(extClient, cfg.Services.LastfmAPIKey, cfg.Services.LastfmAPISecret, "")
+	}
+	if recLB != nil || recLF != nil {
+		srv.SetRecommendRunner(recommend.NewRunner(db, recLB, recLF))
+		log.Print("External recommendations enabled")
+	}
+
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)
 	if err := http.ListenAndServe(cfg.Addr, srv.Handler()); err != nil {
 		log.Fatalf("server: %v", err)

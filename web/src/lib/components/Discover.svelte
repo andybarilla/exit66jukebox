@@ -6,6 +6,7 @@
     onGenre,
     rediscover = [],
     recent = [],
+    recommended = [],
     nowPlayingId = null,
     onAdd,
     station = null,
@@ -60,6 +61,16 @@
         disabled={!stationGenre}
         style="padding:5px 14px; border-radius:var(--radius-sm); background:{stationGenre ? 'var(--neon-cyan)' : 'transparent'}; color:{stationGenre ? 'var(--text-on-accent)' : 'var(--text-faint)'}; border:1px solid {stationGenre ? 'var(--neon-cyan)' : 'var(--border-default)'}; font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; cursor:{stationGenre ? 'pointer' : 'default'};"
       >Start station</button>
+    {/if}
+  </div>
+
+  <!-- Recommended (external) -->
+  <div>
+    <div style="font-family:var(--font-mono); font-size:10px; letter-spacing:0.18em; text-transform:uppercase; color:var(--text-faint); margin-bottom:10px;">Recommended for you</div>
+    {#if recommended.length === 0}
+      <div style="font-family:var(--font-sans); font-size:14px; color:var(--text-faint); padding:16px 0; max-width:460px;">No recommendations yet. Connect ListenBrainz or Last.fm, run enrichment to tag your library with MBIDs, and scrobble some plays — recommendations are matched to local tracks once those land.</div>
+    {:else}
+      <TrackList tracks={recommended} {nowPlayingId} {onAdd} />
     {/if}
   </div>
 

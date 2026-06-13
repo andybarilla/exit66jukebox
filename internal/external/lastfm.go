@@ -107,6 +107,49 @@ func (l *Lastfm) Submit(ctx context.Context, listens []Listen) error {
 	return nil
 }
 
+// SimilarArtist is one artist.getSimilar hit: a name, optional MBID, and a
+// 0–1 similarity score.
+type SimilarArtist struct {
+	Name  string
+	MBID  string
+	Match float64
+}
+
+// SimilarArtists fetches artists similar to the given name (or MBID, preferred
+// when set). It is a read method: GET with api_key only — no session key and no
+// signature — so it works whenever Last.fm is configured, independent of the
+// scrobble auth flow.
+func (l *Lastfm) SimilarArtists(ctx context.Context, name, mbid string, limit int) ([]SimilarArtist, error) {
+	q := url.Values{}
+	q.Set("method", "artist.getSimilar")
+	q.Set("api_key", l.apiKey)
+	q.Set("format", "json")
+	q.Set("limit", strconv.Itoa(limit))
+	if mbid != "" {
+		q.Set("mbid", mbid)
+	} else {
+		q.Set("artist", name)
+	}
+	var resp struct {
+		SimilarArtists struct {
+			Artist []struct {
+				Name  string `json:"name"`
+				MBID  string `json:"mbid"`
+				Match string `json:"match"`
+			} `json:"artist"`
+		} `json:"similarartists"`
+	}
+	if err := l.c.getJSON(ctx, l.baseURL+"?"+q.Encode(), &resp); err != nil {
+		return nil, err
+	}
+	out := make([]SimilarArtist, len(resp.SimilarArtists.Artist))
+	for i, a := range resp.SimilarArtists.Artist {
+		match, _ := strconv.ParseFloat(a.Match, 64)
+		out[i] = SimilarArtist{Name: a.Name, MBID: a.MBID, Match: match}
+	}
+	return out, nil
+}
+
 // GetToken runs auth.getToken, the first step of the desktop auth flow.
 func (l *Lastfm) GetToken(ctx context.Context) (string, error) {
 	var out struct {

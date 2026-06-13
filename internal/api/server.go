@@ -12,6 +12,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
+	"github.com/andybarilla/exit66jukebox/internal/recommend"
 	"github.com/andybarilla/exit66jukebox/internal/scan"
 )
 
@@ -24,8 +25,9 @@ type Server struct {
 	hubs       map[string]*broadcast.Hub
 	buses      map[string]*events.Bus
 	nowPlaying map[string]*NowPlaying // current-track trackers for shared streams
-	enrich     *enrich.Runner // nil until SetEnrichRunner; endpoints 503 while nil
-	scan       *scan.Progress // nil until SetScanProgress (no library); endpoint 503 while nil
+	enrich     *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
+	recommend  *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
+	scan       *scan.Progress         // nil until SetScanProgress (no library); endpoint 503 while nil
 
 	// sonosIPs is the allowlist of IPs from the most recent discovery; casts are
 	// restricted to it so an arbitrary ip can't be used to make the server POST
@@ -52,6 +54,11 @@ func (s *Server) SetListenAddr(addr string) { s.listenAddr = addr }
 // SetEnrichRunner attaches the MusicBrainz/CAA enrichment runner that backs the
 // /api/enrich endpoints.
 func (s *Server) SetEnrichRunner(r *enrich.Runner) { s.enrich = r }
+
+// SetRecommendRunner attaches the external-recommendation runner that backs
+// GET /api/discover/recommended. Left nil when no recommendation source is
+// configured; the endpoint then returns an empty list.
+func (s *Server) SetRecommendRunner(r *recommend.Runner) { s.recommend = r }
 
 // SetScanProgress attaches the library scan progress that backs GET /api/scan.
 // Left nil when no library is configured (no scan ever runs).
@@ -101,6 +108,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/discover/rediscover", s.discoverRediscover)
 	mux.HandleFunc("GET /api/discover/recent", s.discoverRecent)
 	mux.HandleFunc("GET /api/discover/genres", s.discoverGenres)
+	mux.HandleFunc("GET /api/discover/recommended", s.discoverRecommended)
 	mux.HandleFunc("POST /api/enrich", s.enrichStart)
 	mux.HandleFunc("GET /api/enrich", s.enrichStatus)
 	mux.HandleFunc("GET /api/scan", s.scanStatus)
