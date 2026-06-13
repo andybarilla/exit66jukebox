@@ -23,10 +23,28 @@ func (s *Server) getStream(w http.ResponseWriter, r *http.Request) {
 		q = []jukebox.QueuedTrack{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":        id,
-		"queue":     q,
-		"listeners": s.listenerCount(id),
+		"id":          id,
+		"queue":       q,
+		"listeners":   s.listenerCount(id),
+		"now_playing": s.nowPlayingPayload(id),
 	})
+}
+
+// nowPlayingPayload returns {track, offset_seconds} for a tracked shared stream
+// that's playing, or nil (JSON null) when idle or untracked (e.g. /me).
+func (s *Server) nowPlayingPayload(streamID string) any {
+	np, ok := s.nowPlaying[streamID]
+	if !ok {
+		return nil
+	}
+	tr, offset, playing := np.Current()
+	if !playing {
+		return nil
+	}
+	return map[string]any{
+		"track":          s.enrichOne(tr),
+		"offset_seconds": offset,
+	}
 }
 
 func (s *Server) nextTrack(w http.ResponseWriter, r *http.Request) {

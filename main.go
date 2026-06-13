@@ -22,16 +22,6 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/web"
 )
 
-// houseTrack is the single holder of the currently-playing house track and when
-// it started, owned by the house playback loop. It feeds the scrobble threshold
-// (this issue) and is the holder #28's now-playing work reuses rather than
-// duplicating.
-type houseTrack struct {
-	id        int64
-	duration  int
-	startedAt time.Time
-}
-
 func main() {
 	cfg, err := config.Parse(os.Args[1:])
 	if err != nil {
@@ -93,34 +83,41 @@ func main() {
 	}
 
 	// next pops the house queue and publishes now-playing; returns the file path
-	// for the broadcaster. Called repeatedly in the hub's single goroutine, so
-	// the current-track holder needs no lock. Publishes a null now-playing once
-	// when the stream transitions from playing to idle (empty queue).
+	// for the broadcaster. Called repeatedly in the hub's single goroutine.
+	// Publishes a null now-playing once when the stream transitions from playing
+	// to idle (empty queue).
 	//
-	// Scrobble seam: the broadcast Source is real-time-paced, so the gap between
-	// two pops ≈ the just-finished track's play time. On each pop (and on the
-	// play→idle transition) the previous house track is settled — enqueued for
-	// every enabled service when it clears the threshold. Any network work
-	// (now-playing) is fire-and-forget so it never stalls playback.
+	// houseNP is the single house current-track + start-time holder: it seeds a
+	// client connecting mid-track (#28) and is the same holder the scrobble seam
+	// reads from. The broadcast Source is real-time-paced, so houseNP's offset ≈
+	// the just-finished track's play time. On each pop (and the play→idle
+	// transition) settle() evaluates that finished track against the scrobble
+	// threshold and enqueues it for every enabled service when it qualifies. Any
+	// network work (now-playing) is fire-and-forget so it never stalls playback.
+	houseNP := api.NewNowPlaying()
 	rootCtx := context.Background()
-	var current *houseTrack
 	enqueue := func(trackID, playedAt int64) error {
 		return store.EnqueueScrobble(db, enabledServices, trackID, playedAt)
 	}
 	settle := func() {
-		if current == nil {
+		prev, offset, ok := houseNP.Current()
+		if !ok {
 			return
 		}
-		if _, err := scrobble.Finish(current.id, current.duration, current.startedAt, time.Now(), enqueue); err != nil {
-			log.Printf("scrobble: enqueue track %d: %v", current.id, err)
+		end := time.Now()
+		start := end.Add(-time.Duration(offset) * time.Second)
+		if _, err := scrobble.Finish(prev.ID, prev.Duration, start, end, enqueue); err != nil {
+			log.Printf("scrobble: enqueue track %d: %v", prev.ID, err)
 		}
-		current = nil
 	}
+	playing := false
 	next := func() (string, bool) {
 		tr, ok := jb.Next(houseID)
 		if !ok {
-			if current != nil {
+			if playing {
+				playing = false
 				settle()
+				houseNP.Clear()
 				houseBus.Publish(events.Event{Type: "now-playing", Data: nil})
 			}
 			return "", false
@@ -130,9 +127,10 @@ func main() {
 			return "", false
 		}
 		// A new track is starting: settle the one that just finished, then make
-		// this the current house track.
+		// this the current house track in the shared holder.
 		settle()
-		current = &houseTrack{id: tr.ID, duration: tr.Duration, startedAt: time.Now()}
+		playing = true
+		houseNP.Set(tr)
 		// Now-playing is fire-and-forget — never queued, never retried.
 		if lb != nil {
 			id := tr.ID
@@ -169,7 +167,7 @@ func main() {
 	}
 	srv := api.NewServer(db, jb, uiFS)
 	srv.SetListenAddr(cfg.Addr)
-	srv.RegisterStream(houseID, houseHub, houseBus)
+	srv.RegisterStream(houseID, houseHub, houseBus, houseNP)
 	srv.SetScanProgress(scanProgress)
 
 	// MusicBrainz/Cover Art Archive enrichment, triggered via POST /api/enrich.

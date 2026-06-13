@@ -23,6 +23,7 @@ type Server struct {
 	listenAddr string // server's own listen addr, for building Sonos-reachable URLs
 	hubs       map[string]*broadcast.Hub
 	buses      map[string]*events.Bus
+	nowPlaying map[string]*NowPlaying // current-track trackers for shared streams
 	enrich     *enrich.Runner // nil until SetEnrichRunner; endpoints 503 while nil
 	scan       *scan.Progress // nil until SetScanProgress (no library); endpoint 503 while nil
 
@@ -36,9 +37,10 @@ type Server struct {
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 	return &Server{
 		db: db, jb: jb, ui: ui,
-		hubs:     make(map[string]*broadcast.Hub),
-		buses:    make(map[string]*events.Bus),
-		sonosIPs: make(map[string]bool),
+		hubs:       make(map[string]*broadcast.Hub),
+		buses:      make(map[string]*events.Bus),
+		nowPlaying: make(map[string]*NowPlaying),
+		sonosIPs:   make(map[string]bool),
 	}
 }
 
@@ -55,10 +57,15 @@ func (s *Server) SetEnrichRunner(r *enrich.Runner) { s.enrich = r }
 // Left nil when no library is configured (no scan ever runs).
 func (s *Server) SetScanProgress(p *scan.Progress) { s.scan = p }
 
-// RegisterStream attaches a broadcast hub and event bus for a shared stream id.
-func (s *Server) RegisterStream(id string, hub *broadcast.Hub, bus *events.Bus) {
+// RegisterStream attaches a broadcast hub, event bus, and now-playing tracker
+// for a shared stream id. np may be nil for streams that don't track current
+// track (GET /api/streams/{id} then reports now_playing: null).
+func (s *Server) RegisterStream(id string, hub *broadcast.Hub, bus *events.Bus, np *NowPlaying) {
 	s.hubs[id] = hub
 	s.buses[id] = bus
+	if np != nil {
+		s.nowPlaying[id] = np
+	}
 }
 
 // listenerCount returns connected listeners for a registered shared stream, or

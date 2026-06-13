@@ -65,6 +65,51 @@ func TestRequestRecordsRequesterAndStreamReturnsIt(t *testing.T) {
 	}
 }
 
+func TestGetStreamNowPlayingWhenPlaying(t *testing.T) {
+	srv := newTestServer(t)
+	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "Album")
+	np := NewNowPlaying()
+	tr, _, _ := store.GetTrack(srv.db, id)
+	np.Set(tr)
+	srv.nowPlaying["house"] = np
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/streams/house", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"now_playing":{`) {
+		t.Fatalf("expected now_playing object, got %s", body)
+	}
+	if !strings.Contains(body, `"offset_seconds":`) {
+		t.Fatalf("expected offset_seconds, got %s", body)
+	}
+	if !strings.Contains(body, `"title":"Hello"`) {
+		t.Fatalf("expected track title, got %s", body)
+	}
+}
+
+func TestGetStreamNowPlayingNullWhenIdle(t *testing.T) {
+	srv := newTestServer(t)
+	srv.nowPlaying["house"] = NewNowPlaying() // tracker present but idle
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/streams/house", nil))
+	if !strings.Contains(rec.Body.String(), `"now_playing":null`) {
+		t.Fatalf("expected now_playing:null when idle, got %s", rec.Body.String())
+	}
+}
+
+func TestGetStreamNowPlayingNullForUntrackedStream(t *testing.T) {
+	srv := newTestServer(t)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/streams/me", nil))
+	if !strings.Contains(rec.Body.String(), `"now_playing":null`) {
+		t.Fatalf("expected now_playing:null for untracked stream, got %s", rec.Body.String())
+	}
+}
+
 func TestRequestThenNextRoundTrip(t *testing.T) {
 	srv := newTestServer(t)
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "Album")
