@@ -1,0 +1,12 @@
+[Unit]
+Description=Exit 66 Jukebox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/exit66jukebox -db %h/.local/share/exit66jukebox/exit66.db $EXIT66_ARGS
+EnvironmentFile=%h/.config/exit66jukebox/exit66.env
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
