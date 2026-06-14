@@ -1,4 +1,7 @@
 <script>
+  import IconNext from './icons/IconNext.svelte';
+  import IconPlay from './icons/IconPlay.svelte';
+  import IconPause from './icons/IconPause.svelte';
   let { np = null, npPct = '0%', playing = true, onPlayPause, onNext } = $props();
   let artFailed = $state(false);
   // Reset the fallback when the now-playing track changes.
@@ -18,7 +21,7 @@
       <div style="font-family:var(--font-sans); font-weight:600; font-size:14px; color:var(--text-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{np ? np.title : 'Nothing playing'}</div>
       <div style="font-family:var(--font-sans); font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{np ? `${np.artistName} · ${np.albumName}` : '—'}</div>
     </div>
-    <button aria-label="Play / pause" onclick={onPlayPause} style="width:42px; height:42px; flex:none; border-radius:50%; border:none; background:var(--neon-magenta); color:var(--text-on-accent); font-size:18px; cursor:pointer;">{playing ? '❚❚' : '▶'}</button>
-    <button aria-label="Next" onclick={onNext} style="width:38px; height:38px; flex:none; border-radius:50%; border:1px solid var(--border-strong); background:transparent; color:var(--text-body); font-size:16px; cursor:pointer;">⏭</button>
+    <button aria-label="Play / pause" onclick={onPlayPause} style="width:42px; height:42px; flex:none; border-radius:50%; border:none; background:var(--neon-magenta); color:var(--text-on-accent); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">{#if playing}<IconPause size={20} />{:else}<IconPlay size={20} />{/if}</button>
+    <button aria-label="Next" onclick={onNext} style="width:38px; height:38px; flex:none; border-radius:50%; border:1px solid var(--border-strong); background:transparent; color:var(--text-body); cursor:pointer; display:inline-flex; align-items:center; justify-content:center;"><IconNext size={18} /></button>
   </div>
 </div>

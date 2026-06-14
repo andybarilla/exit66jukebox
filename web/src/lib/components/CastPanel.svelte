@@ -3,6 +3,10 @@
     listSonos, castSonos, stopSonos, getSonosVolume, setSonosVolume,
     addManualSonos, nextHouse,
   } from '../api.js';
+  import IconCast from './icons/IconCast.svelte';
+  import IconNext from './icons/IconNext.svelte';
+  import IconStop from './icons/IconStop.svelte';
+  import IconVolume from './icons/IconVolume.svelte';
   let { onToast = () => {} } = $props();
 
   let open = $state(false);
@@ -94,7 +98,7 @@
 <div style="position:relative; flex:none;">
   <button onclick={() => (open = !open)} aria-label="Cast to Sonos" aria-expanded={open}
     style="display:inline-flex; align-items:center; gap:7px; padding:7px 12px; border:1px solid {activeIp ? 'var(--neon-cyan)' : 'var(--border-default)'}; border-radius:var(--radius-sm); background:{activeIp ? 'rgba(34,224,238,0.06)' : 'transparent'}; font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:{activeIp ? 'var(--neon-cyan)' : 'var(--text-muted)'}; cursor:pointer; white-space:nowrap;">
-    <span style="font-size:13px; line-height:1;">📡</span>Cast
+    <span style="display:inline-flex; line-height:1;"><IconCast size={15} /></span>Cast
   </button>
 
   {#if open}
@@ -118,7 +122,7 @@
 
       {#if activeIp}
         <div style="display:flex; align-items:center; gap:10px;">
-          <span style="color:var(--text-muted); font-size:15px;">♪</span>
+          <span style="color:var(--text-muted); display:inline-flex;"><IconVolume size={15} /></span>
           <div onpointerdown={onVolPointerDown} onpointermove={onVolPointerMove} role="slider" tabindex="0" aria-label="Sonos volume" aria-valuenow={volume} style="position:relative; flex:1; height:14px; display:flex; align-items:center; cursor:pointer; touch-action:none;">
             <div style="position:absolute; left:0; right:0; height:4px; border-radius:var(--radius-pill); background:var(--ink-700);"></div>
             <div style="position:absolute; left:0; width:{volume}%; height:4px; border-radius:var(--radius-pill); background:var(--neon-cyan);"></div>
@@ -127,8 +131,8 @@
           <span style="font-family:var(--font-mono); font-size:10px; color:var(--text-faint); width:26px; text-align:right;">{volume}</span>
         </div>
         <div style="display:flex; gap:8px;">
-          <button onclick={next} style="flex:1; padding:7px 0; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:transparent; color:var(--text-body); font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer;">Next ⏭</button>
-          <button onclick={stop} style="flex:1; padding:7px 0; border:1px solid var(--neon-magenta); border-radius:var(--radius-sm); background:transparent; color:var(--neon-magenta-bright); font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer;">Stop ◼</button>
+          <button onclick={next} style="flex:1; padding:7px 0; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:transparent; color:var(--text-body); font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;">Next <IconNext size={14} /></button>
+          <button onclick={stop} style="flex:1; padding:7px 0; border:1px solid var(--neon-magenta); border-radius:var(--radius-sm); background:transparent; color:var(--neon-magenta-bright); font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;">Stop <IconStop size={13} /></button>
         </div>
       {/if}
 

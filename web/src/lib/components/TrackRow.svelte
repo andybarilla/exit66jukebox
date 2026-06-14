@@ -1,5 +1,6 @@
 <script>
   import { toneGradient, keyActivate } from '../format.js';
+  import IconPlus from './icons/IconPlus.svelte';
   let { code = 'A6', title = 'Untitled', artist = 'Unknown', duration = '0:00',
         cover = null, gradient = null, tone = 'magenta', explicit = false,
         trackNo = 0, playing = false, onAdd, onClick } = $props();
@@ -30,7 +31,7 @@
   <span style="font-family:var(--font-mono); font-size:13px; color:var(--text-faint); flex:none;">{duration}</span>
   {#if onAdd}
     <button class="add" aria-label="Add to queue" onclick={(e) => { e.stopPropagation(); onAdd(); }}
-      style="width:34px; height:34px; flex:none; border-radius:var(--radius-sm); display:inline-flex; align-items:center; justify-content:center; background:var(--bg-surface-raised); color:var(--text-muted); border:1px solid var(--border-default); cursor:pointer; font-size:18px; line-height:1; transition:all var(--dur) var(--ease-out);">+</button>
+      style="width:34px; height:34px; flex:none; border-radius:var(--radius-sm); display:inline-flex; align-items:center; justify-content:center; background:var(--bg-surface-raised); color:var(--text-muted); border:1px solid var(--border-default); cursor:pointer; line-height:1; transition:all var(--dur) var(--ease-out);"><IconPlus size={18} /></button>
   {/if}
 </div>
 <style>
