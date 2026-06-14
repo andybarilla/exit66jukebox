@@ -184,7 +184,7 @@ export function createStore() {
   function normalizeQueued(item) {
     const t = item.track || item;
     return {
-      uid: ++_uid, id: t.id, title: t.title,
+      uid: ++_uid, id: t.id, title: t.title, albumId: t.album_id,
       artistName: t.artist_name || 'Unknown', albumName: t.album_name || '',
       code: t.code || '··', tone: t.tone || 'magenta', requester: item.requested_by || '',
       cover: coverURL(t.id), gradient: gradientFor(t.id),
@@ -388,7 +388,7 @@ export function createStore() {
     // npMeta maps an enriched track (from /next) to now-playing display fields.
     npMeta(t) {
       return {
-        code: t.code || '··', artistName: t.artist_name || 'Unknown',
+        code: t.code || '··', albumId: t.album_id, artistName: t.artist_name || 'Unknown',
         albumName: t.album_name || '', tone: t.tone || 'magenta',
         cover: coverURL(t.id), gradient: gradientFor(t.id),
       };
@@ -398,7 +398,7 @@ export function createStore() {
   // normalizeNP maps an enriched now-playing track (SSE/`/next`) to display shape.
   function normalizeNP(t) {
     return {
-      id: t.id, title: t.title, code: t.code || '··',
+      id: t.id, title: t.title, code: t.code || '··', albumId: t.album_id,
       artistName: t.artist_name || 'Unknown', albumName: t.album_name || '',
       tone: t.tone || 'magenta', duration: t.duration || 0,
       cover: coverURL(t.id), gradient: gradientFor(t.id),
