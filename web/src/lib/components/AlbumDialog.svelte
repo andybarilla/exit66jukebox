@@ -24,7 +24,7 @@
           <div style="display:flex; flex-direction:column; gap:2px; max-height:336px; overflow-y:auto; margin-right:-6px; padding-right:6px;">
             {#each album.tracks as t (t.id)}
               <TrackRow code={t.code} title={t.title} artist={t.artistName} duration={fmt(t.duration)}
-                cover={t.cover} gradient={t.gradient} tone={t.tone}
+                cover={t.cover} gradient={t.gradient} tone={t.tone} trackNo={t.trackNo}
                 playing={t.id === nowPlayingId} onAdd={() => onAddTrack(t)} />
             {/each}
           </div>
