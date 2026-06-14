@@ -4,8 +4,9 @@ import "database/sql"
 
 // currentLibraryVersion is bumped whenever the indexing rules change in a way
 // that stored columns can't re-derive, forcing a one-time full re-scan. v1:
-// albums re-keyed by album-artist (#32). v2: comment-tag links extracted (#46).
-const currentLibraryVersion = 2
+// albums re-keyed by album-artist (#32). v2: compilation flag forces "Various
+// Artists" when AlbumArtist is blank (#63). v3: comment-tag links extracted (#46).
+const currentLibraryVersion = 3
 
 // columnExists reports whether a column is present on a table.
 func columnExists(db *sql.DB, table, col string) (bool, error) {
