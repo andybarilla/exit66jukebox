@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/dhowden/tag"
 )
@@ -34,7 +35,10 @@ func extractLinks(comment string) []string {
 	seen := make(map[string]bool, len(matches))
 	var out []string
 	for _, u := range matches {
-		if seen[u] {
+		// Trim sentence punctuation the regex swallows when a URL ends a clause
+		// ("Visit https://x/a." / "https://x/a, https://y/b").
+		u = strings.TrimRight(u, ".,;:!?")
+		if u == "" || seen[u] {
 			continue
 		}
 		seen[u] = true

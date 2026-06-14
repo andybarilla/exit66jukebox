@@ -52,6 +52,16 @@ func TestExtractLinks(t *testing.T) {
 			"see (https://a.com/x). thanks",
 			[]string{"https://a.com/x"},
 		},
+		{
+			"bare trailing period",
+			"Visit https://a.com/x. Thanks",
+			[]string{"https://a.com/x"},
+		},
+		{
+			"trailing comma in list",
+			"https://a.com/x, https://b.com/y",
+			[]string{"https://a.com/x", "https://b.com/y"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
