@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS track (
     duration   INTEGER NOT NULL DEFAULT 0,
     play_count INTEGER NOT NULL DEFAULT 0,
     added_at   INTEGER NOT NULL DEFAULT 0,
-    mbid       TEXT NOT NULL DEFAULT ''
+    mbid       TEXT NOT NULL DEFAULT '',
+    links      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_track_artist ON track(artist_id);
 CREATE INDEX IF NOT EXISTS idx_track_album  ON track(album_id);

@@ -119,6 +119,7 @@ export function createStore() {
       trackNo: t.track_no || 0,
       code: t.code || '··', tone: t.tone || 'magenta',
       artistName: t.artist_name || 'Unknown', albumName: t.album_name || '',
+      links: t.links || [],
       cover: coverURL(t.id), gradient: gradientFor(t.id),
     };
   }

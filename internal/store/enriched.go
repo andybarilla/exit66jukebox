@@ -27,7 +27,7 @@ ranked_album AS (
 // album's album-artist (r.artist_name) — so a compilation track shows its own
 // performer while the album card stays titled by its album-artist.
 const trackSelectCols = `t.id, t.title, t.artist_id, t.album_id, t.track_no,
-	t.genre, t.duration, t.play_count, r.rank, r.album_name, ta.name`
+	t.genre, t.duration, t.play_count, t.links, r.rank, r.album_name, ta.name`
 
 // trackArtistJoin attaches each track's own artist for its displayed name.
 const trackArtistJoin = ` JOIN artist ta ON ta.id = t.artist_id`
@@ -37,9 +37,13 @@ const trackArtistJoin = ` JOIN artist ta ON ta.id = t.artist_id`
 func scanEnrichedTrack(rows *sql.Rows) (model.EnrichedTrack, error) {
 	var t model.EnrichedTrack
 	var rank int
+	var links string
 	if err := rows.Scan(&t.ID, &t.Title, &t.ArtistID, &t.AlbumID, &t.TrackNo,
-		&t.Genre, &t.Duration, &t.PlayCount, &rank, &t.AlbumName, &t.ArtistName); err != nil {
+		&t.Genre, &t.Duration, &t.PlayCount, &links, &rank, &t.AlbumName, &t.ArtistName); err != nil {
 		return model.EnrichedTrack{}, err
+	}
+	if links != "" {
+		t.Links = strings.Split(links, "\n")
 	}
 	t.Code = slotCode(rank, t.TrackNo)
 	t.Tone = tone(rank)

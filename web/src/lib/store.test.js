@@ -47,4 +47,21 @@ describe('openAlbum track mapping', () => {
     await store.openAlbum({ id: 11, name: 'X', artistName: 'Y' });
     expect(store.detailAlbum.tracks[0].trackNo).toBe(0);
   });
+
+  // The backend serves comment-derived URLs as a `links` array; the dialog
+  // renders them, so mapTrack must carry them through, defaulting to [] (#46).
+  it('carries links through for the album dialog, defaulting to []', async () => {
+    global.fetch = vi.fn(async () => ({
+      json: async () => [
+        { id: 1, title: 'One', track_no: 1, links: ['https://a.bandcamp.com/x'] },
+        { id: 2, title: 'Two', track_no: 2 },
+      ],
+    }));
+    const store = createStore();
+    await store.openAlbum({ id: 12, name: 'X', artistName: 'Y' });
+    expect(store.detailAlbum.tracks.map((t) => t.links)).toEqual([
+      ['https://a.bandcamp.com/x'],
+      [],
+    ]);
+  });
 });
