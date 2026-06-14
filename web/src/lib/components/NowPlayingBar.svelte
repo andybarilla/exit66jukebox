@@ -1,5 +1,10 @@
 <script>
   import { fmt, toneGradient } from '../format.js';
+  import IconPrev from './icons/IconPrev.svelte';
+  import IconNext from './icons/IconNext.svelte';
+  import IconPlay from './icons/IconPlay.svelte';
+  import IconPause from './icons/IconPause.svelte';
+  import IconVolume from './icons/IconVolume.svelte';
   let { title = 'Nothing playing', artist = '—', code = 'A6', cover = null, gradient = null,
         tone = 'magenta', current = 0, duration = 0, playing = false, volume = 70,
         onPlayPause, onPrev, onNext, onSeek, onVolume } = $props();
@@ -38,9 +43,9 @@
   <!-- transport + scrub -->
   <div style="flex:1; min-width:0; display:flex; flex-direction:column; gap:7px; align-items:center;">
     <div style="display:flex; align-items:center; gap:10px;">
-      <button class="t" aria-label="Previous" onclick={onPrev} style="width:38px; height:38px;">⏮</button>
-      <button class="t primary" aria-label={playing ? 'Pause' : 'Play'} onclick={onPlayPause} style="width:46px; height:46px;">{playing ? '❚❚' : '▶'}</button>
-      <button class="t" aria-label="Next" onclick={onNext} style="width:38px; height:38px;">⏭</button>
+      <button class="t" aria-label="Previous" onclick={onPrev} style="width:38px; height:38px;"><IconPrev size={20} /></button>
+      <button class="t primary" aria-label={playing ? 'Pause' : 'Play'} onclick={onPlayPause} style="width:46px; height:46px;">{#if playing}<IconPause size={22} />{:else}<IconPlay size={22} />{/if}</button>
+      <button class="t" aria-label="Next" onclick={onNext} style="width:38px; height:38px;"><IconNext size={20} /></button>
     </div>
     <div style="display:flex; align-items:center; gap:12px; width:100%; max-width:520px;">
       <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-faint); width:38px; text-align:right;">{fmt(current)}</span>
@@ -54,7 +59,7 @@
   </div>
   <!-- volume -->
   <div style="display:flex; align-items:center; gap:10px; width:160px; flex:none;">
-    <span style="color:var(--text-muted); font-size:16px;">♪</span>
+    <span style="color:var(--text-muted); display:inline-flex;"><IconVolume size={16} /></span>
     <div onmousedown={volFrom} role="slider" tabindex="0" aria-label="Volume" aria-valuenow={volume} style="position:relative; flex:1; height:14px; display:flex; align-items:center; cursor:pointer;">
       <div style="position:absolute; left:0; right:0; height:4px; border-radius:var(--radius-pill); background:var(--ink-700);"></div>
       <div style="position:absolute; left:0; width:{volume}%; height:4px; border-radius:var(--radius-pill); background:var(--neon-cyan);"></div>
