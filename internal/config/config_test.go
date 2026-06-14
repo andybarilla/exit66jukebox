@@ -57,6 +57,28 @@ func TestLastfmConfiguredNeedsBoth(t *testing.T) {
 	}
 }
 
+func TestMuteLocalOnCastDefaultsTrue(t *testing.T) {
+	t.Setenv("EXIT66_MUTE_LOCAL_ON_CAST", "")
+	c, err := Parse(nil)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !c.MuteLocalOnCast {
+		t.Error("MuteLocalOnCast = false with env unset, want true (default)")
+	}
+}
+
+func TestMuteLocalOnCastDisabled(t *testing.T) {
+	t.Setenv("EXIT66_MUTE_LOCAL_ON_CAST", "false")
+	c, err := Parse(nil)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if c.MuteLocalOnCast {
+		t.Error("MuteLocalOnCast = true with env=false, want false")
+	}
+}
+
 // Tokens must never be exposed as flags (they would leak via the process list).
 func TestTokenNotAFlag(t *testing.T) {
 	_, err := Parse([]string{"-listenbrainz-token", "x"})

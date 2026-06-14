@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"os"
+	"strconv"
 )
 
 // Config holds runtime options sourced from flags.
@@ -13,6 +14,11 @@ type Config struct {
 	HistoryWindow int
 	ScanWorkers   int
 	Services      Services
+
+	// MuteLocalOnCast silences the browser's local <audio> while a Sonos cast is
+	// active. Sourced from EXIT66_MUTE_LOCAL_ON_CAST for now; a settings UI will
+	// replace the env source later. Defaults true when unset.
+	MuteLocalOnCast bool
 }
 
 // Services holds external-service credentials. They are read from the
@@ -67,5 +73,21 @@ func Parse(args []string) (Config, error) {
 		return Config{}, err
 	}
 	c.Services = servicesFromEnv()
+	c.MuteLocalOnCast = envBool("EXIT66_MUTE_LOCAL_ON_CAST", true)
 	return c, nil
+}
+
+// envBool reads a truthy boolean from the environment. An unset or unparseable
+// value falls back to def, so EXIT66_MUTE_LOCAL_ON_CAST defaults on but an
+// explicit "false"/"0" turns it off.
+func envBool(key string, def bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return def
+	}
+	return b
 }

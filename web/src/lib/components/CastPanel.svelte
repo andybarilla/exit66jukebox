@@ -3,7 +3,7 @@
     listSonos, castSonos, stopSonos, getSonosVolume, setSonosVolume,
     addManualSonos, nextHouse,
   } from '../api.js';
-  let { onToast = () => {} } = $props();
+  let { onToast = () => {}, onCastActive = () => {} } = $props();
 
   let open = $state(false);
   let searching = $state(false);
@@ -32,6 +32,7 @@
     try {
       await castSonos(d.ip);
       activeIp = d.ip;
+      onCastActive(true);
       onToast('success', 'Casting', `House stream → ${d.name}.`);
       try { const r = await getSonosVolume(d.ip); if (typeof r?.volume === 'number') volume = r.volume; } catch (_) {}
     } catch (_) {
@@ -45,6 +46,7 @@
     try {
       await stopSonos(ip);
       activeIp = null;
+      onCastActive(false);
       onToast('cyan', 'Stopped', 'Sonos playback stopped.');
     } catch (_) {
       onToast('amber', 'Stop failed', 'Could not stop Sonos playback.');

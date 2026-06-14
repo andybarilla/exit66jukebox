@@ -142,6 +142,13 @@
     }
   });
 
+  // Mute the local <audio> while a Sonos cast is active (gated by config).
+  // Muting, not pausing — the timeline keeps running so resuming is seamless and
+  // the volume value is untouched.
+  $effect(() => {
+    if (audio) audio.muted = s.muteLocalOnCast && s.castActive;
+  });
+
   // Load discover data when switching to the discover tab.
   let lastTab = s.tab;
   $effect(() => {
@@ -154,7 +161,8 @@
 
   <TopBar isPhone={s.isPhone} query={s.query} onSearch={(v) => (s.query = v)}
     streamChipLabel={chip} onToggleStream={() => s.toggleStream()} scan={s.scan}
-    onToast={(tone, title, msg) => s.pushToast(tone, title, msg)} />
+    onToast={(tone, title, msg) => s.pushToast(tone, title, msg)}
+    onCastActive={(v) => s.setCastActive(v)} />
 
   <!-- BODY -->
   <div style="display:flex; flex:1; min-height:0;">

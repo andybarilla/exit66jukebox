@@ -3,7 +3,7 @@
   import Avatar from './Avatar.svelte';
   import CastPanel from './CastPanel.svelte';
   import { scanIndicator } from '../scan.js';
-  let { isPhone = false, query = '', onSearch, streamChipLabel = '', onToggleStream, scan = null, onToast = () => {} } = $props();
+  let { isPhone = false, query = '', onSearch, streamChipLabel = '', onToggleStream, scan = null, onToast = () => {}, onCastActive = () => {} } = $props();
   let ind = $derived(scanIndicator(scan));
 </script>
 
@@ -25,7 +25,7 @@
     </div>
     <div style="display:flex; align-items:center; gap:14px; flex:none;">
       {@render scanChip()}
-      <CastPanel {onToast} />
+      <CastPanel {onToast} {onCastActive} />
       <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid var(--border-default); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{streamChipLabel} listening</span>
       <Avatar name="You" ring="cyan" size="sm" />
     </div>
@@ -38,7 +38,7 @@
         <div style="font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:0.06em; color:var(--text-strong);">EXIT&nbsp;<span style="color:var(--neon-cyan);">66</span></div>
       </div>
       <div style="display:flex; align-items:center; gap:9px;">
-        <CastPanel {onToast} />
+        <CastPanel {onToast} {onCastActive} />
         <button onclick={onToggleStream} style="display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--bg-surface); font-family:var(--font-mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-body); cursor:pointer; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{streamChipLabel}</button>
       </div>
     </div>

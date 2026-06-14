@@ -161,3 +161,10 @@ export async function setShuffle(streamId, on) {
 }
 
 export function albumCoverURL(albumId) { return `/api/albums/${albumId}/cover`; }
+
+// getConfig returns runtime settings (e.g. mute_local_on_cast). This is the seam
+// a future settings UI will read/write; today it's sourced from server env.
+export async function getConfig() {
+  const r = await fetch('/api/config');
+  return r.json(); // { mute_local_on_cast: bool }
+}
