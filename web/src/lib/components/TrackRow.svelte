@@ -1,11 +1,19 @@
 <script>
   import { toneGradient, keyActivate } from '../format.js';
   import IconPlus from './icons/IconPlus.svelte';
+  import IconCheck from './icons/IconCheck.svelte';
   let { code = 'A6', title = 'Untitled', artist = 'Unknown', duration = '0:00',
         cover = null, gradient = null, tone = 'magenta', explicit = false,
         trackNo = 0, playing = false, onAdd, onClick } = $props();
   let artFailed = $state(false);
+  let justAdded = $state(false);
   const tile = $derived(gradient || toneGradient(tone));
+  function handleAdd(e) {
+    e.stopPropagation();
+    justAdded = true;
+    setTimeout(() => (justAdded = false), 600);
+    onAdd();
+  }
 </script>
 <div class="tr" class:playing
   {...onClick ? { role: 'button', tabindex: 0, onclick: onClick, onkeydown: keyActivate(onClick) } : {}}
@@ -30,11 +38,17 @@
   </div>
   <span style="font-family:var(--font-mono); font-size:13px; color:var(--text-faint); flex:none;">{duration}</span>
   {#if onAdd}
-    <button class="add" aria-label="Add to queue" onclick={(e) => { e.stopPropagation(); onAdd(); }}
-      style="width:34px; height:34px; flex:none; border-radius:var(--radius-sm); display:inline-flex; align-items:center; justify-content:center; background:var(--bg-surface-raised); color:var(--text-muted); border:1px solid var(--border-default); cursor:pointer; line-height:1; transition:all var(--dur) var(--ease-out);"><IconPlus size={18} /></button>
+    <button class="add" class:added={justAdded} aria-label="Add to queue" onclick={handleAdd}
+      style="width:34px; height:34px; flex:none; border-radius:var(--radius-sm); display:inline-flex; align-items:center; justify-content:center; background:var(--bg-surface-raised); color:var(--text-muted); border:1px solid var(--border-default); cursor:pointer; line-height:1; transition:all var(--dur) var(--ease-out);">{#if justAdded}<IconCheck size={18} />{:else}<IconPlus size={18} />{/if}</button>
   {/if}
 </div>
 <style>
   .tr:not(.playing):hover { background: var(--bg-surface-hover) !important; }
   .tr:hover .add { background: var(--neon-magenta); color: var(--text-on-accent); box-shadow: var(--glow-soft-magenta); }
+  .add.added { background: var(--neon-magenta); color: var(--text-on-accent); box-shadow: var(--glow-soft-magenta); animation: add-pulse 600ms var(--ease-out); }
+  @keyframes add-pulse {
+    0% { transform: scale(1); }
+    30% { transform: scale(1.18); }
+    100% { transform: scale(1); }
+  }
 </style>
