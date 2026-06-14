@@ -4,8 +4,8 @@ import "database/sql"
 
 // currentLibraryVersion is bumped whenever the indexing rules change in a way
 // that stored columns can't re-derive, forcing a one-time full re-scan. v1:
-// albums re-keyed by album-artist (#32).
-const currentLibraryVersion = 1
+// albums re-keyed by album-artist (#32). v2: comment-tag links extracted (#46).
+const currentLibraryVersion = 2
 
 // columnExists reports whether a column is present on a table.
 func columnExists(db *sql.DB, table, col string) (bool, error) {
@@ -45,6 +45,17 @@ func migrate(db *sql.DB) error {
 			if _, err := db.Exec("ALTER TABLE " + t + " ADD COLUMN mbid TEXT NOT NULL DEFAULT ''"); err != nil {
 				return err
 			}
+		}
+	}
+	// links column holds newline-joined comment-tag URLs (#46). The version bump
+	// below forces a re-scan that backfills it for already-indexed libraries.
+	has, err = columnExists(db, "track", "links")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE track ADD COLUMN links TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
 		}
 	}
 	// sort_key columns drive backend-owned library ordering (#53). Add and backfill

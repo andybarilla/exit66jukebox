@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"strings"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
 )
@@ -69,13 +70,15 @@ func UpsertTrack(db *sql.DB, t model.Track, artistName, albumArtist, albumName s
 		return 0, err
 	}
 	_, err = tx.Exec(
-		`INSERT INTO track(path, mod_time, size, title, artist_id, album_id, track_no, genre, duration, added_at)
-		 VALUES(?,?,?,?,?,?,?,?,?, strftime('%s','now'))
+		`INSERT INTO track(path, mod_time, size, title, artist_id, album_id, track_no, genre, duration, links, added_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?, strftime('%s','now'))
 		 ON CONFLICT(path) DO UPDATE SET
 		   mod_time=excluded.mod_time, size=excluded.size, title=excluded.title,
 		   artist_id=excluded.artist_id, album_id=excluded.album_id,
-		   track_no=excluded.track_no, genre=excluded.genre, duration=excluded.duration`,
+		   track_no=excluded.track_no, genre=excluded.genre, duration=excluded.duration,
+		   links=excluded.links`,
 		t.Path, t.ModTime, t.Size, t.Title, artistID, albumID, t.TrackNo, t.Genre, t.Duration,
+		strings.Join(t.Links, "\n"),
 	)
 	if err != nil {
 		return 0, err

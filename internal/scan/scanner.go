@@ -93,7 +93,7 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 				tr := model.Track{
 					Path: j.path, ModTime: j.modTime, Size: j.size,
 					Title: meta.Title, TrackNo: meta.TrackNo, Genre: meta.Genre,
-					Duration: probeDuration(j.path),
+					Duration: probeDuration(j.path), Links: meta.Links,
 				}
 				mu.Lock()
 				_, err = store.UpsertTrack(db, tr, meta.Artist, meta.AlbumArtistOrFallback(), meta.Album)

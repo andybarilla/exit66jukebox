@@ -27,9 +27,10 @@ type Track struct {
 	AlbumID   int64  `json:"album_id"`
 	TrackNo   int    `json:"track_no"`
 	Genre     string `json:"genre"`
-	Duration  int    `json:"duration"`
-	PlayCount int    `json:"play_count"`
-	Mbid      string `json:"-"`
+	Duration  int      `json:"duration"`
+	PlayCount int      `json:"play_count"`
+	Links     []string `json:"links"`
+	Mbid      string   `json:"-"`
 }
 
 // Stream owns a queue + fairness config. Kind is "private" or "shared".

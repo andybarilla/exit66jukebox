@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"reflect"
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
@@ -51,6 +52,33 @@ func TestTracksByAlbumShowsPerTrackArtist(t *testing.T) {
 	}
 	if got["One"] != "Artist A" || got["Two"] != "Artist B" {
 		t.Fatalf("expected per-track artists, got %v", got)
+	}
+}
+
+// TestTrackLinksRoundTrip verifies comment-derived links persist on the track
+// and come back through the enriched album-dialog query; a track with no links
+// reads back empty.
+func TestTrackLinksRoundTrip(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+	links := []string{"https://artist.bandcamp.com/album/x", "http://shop.example.com"}
+	UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "One", TrackNo: 1, Links: links}, "Band", "", "LP")
+	UpsertTrack(db, model.Track{Path: "/m/2.mp3", Title: "Two", TrackNo: 2}, "Band", "", "LP")
+
+	albums, _ := ListAlbumsEnriched(db, "", 50, 0)
+	tracks, err := TracksByAlbumEnriched(db, albums[0].ID)
+	if err != nil {
+		t.Fatalf("TracksByAlbumEnriched: %v", err)
+	}
+	got := map[string][]string{}
+	for _, tr := range tracks {
+		got[tr.Title] = tr.Links
+	}
+	if !reflect.DeepEqual(got["One"], links) {
+		t.Errorf("track One links = %#v, want %#v", got["One"], links)
+	}
+	if len(got["Two"]) != 0 {
+		t.Errorf("track Two should have no links, got %#v", got["Two"])
 	}
 }
 
