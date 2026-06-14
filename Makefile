@@ -55,10 +55,10 @@ check-prereqs:
 	command -v npm >/dev/null 2>&1 || missing="$$missing npm"; \
 	if [ -n "$$missing" ]; then \
 		echo "Missing build tools:$$missing"; \
-		id=$$( . /etc/os-release 2>/dev/null; echo "$$ID" ); \
-		case "$$id" in \
-			arch) echo "Install with: sudo pacman -S go npm" ;; \
-			fedora) echo "Install with: sudo dnf install golang npm" ;; \
+		id=$$( . /etc/os-release 2>/dev/null; echo "$$ID $$ID_LIKE" ); \
+		case " $$id " in \
+			*" arch "*) echo "Install with: sudo pacman -S go npm" ;; \
+			*" fedora "*) echo "Install with: sudo dnf install golang npm" ;; \
 			*) echo "Install go and npm with your distro's package manager." ;; \
 		esac; \
 		exit 1; \
