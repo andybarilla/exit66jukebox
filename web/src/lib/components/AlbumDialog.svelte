@@ -1,7 +1,10 @@
 <script>
   import TrackRow from './TrackRow.svelte';
+  import IconLink from './icons/IconLink.svelte';
   import { fmt, keyActivate } from '../format.js';
   let { album = null, nowPlayingId = null, onClose, onRequestAll, onAddTrack } = $props();
+  // Strip the scheme so a bandcamp/merch URL reads as its host + path.
+  const linkLabel = (url) => url.replace(/^https?:\/\//, '');
 </script>
 {#if album}
   <div role="button" tabindex="-1" aria-label="Close" onclick={(e) => { if (e.target === e.currentTarget) onClose(); }} onkeydown={keyActivate(onClose)} style="position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(6,6,11,0.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);">
@@ -26,6 +29,16 @@
               <TrackRow code={t.code} title={t.title} artist={t.artistName} duration={fmt(t.duration)}
                 cover={t.cover} gradient={t.gradient} tone={t.tone} trackNo={t.trackNo}
                 playing={t.id === nowPlayingId} onAdd={() => onAddTrack(t)} />
+              {#if t.links && t.links.length}
+                <div style="display:flex; flex-direction:column; gap:3px; margin:0 12px 6px 82px;">
+                  {#each t.links as url (url)}
+                    <a class="trk-link" href={url} target="_blank" rel="noopener noreferrer"
+                      style="display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:11px; color:var(--neon-cyan); text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                      <IconLink size={12} /><span style="overflow:hidden; text-overflow:ellipsis;">{linkLabel(url)}</span>
+                    </a>
+                  {/each}
+                </div>
+              {/if}
             {/each}
           </div>
         </div>
@@ -35,4 +48,5 @@
 {/if}
 <style>
   .qall:hover { background: var(--neon-magenta-bright); border-color: var(--neon-magenta-bright); }
+  .trk-link:hover { color: var(--text-strong); text-decoration: underline; }
 </style>
