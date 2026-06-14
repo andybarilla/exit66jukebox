@@ -3,7 +3,7 @@ import {
   setShuffle, subscribeEvents, coverURL, albumCoverURL, HOUSE,
   discoverGenres, discoverRediscover, discoverRecent, discoverRecommended,
   getStation, startStation as apiStartStation, stopStation as apiStopStation,
-  scanStatus,
+  scanStatus, getConfig,
 } from './api.js';
 import { gradientFor } from './format.js';
 import { createPager } from './pager.js';
@@ -33,6 +33,12 @@ export function createStore() {
     tracks: { items: [], total: 0, loading: true },
   });
   let scan = $state(null);      // /api/scan snapshot {running,added,...} | null
+
+  // Runtime config + cast state. config loads once on init; muteLocalOnCast
+  // defaults true so a cast that starts before config resolves still mutes.
+  // castActive is lifted out of CastPanel so App can mute the local <audio>.
+  let config = $state({ muteLocalOnCast: true });
+  let castActive = $state(false);
 
   // per-stream live state
   let nowPlaying = $state({ house: null, me: null });
@@ -226,6 +232,9 @@ export function createStore() {
     pushToast,
 
     get scan() { return scan; },
+    get muteLocalOnCast() { return config.muteLocalOnCast; },
+    get castActive() { return castActive; },
+    setCastActive(v) { castActive = v; },
 
     // Personal is always "just you": the `me` stream has no broadcast hub, so
     // the backend reports 0 listeners for it. Never let that 0 surface here.
@@ -263,6 +272,9 @@ export function createStore() {
       // Seed scan state before the initial load so a scan that finishes *during*
       // the first fetch is still seen as a true→false transition by the first
       // poll, triggering the reload that pulls in the last tracks.
+      getConfig()
+        .then((c) => { if (c && typeof c.mute_local_on_cast === 'boolean') config = { muteLocalOnCast: c.mute_local_on_cast }; })
+        .catch(() => {});
       const s0 = await scanStatus().catch(() => null);
       scan = s0;
       _scanWasRunning = !!(s0 && s0.running);

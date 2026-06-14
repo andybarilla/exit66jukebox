@@ -31,6 +31,10 @@ type Server struct {
 	recommend  *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
 	scan       *scan.Progress         // nil until SetScanProgress (no library); endpoint 503 while nil
 
+	// muteLocalOnCast is exposed via GET /api/config so the frontend can mute the
+	// local <audio> while a Sonos cast is active. Sourced from config (env for now).
+	muteLocalOnCast bool
+
 	// sonosIPs is the allowlist of IPs from the most recent discovery; casts are
 	// restricted to it so an arbitrary ip can't be used to make the server POST
 	// to an internal host (SSRF). sonosManual holds IPs added via /api/sonos/manual
@@ -88,6 +92,10 @@ func (s *Server) SetRecommendRunner(r *recommend.Runner) { s.recommend = r }
 // Left nil when no library is configured (no scan ever runs).
 func (s *Server) SetScanProgress(p *scan.Progress) { s.scan = p }
 
+// SetMuteLocalOnCast records whether the frontend should mute local audio while
+// casting; exposed via GET /api/config.
+func (s *Server) SetMuteLocalOnCast(v bool) { s.muteLocalOnCast = v }
+
 // RegisterStream attaches a broadcast hub, event bus, and now-playing tracker
 // for a shared stream id. np may be nil for streams that don't track current
 // track (GET /api/streams/{id} then reports now_playing: null).
@@ -139,6 +147,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/enrich", s.enrichStart)
 	mux.HandleFunc("GET /api/enrich", s.enrichStatus)
 	mux.HandleFunc("GET /api/scan", s.scanStatus)
+	mux.HandleFunc("GET /api/config", s.getConfig)
 	mux.HandleFunc("GET /api/streams/{id}/station", s.getStationHandler)
 	mux.HandleFunc("POST /api/streams/{id}/station", s.startStationHandler)
 	mux.HandleFunc("DELETE /api/streams/{id}/station", s.stopStationHandler)

@@ -1,10 +1,27 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createStore } from './store.svelte.js';
 
 // createStore reads localStorage for the saved display name; stub it (node env).
-global.localStorage = { getItem: () => null, setItem: () => {} };
-
+beforeEach(() => {
+  vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
+});
 afterEach(() => { vi.restoreAllMocks(); });
+
+describe('cast-active state', () => {
+  it('defaults to false and is toggled by setCastActive', () => {
+    const s = createStore();
+    expect(s.castActive).toBe(false);
+    s.setCastActive(true);
+    expect(s.castActive).toBe(true);
+    s.setCastActive(false);
+    expect(s.castActive).toBe(false);
+  });
+
+  it('exposes muteLocalOnCast, defaulting true before config loads', () => {
+    const s = createStore();
+    expect(s.muteLocalOnCast).toBe(true);
+  });
+});
 
 // openAlbum maps the album's enriched track rows for the dialog. The backend
 // serves the track position as `track_no`; the dialog renders it, so mapTrack
