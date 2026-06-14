@@ -3,6 +3,7 @@ package scan
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/dhowden/tag"
 )
@@ -15,6 +16,31 @@ type Meta struct {
 	Album       string
 	Genre       string
 	TrackNo     int
+	Links       []string
+}
+
+// urlRe matches http(s) URLs in free text. It stops at whitespace and at
+// trailing punctuation that commonly wraps a link in prose (closing brackets,
+// quotes, sentence enders), so "(https://x.com/a)." yields the bare URL.
+var urlRe = regexp.MustCompile(`https?://[^\s<>"')\]}]+`)
+
+// extractLinks pulls every distinct http(s) URL out of a comment string,
+// preserving first-seen order. Returns nil when none are found.
+func extractLinks(comment string) []string {
+	matches := urlRe.FindAllString(comment, -1)
+	if matches == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(matches))
+	var out []string
+	for _, u := range matches {
+		if seen[u] {
+			continue
+		}
+		seen[u] = true
+		out = append(out, u)
+	}
+	return out
 }
 
 // AlbumArtistOrFallback returns the album's grouping artist: the AlbumArtist tag
@@ -48,6 +74,7 @@ func ReadTags(path string) (Meta, error) {
 		Album:       m.Album(),
 		Genre:       m.Genre(),
 		TrackNo:     trackNo,
+		Links:       extractLinks(m.Comment()),
 	}
 	return normalize(meta, path), nil
 }
