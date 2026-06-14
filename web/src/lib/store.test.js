@@ -65,3 +65,35 @@ describe('openAlbum track mapping', () => {
     ]);
   });
 });
+
+// Now-playing and queue payloads are enriched tracks that carry album_id; the
+// store surfaces it as albumId so the bar/Lineup/queue covers can openAlbum (#71).
+describe('album linkage from now-playing and queue', () => {
+  it('surfaces album_id as albumId on queue items and now-playing', async () => {
+    global.fetch = vi.fn(async () => ({
+      json: async () => ({
+        id: 'house',
+        now_playing: { track: { id: 1, title: 'NP', album_id: 100, album_name: 'NP Album' }, offset_seconds: 0 },
+        queue: [{ track: { id: 2, title: 'Q', album_id: 200, album_name: 'Q Album' } }],
+      }),
+    }));
+    const store = createStore();
+    await store.refreshQueue('house');
+    expect(store.nowPlaying.albumId).toBe(100);
+    expect(store.queue[0].albumId).toBe(200);
+  });
+
+  it('leaves albumId undefined when the payload lacks album_id', async () => {
+    global.fetch = vi.fn(async () => ({
+      json: async () => ({
+        id: 'house',
+        now_playing: { track: { id: 1, title: 'NP' }, offset_seconds: 0 },
+        queue: [{ track: { id: 2, title: 'Q' } }],
+      }),
+    }));
+    const store = createStore();
+    await store.refreshQueue('house');
+    expect(store.nowPlaying.albumId).toBeUndefined();
+    expect(store.queue[0].albumId).toBeUndefined();
+  });
+});

@@ -7,7 +7,8 @@
   import IconVolume from './icons/IconVolume.svelte';
   let { title = 'Nothing playing', artist = '—', code = 'A6', cover = null, gradient = null,
         tone = 'magenta', current = 0, duration = 0, playing = false, volume = 70,
-        onPlayPause, onPrev, onNext, onSeek, onVolume } = $props();
+        albumId = null, onOpenAlbum, onPlayPause, onPrev, onNext, onSeek, onVolume } = $props();
+  const canOpenAlbum = $derived(!!albumId && !!onOpenAlbum);
   let artFailed = $state(false);
   // Reset the fallback when the cover changes so a prior failed load doesn't
   // stick the code tile for the next track.
@@ -28,13 +29,18 @@
 <div style="display:flex; align-items:center; gap:20px; height:84px; padding:0 22px; background:var(--bg-surface-raised); background-image:var(--scanline); border-top:1px solid var(--border-strong); box-shadow:0 -8px 30px rgba(0,0,0,0.5);">
   <!-- track -->
   <div style="display:flex; align-items:center; gap:14px; width:280px; flex:none;">
-    <div style="position:relative; width:54px; height:54px; flex:none; border-radius:var(--radius-sm); overflow:hidden; background:{tile}; display:flex; align-items:flex-end; padding:6px; box-sizing:border-box; box-shadow:{playing ? 'var(--glow-soft-magenta)' : 'none'};">
+    {#snippet art()}
       {#if cover && !artFailed}
         <img src={cover} alt="" onerror={() => (artFailed = true)} style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover;" />
       {:else}
         <span style="font-family:var(--font-mono); font-size:10px; font-weight:700; color:rgba(255,255,255,0.85);">{code}</span>
       {/if}
-    </div>
+    {/snippet}
+    {#if canOpenAlbum}
+      <button type="button" class="cover-btn" onclick={onOpenAlbum} aria-label="Open album" title="Open album" style="position:relative; width:54px; height:54px; flex:none; border:none; border-radius:var(--radius-sm); overflow:hidden; background:{tile}; display:flex; align-items:flex-end; padding:6px; box-sizing:border-box; cursor:pointer; box-shadow:{playing ? 'var(--glow-soft-magenta)' : 'none'};">{@render art()}</button>
+    {:else}
+      <div style="position:relative; width:54px; height:54px; flex:none; border-radius:var(--radius-sm); overflow:hidden; background:{tile}; display:flex; align-items:flex-end; padding:6px; box-sizing:border-box; box-shadow:{playing ? 'var(--glow-soft-magenta)' : 'none'};">{@render art()}</div>
+    {/if}
     <div style="min-width:0;">
       <div style="font-family:var(--font-sans); font-weight:600; font-size:15px; color:var(--text-strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{title}</div>
       <div style="font-family:var(--font-sans); font-size:13px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{artist}</div>
@@ -71,4 +77,7 @@
   .t { flex:none; border-radius:50%; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:17px; line-height:1; background:transparent; color:var(--text-body); border:1px solid transparent; transition:all var(--dur) var(--ease-out); }
   .t.primary { font-size:20px; background:var(--neon-magenta); color:var(--text-on-accent); border:none; }
   .t.primary:hover { box-shadow: var(--glow-magenta); }
+  .cover-btn { transition: box-shadow var(--dur) var(--ease-out), transform var(--dur) var(--ease-out); }
+  .cover-btn:hover { box-shadow: var(--glow-soft-cyan); transform: scale(1.04); }
+  .cover-btn:focus-visible { outline: 2px solid var(--neon-cyan); outline-offset: 2px; }
 </style>
