@@ -22,6 +22,7 @@ type Manager struct {
 	MemberHandler http.Handler // served over session, member side
 	HubHandler    http.Handler // served over session, hub side
 	Registry      *Registry
+	Relay         *Relay // hub role: the single relay instance shared with HubHandler
 
 	hubSession *yamux.Session // member side: the live session to the hub
 }
