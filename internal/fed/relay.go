@@ -155,6 +155,7 @@ func (h *Relay) serveMerged(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(MergedCatalog{Catalogs: cats, Online: h.reg.IDs()})
 }
 
