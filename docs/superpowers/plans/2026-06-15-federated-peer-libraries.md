@@ -56,6 +56,7 @@ import (
 func TestFederationFromEnv(t *testing.T) {
 	t.Setenv("EXIT66_FED_ROLE", "member")
 	t.Setenv("EXIT66_FED_HUB", "hub.example.com:8443")
+	t.Setenv("EXIT66_FED_LISTEN", ":8443")
 	t.Setenv("EXIT66_FED_TOKEN", "s3cret")
 	t.Setenv("EXIT66_FED_PEER_ID", "home")
 
@@ -63,7 +64,7 @@ func TestFederationFromEnv(t *testing.T) {
 	if !f.Enabled() {
 		t.Fatal("expected federation enabled")
 	}
-	if f.Role != "member" || f.HubAddr != "hub.example.com:8443" || f.Token != "s3cret" || f.PeerID != "home" {
+	if f.Role != "member" || f.HubAddr != "hub.example.com:8443" || f.Listen != ":8443" || f.Token != "s3cret" || f.PeerID != "home" {
 		t.Fatalf("unexpected federation config: %+v", f)
 	}
 }
@@ -92,7 +93,8 @@ In `internal/config/config.go`, add to the `Config` struct a `Federation Federat
 // dials. PeerID is this instance's stable identifier within the federation.
 type Federation struct {
 	Role    string // "hub" | "member" | ""
-	HubAddr string // members only: hub's public address
+	HubAddr string // members only: hub's public address to dial
+	Listen  string // hub only: local address to listen on (e.g. ":8443")
 	Token   string // shared secret presented at registration
 	PeerID  string // this instance's id (e.g. "home", "vps")
 }
@@ -104,6 +106,7 @@ func federationFromEnv() Federation {
 	return Federation{
 		Role:    os.Getenv("EXIT66_FED_ROLE"),
 		HubAddr: os.Getenv("EXIT66_FED_HUB"),
+		Listen:  os.Getenv("EXIT66_FED_LISTEN"),
 		Token:   os.Getenv("EXIT66_FED_TOKEN"),
 		PeerID:  os.Getenv("EXIT66_FED_PEER_ID"),
 	}
@@ -1127,6 +1130,8 @@ git add internal/fed/manager.go internal/fed/session.go internal/fed/manager_tes
 git commit -m "feat(fed): manager dial loop (member) + listener (hub)"
 ```
 
+> **TLS (spec requirement, apply before any non-loopback deployment):** the connection carries catalogs and audio over the public internet, so the hub's listener must be TLS. Wrap `runHub`'s `net.Listen` with `tls.NewListener(ln, tlsConfig)` and `runMember`'s `net.Dial` with `tls.Dial("tcp", m.HubAddr, tlsConfig)`. Source the hub cert/key from config (add `EXIT66_FED_TLS_CERT`/`EXIT66_FED_TLS_KEY`); members verify against the hub's hostname. The token still authenticates the *member to the hub* on top of TLS. Loopback tests in this plan use plain `net.Pipe`/`net.Dial` and are unaffected. If you instead terminate TLS at a reverse proxy in front of the VPS, the listener stays plain and this note is moot — decide per deployment.
+
 ---
 
 ## Phase 3 — Audio relay end-to-end
@@ -1157,42 +1162,45 @@ import (
 
 func TestHubRelayForwardsToOwner(t *testing.T) {
 	reg := NewRegistry()
+
+	// The hub listens; the owner member "home" dials in and serves its audio
+	// endpoint over the session. The relay runs on the hub side against reg.
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer ln.Close()
-
-	// Owner peer ("home") serves /api/tracks/{id}/audio with Range support.
-	ownerMux := http.NewServeMux()
-	ownerMux.HandleFunc("/api/tracks/{id}/audio", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeContent(w, r, "x.mp3", time.Time{}, newSeeker("0123456789"))
-	})
-
 	go func() {
-		conn, _ := ln.Accept()
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
 		p, err := acceptAndRegister(conn, "tok", reg)
 		if err != nil {
 			return
 		}
-		http.Serve(p.Session, ownerMux)
+		http.Serve(p.Session, nil) // member-initiated requests unused in this test
 	}()
 
-	m := &Manager{Token: "tok", PeerID: "home", HubAddr: ln.Addr().String()}
-	m.Registry = reg
-	go m.runMember() // home dials in, serves nothing extra — owner role is the listener above
-	// NOTE: in this test the listener above is the hub; home is the member. The
-	// owner handler is served by the *member*, so swap: member serves ownerMux.
+	ownerMux := http.NewServeMux()
+	ownerMux.HandleFunc("/api/tracks/{id}/audio", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "x.mp3", time.Time{}, strings.NewReader("0123456789"))
+	})
+	home := &Manager{Role: "member", Token: "tok", PeerID: "home",
+		HubAddr: ln.Addr().String(), MemberHandler: ownerMux, Registry: NewRegistry()}
+	home.Start()
 
-	// (See Step 3 note — wire member's MemberHandler = ownerMux instead.)
-	_ = m
-
-	// Build the relay against the registry and call it as another peer would.
-	relay := NewRelay(reg)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/fed/audio/home/42", nil)
-	req.Header.Set("Range", "bytes=2-5")
-	// wait for home to register
-	for i := 0; i < 200 && reg.Get("home") == nil; i++ {
+	// Wait for home to register on the hub, then relay a ranged request to it.
+	for i := 0; i < 300 && reg.Get("home") == nil; i++ {
 		time.Sleep(10 * time.Millisecond)
 	}
+	if reg.Get("home") == nil {
+		t.Fatal("owner 'home' never registered")
+	}
+
+	relay := NewRelay(reg, nil) // nil db: this test exercises audio relay only
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/fed/audio/home/42", nil)
+	req.SetPathValue("peer", "home")
+	req.SetPathValue("id", "42")
+	req.Header.Set("Range", "bytes=2-5")
 	relay.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusPartialContent {
@@ -1205,15 +1213,9 @@ func TestHubRelayForwardsToOwner(t *testing.T) {
 }
 ```
 
-Add a tiny ReadSeeker helper in the test file:
+Imports for this test file: `io`, `net`, `net/http`, `net/http/httptest`, `strings`, `testing`, `time`.
 
-```go
-import "strings"
-
-func newSeeker(s string) *strings.Reader { return strings.NewReader(s) }
-```
-
-> **Step 3 wiring correction (apply when implementing):** the member must serve `ownerMux`. Set `m := &Manager{..., MemberHandler: ownerMux}` and drop the stray comment lines. The listener (`ln`) is the hub; `home` is the member that dials it; the relay runs on the hub side against `reg`.
+> `relay.ServeHTTP` reads its peer/id from `r.PathValue`, so the test sets them explicitly with `SetPathValue` rather than relying on a mux. `NewRelay`'s second arg is the hub's DB (Task 14); pass `nil` here since this test only covers audio relay.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1228,19 +1230,24 @@ Create `internal/fed/relay.go`:
 package fed
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
 )
 
-// Relay is the hub-side handler for GET /fed/audio/{peer}/{id}. It reverse-
-// proxies to the owning peer's /api/tracks/{id}/audio over that peer's session,
-// forwarding the Range header and copying status (including 206) and body back.
+// Relay is the hub-side handler. It reverse-proxies GET /fed/audio/{peer}/{id}
+// to the owning peer's /api/tracks/{id}/audio over that peer's session
+// (forwarding Range, copying 206 + body back), and in Phase 4 also ingests and
+// fans out catalogs. db is the hub's own database — the hub is a peer too, so
+// received catalogs are applied to it (Task 14). db may be nil in tests that
+// exercise only audio relay.
 type Relay struct {
 	reg *Registry
+	db  *sql.DB
 }
 
-func NewRelay(reg *Registry) *Relay { return &Relay{reg: reg} }
+func NewRelay(reg *Registry, db *sql.DB) *Relay { return &Relay{reg: reg, db: db} }
 
 func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	peerID := r.PathValue("peer")
@@ -1433,12 +1440,12 @@ func (hr *hubResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Request, 
 }
 ```
 
-And update `NewResolverFor`:
+And update `NewResolverFor` to reuse the manager's single `Relay` (add a `Relay *Relay` field to `Manager`; `main.go` sets it once so the resolver and `HubHandler` share one instance — same registry *and* same catalog cache/DB):
 
 ```go
 func NewResolverFor(m *Manager) Resolver {
 	if m.Role == "hub" {
-		return &hubResolver{relay: NewRelay(m.Registry)}
+		return &hubResolver{relay: m.Relay}
 	}
 	return &memberResolver{m: m}
 }
@@ -1464,6 +1471,8 @@ The shared-stream source currently opens a local path. For a remote track the so
 - Modify: `internal/broadcast/source.go`, and the caller that picks the path (find with `grep -rn "FFmpegSource\|\.Open(" internal/`)
 - Test: `internal/broadcast/source_test.go` (create or extend)
 
+Both local and remote tracks resolve through the instance's own `/api/tracks/{id}/audio` (Task 4 already branches there), so the source never needs to know which is which — it always points ffmpeg at the loopback audio URL for the track's **local** id. This removes any peer/remote_id args from the source.
+
 - [ ] **Step 1: Write the failing test**
 
 ```go
@@ -1471,29 +1480,21 @@ package broadcast
 
 import "testing"
 
-func TestSourceArgForRemoteUsesURL(t *testing.T) {
-	local := sourceInput("/music/x.mp3", "", 0, "http://127.0.0.1:8066")
-	if local != "/music/x.mp3" {
-		t.Fatalf("local input should be the path, got %q", local)
-	}
-	remote := sourceInput("", "home", 42, "http://127.0.0.1:8066")
+func TestSourceInputIsLoopbackAudioURL(t *testing.T) {
+	got := sourceInput("http://127.0.0.1:8066", 42)
 	want := "http://127.0.0.1:8066/api/tracks/42/audio"
-	if remote != want {
-		t.Fatalf("remote input = %q, want %q", remote, want)
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
 	}
 }
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `go test ./internal/broadcast/ -run TestSourceArgForRemote -v`
+Run: `go test ./internal/broadcast/ -run TestSourceInput -v`
 Expected: FAIL — `sourceInput` undefined.
 
 - [ ] **Step 3: Implement sourceInput and use it in Open**
-
-> Rationale for routing remote shared-stream audio through the instance's own `/api/tracks/{id}/audio` (with the remote row's *local* id, not `remote_id`): that handler already branches to the resolver (Task 4), so the same loopback path serves both `<audio>` playback and ffmpeg. The caller passes the track's **local** id and empty peer for that case. Simpler still: always feed ffmpeg `selfBaseURL + "/api/tracks/" + localID + "/audio"`; the handler resolves local-vs-remote. Adopt that — it removes the peer/remote_id args from the source entirely.
-
-Replace `sourceInput`'s contract with the simpler form and update the test accordingly:
 
 ```go
 // sourceInput returns the ffmpeg -i argument for a track. Local and remote
@@ -1502,18 +1503,6 @@ Replace `sourceInput`'s contract with the simpler form and update the test accor
 // audio URL for the track's local id.
 func sourceInput(selfBaseURL string, localTrackID int64) string {
 	return fmt.Sprintf("%s/api/tracks/%d/audio", selfBaseURL, localTrackID)
-}
-```
-
-Updated test:
-
-```go
-func TestSourceInputIsLoopbackAudioURL(t *testing.T) {
-	got := sourceInput("http://127.0.0.1:8066", 42)
-	want := "http://127.0.0.1:8066/api/tracks/42/audio"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
 }
 ```
 
@@ -1551,25 +1540,33 @@ In `main.go`, after the server is constructed and before `ListenAndServe`, add:
 
 ```go
 	if cfg.Federation.Enabled() {
+		reg := fed.NewRegistry()
 		fm := &fed.Manager{
 			Role:          cfg.Federation.Role,
 			Token:         cfg.Federation.Token,
 			PeerID:        cfg.Federation.PeerID,
-			HubAddr:       cfg.Federation.HubAddr,   // member
-			HubListen:     cfg.Federation.HubAddr,   // hub: reuse field as listen addr when role==hub
+			HubAddr:       cfg.Federation.HubAddr, // member: hub to dial
+			HubListen:     cfg.Federation.Listen,  // hub: local listen addr
 			MemberHandler: srv.Handler(),
-			Registry:      fed.NewRegistry(),
+			Registry:      reg,
+			DB:            db,
 		}
 		if cfg.Federation.Role == "hub" {
-			fm.HubHandler = fed.NewRelay(fm.Registry).Routes()
+			// One relay instance: it holds the registry, the catalog cache, AND the
+			// hub's DB, and is shared by both the session handler and the resolver
+			// so received catalogs land in the hub's own browse.
+			relay := fed.NewRelay(reg, db)
+			fm.Relay = relay
+			fm.HubHandler = relay.Routes()
 		}
 		fm.Start()
 		srv.SetFedResolver(fed.NewResolverFor(fm))
+		srv.SetFedPeers(fm.OnlinePeers)
 		log.Printf("federation: role=%s peer=%s", cfg.Federation.Role, cfg.Federation.PeerID)
 	}
 ```
 
-> `HubAddr` is overloaded: for a member it's the hub to dial; for the hub it's the local listen address. If that's confusing, add a distinct `EXIT66_FED_LISTEN` env + `Federation.Listen` field in Task 1 and use it here. Decide during implementation; the simplest is a separate field.
+> This uses a dedicated `Federation.Listen` field (hub's listen address) distinct from `HubAddr` (the address a member dials). Add it in Task 1: `Listen string` on the `Federation` struct, sourced from `EXIT66_FED_LISTEN`. Update Task 1's test to set and assert it.
 
 - [ ] **Step 3: Build**
 
@@ -1816,19 +1813,16 @@ func PushCatalog(db *sql.DB, hubClient *http.Client, peerID string) error {
 
 Add `bytesReader` (or just use `bytes.NewReader`; import `bytes`).
 
-Add hub-side handlers to `Relay.Routes()` in `relay.go`. The hub needs the merged catalog stored somewhere it can re-serve. Store received catalogs in memory keyed by peer:
+Add hub-side handlers to `Relay.Routes()` in `relay.go`. Two things happen on receive: the rows are cached for fan-out to *other* members, **and** applied to the hub's own DB — the hub is a peer too, so its browse must show remote tracks (this is the headline VPS-shows-home-library scenario). Add the catalog cache + a mutex to the existing `Relay` struct (which already holds `reg` and `db` from Task 9):
 
 ```go
-// In relay.go, extend Relay with a catalog cache.
-type Relay struct {
-	reg      *Registry
-	mu       sync.Mutex
-	catalogs map[string][]store.CatalogRow // peer -> its rows
-}
-
-func NewRelay(reg *Registry) *Relay {
-	return &Relay{reg: reg, catalogs: make(map[string][]store.CatalogRow)}
-}
+// Extend the Relay struct from Task 9 with a catalog cache:
+//   reg      *Registry
+//   db       *sql.DB
+//   mu       sync.Mutex
+//   catalogs map[string][]store.CatalogRow  // peer -> its rows
+// and initialize catalogs in NewRelay:
+//   return &Relay{reg: reg, db: db, catalogs: make(map[string][]store.CatalogRow)}
 
 func (h *Relay) receiveCatalog(w http.ResponseWriter, r *http.Request) {
 	peer := r.PathValue("peer")
@@ -1840,33 +1834,63 @@ func (h *Relay) receiveCatalog(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.catalogs[peer] = rows
 	h.mu.Unlock()
+	// The hub is a peer too: apply to its own DB so its browse shows remote tracks.
+	if h.db != nil {
+		if err := ApplyCatalog(h.db, peer, rows); err != nil {
+			http.Error(w, "apply catalog", http.StatusInternalServerError)
+			return
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// mergedFor returns all peers' rows except the requester's own.
-func (h *Relay) mergedFor(exclude string) map[string][]store.CatalogRow {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	out := make(map[string][]store.CatalogRow)
-	for peer, rows := range h.catalogs {
-		if peer != exclude {
-			out[peer] = rows
-		}
-	}
-	return out
+// MergedCatalog is the fan-out payload: every peer's rows except the requester's
+// own, plus the ids of all currently-online peers so members can grey out the
+// offline ones (a member's local registry only knows the hub, not its siblings).
+type MergedCatalog struct {
+	Catalogs map[string][]store.CatalogRow `json:"catalogs"`
+	Online   []string                      `json:"online"`
 }
 
 func (h *Relay) serveMerged(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(h.mergedFor(r.PathValue("peer")))
+	exclude := r.PathValue("peer")
+	h.mu.Lock()
+	cats := make(map[string][]store.CatalogRow)
+	for peer, rows := range h.catalogs {
+		if peer != exclude {
+			cats[peer] = rows
+		}
+	}
+	h.mu.Unlock()
+	json.NewEncoder(w).Encode(MergedCatalog{Catalogs: cats, Online: h.reg.IDs()})
 }
 ```
 
-Register in `Routes()`:
+Register in `Routes()` (add `"sync"`, `"encoding/json"`, and the store import to `relay.go`):
 
 ```go
 	mux.HandleFunc("POST /fed/catalog/{peer}", h.receiveCatalog)
 	mux.HandleFunc("GET /fed/catalog/{peer}/merged", h.serveMerged)
 ```
+
+> Add a test asserting the **hub's own DB** gains a member's track after a push — not just a downstream member's DB:
+>
+> ```go
+> func TestReceiveCatalogAppliesToHubDB(t *testing.T) {
+> 	hubDB, _ := store.Open(":memory:")
+> 	defer hubDB.Close()
+> 	relay := NewRelay(NewRegistry(), hubDB)
+> 	body, _ := json.Marshal([]store.CatalogRow{{RemoteID: 1, Title: "Hit", ArtistName: "A", AlbumName: "Al"}})
+> 	rec := httptest.NewRecorder()
+> 	req := httptest.NewRequest("POST", "/fed/catalog/home", bytes.NewReader(body))
+> 	req.SetPathValue("peer", "home")
+> 	relay.receiveCatalog(rec, req)
+> 	got, _ := store.ListTracks(hubDB, "", 0, 0)
+> 	if len(got) != 1 || got[0].Title != "Hit" {
+> 		t.Fatalf("hub DB should hold the member's track, got %+v", got)
+> 	}
+> }
+> ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1964,38 +1988,47 @@ Expected: FAIL — `PullAndApply` undefined.
 Add to `internal/fed/sync.go`:
 
 ```go
-// PullAndApply (member side) fetches the merged catalog from the hub and applies
-// each peer's rows into the local DB.
-func PullAndApply(db *sql.DB, hubClient *http.Client, peerID string) error {
+// PullAndApply (member side) fetches the merged catalog from the hub, applies
+// each peer's rows into the local DB, and returns the hub-reported list of
+// online peers so the caller can update liveness.
+func PullAndApply(db *sql.DB, hubClient *http.Client, peerID string) ([]string, error) {
 	resp, err := hubClient.Get("http://@hub/fed/catalog/" + peerID + "/merged")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
-	var merged map[string][]store.CatalogRow
+	var merged MergedCatalog
 	if err := json.NewDecoder(resp.Body).Decode(&merged); err != nil {
-		return err
+		return nil, err
 	}
-	for peer, rows := range merged {
+	for peer, rows := range merged.Catalogs {
 		if err := ApplyCatalog(db, peer, rows); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return merged.Online, nil
 }
 ```
 
-In `manager.go`, add a `DB *sql.DB` field to `Manager` and a member sync loop started from `runMember` after a successful connect:
+The end-to-end test (Step 1) must capture the new return value: change
+`if err := PullAndApply(hubDB, other.HubClient(), "vps"); err != nil {` to
+`if _, err := PullAndApply(hubDB, other.HubClient(), "vps"); err != nil {`.
+
+In `manager.go`, add `DB *sql.DB`, `mu sync.Mutex`, and `online []string` fields to `Manager`, plus a member sync loop started from `runMember` after a successful connect:
 
 ```go
 // startSyncLoop (member) pushes the local catalog once, then pulls the merged
-// catalog on a ticker. Runs until the session closes.
+// catalog on a ticker, recording the hub-reported online peers each pull. Runs
+// until the session closes.
 func (m *Manager) startSyncLoop(done <-chan struct{}) {
 	if m.DB == nil {
 		return
 	}
 	if hc := m.HubClient(); hc != nil {
 		_ = PushCatalog(m.DB, hc, m.PeerID)
+		if online, err := PullAndApply(m.DB, hc, m.PeerID); err == nil {
+			m.setOnline(online)
+		}
 	}
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
@@ -2005,10 +2038,30 @@ func (m *Manager) startSyncLoop(done <-chan struct{}) {
 			return
 		case <-t.C:
 			if hc := m.HubClient(); hc != nil {
-				_ = PullAndApply(m.DB, hc, m.PeerID)
+				if online, err := PullAndApply(m.DB, hc, m.PeerID); err == nil {
+					m.setOnline(online)
+				}
 			}
 		}
 	}
+}
+
+func (m *Manager) setOnline(ids []string) {
+	m.mu.Lock()
+	m.online = ids
+	m.mu.Unlock()
+}
+
+// OnlinePeers returns the ids of peers currently online. The hub knows this
+// directly from its registry; a member uses the list the hub last reported,
+// since a member's own registry only contains the hub.
+func (m *Manager) OnlinePeers() []string {
+	if m.Role == "hub" {
+		return m.Registry.IDs()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.online...)
 }
 ```
 
@@ -2088,7 +2141,7 @@ Also extend `GET /api/config` (`internal/api/config.go`) to report online peers 
 func (s *Server) SetFedPeers(fn func() []string) { s.fedPeers = fn }
 ```
 
-In `getConfig`, include `"fed_peers"` (empty array when `s.fedPeers == nil`). In `main.go`, after building the manager: `srv.SetFedPeers(fm.Registry.IDs)`.
+In `getConfig`, include `"fed_peers"` (empty array when `s.fedPeers == nil`). The `main.go` wiring (`srv.SetFedPeers(fm.OnlinePeers)`) was added in Task 12 — `fm.OnlinePeers` returns the registry's ids on a hub and the hub-reported list on a member, so a member greys out offline siblings correctly.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -2231,5 +2284,7 @@ Note pass/fail per step. If anything fails, debug with superpowers:systematic-de
 ## Self-Review notes (already applied)
 
 - **Spec coverage:** topology/connectivity → Phase 2; token auth → Task 7; track identity/storage → Tasks 2–3; audio resolution branch → Task 4; relay flow → Tasks 9–11; ffmpeg URL source → Task 11; catalog sync (push/merge/cache, offline) → Phase 4 + Tasks 16–17; security/admin gate → Phase 6; testing → unit tests per task + integration Tasks 9/15 + manual Phase 7; out-of-scope items (#87 direct P2P, #88 listening groups) intentionally excluded.
-- **Type consistency:** `RemoteTrack`/`CatalogRow`/`Peer`/`Manager`/`Relay`/`Resolver` names used consistently across tasks; `ServeRemoteAudio` signature identical in seam (Task 4) and impl (Task 10); `RemoteID` means "owner's local id" in both export (Task 13) and apply (Task 14).
-- **Known overloads to resolve during implementation (flagged inline):** `Federation.HubAddr` vs a dedicated listen field (Task 12); the `sourceInput` contract was simplified mid-task (Task 11) — use the final loopback-URL form.
+- **Type consistency:** `RemoteTrack`/`CatalogRow`/`Peer`/`Manager`/`Relay`/`Resolver` names used consistently across tasks; `ServeRemoteAudio` signature identical in seam (Task 4) and impl (Task 10); `RemoteID` means "owner's local id" in both export (Task 13) and apply (Task 14); `NewRelay(reg, db)` and `PullAndApply(...) ([]string, error)` signatures consistent across Tasks 9/14/15.
+- **Hub-is-a-peer (headline scenario):** the hub applies received catalogs to its **own** DB in `receiveCatalog` (Task 14), so the VPS browse shows the home library — verified by `TestReceiveCatalogAppliesToHubDB`. A single `Relay` instance (built in `main.go`, Task 12) is shared by the session handler and the resolver so the registry, catalog cache, and DB are all one.
+- **Member liveness:** members learn online siblings from the hub's `MergedCatalog.Online` (Task 14/15), not their local registry; `Manager.OnlinePeers()` returns the right source per role. This makes the office↔home offline grey-out correct.
+- **Resolved overloads:** dedicated `Federation.Listen` (`EXIT66_FED_LISTEN`) separates the hub's listen address from a member's dial target (Tasks 1/12); `sourceInput` uses the final loopback-URL form (Task 11).
