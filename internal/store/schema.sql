@@ -18,19 +18,23 @@ CREATE INDEX IF NOT EXISTS idx_artist_sortkey ON artist(sort_key, id);
 CREATE TABLE IF NOT EXISTS track (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     path       TEXT NOT NULL UNIQUE,
-    mod_time   INTEGER NOT NULL,
-    size       INTEGER NOT NULL,
+    mod_time   INTEGER NOT NULL DEFAULT 0,
+    size       INTEGER NOT NULL DEFAULT 0,
     title      TEXT NOT NULL,
     artist_id  INTEGER NOT NULL REFERENCES artist(id),
-    album_id   INTEGER NOT NULL REFERENCES album(id),
+    album_id   INTEGER NOT NULL,
     track_no   INTEGER NOT NULL DEFAULT 0,
     genre      TEXT NOT NULL DEFAULT '',
     duration   INTEGER NOT NULL DEFAULT 0,
     play_count INTEGER NOT NULL DEFAULT 0,
     added_at   INTEGER NOT NULL DEFAULT 0,
-    mbid       TEXT NOT NULL DEFAULT '',
-    links      TEXT NOT NULL DEFAULT ''
+    mbid        TEXT NOT NULL DEFAULT '',
+    links       TEXT NOT NULL DEFAULT '',
+    source_peer TEXT NOT NULL DEFAULT '',
+    remote_id   INTEGER NOT NULL DEFAULT 0
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_track_remote
+  ON track(source_peer, remote_id) WHERE source_peer <> '';
 CREATE INDEX IF NOT EXISTS idx_track_artist ON track(artist_id);
 CREATE INDEX IF NOT EXISTS idx_track_album  ON track(album_id);
 
