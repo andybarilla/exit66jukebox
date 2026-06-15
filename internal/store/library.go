@@ -322,9 +322,33 @@ func UpsertRemoteTrack(db *sql.DB, rt RemoteTrack) (int64, error) {
 }
 
 // DeleteRemoteTracks removes all cached tracks owned by a peer, then prunes
-// orphaned albums/artists. Called when a peer's catalog is replaced or it leaves.
+// orphaned albums/artists. Called when a peer leaves the federation.
 func DeleteRemoteTracks(db *sql.DB, peer string) error {
 	if _, err := db.Exec(`DELETE FROM track WHERE source_peer = ?`, peer); err != nil {
+		return err
+	}
+	return PruneOrphans(db)
+}
+
+// DeleteRemoteTracksExcept removes a peer's cached tracks whose remote_id is not
+// in keep, then prunes orphans. Catalog sync upserts the incoming rows (which
+// preserves their local id via ON CONFLICT) and then calls this to drop only
+// tracks that truly disappeared — so a track's local id stays STABLE across
+// syncs. A blanket delete+reinsert would mint a new autoincrement id every sync,
+// breaking any id a client is already holding (browse→play) and any queue row.
+func DeleteRemoteTracksExcept(db *sql.DB, peer string, keep []int64) error {
+	if len(keep) == 0 {
+		return DeleteRemoteTracks(db, peer)
+	}
+	ph := strings.TrimRight(strings.Repeat("?,", len(keep)), ",")
+	args := make([]any, 0, len(keep)+1)
+	args = append(args, peer)
+	for _, id := range keep {
+		args = append(args, id)
+	}
+	if _, err := db.Exec(
+		`DELETE FROM track WHERE source_peer = ? AND remote_id NOT IN (`+ph+`)`, args...,
+	); err != nil {
 		return err
 	}
 	return PruneOrphans(db)

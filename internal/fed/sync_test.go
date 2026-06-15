@@ -116,3 +116,36 @@ func TestReceiveCatalogAppliesToHubDB(t *testing.T) {
 		t.Fatalf("hub DB should hold the member's track, got %+v", got)
 	}
 }
+
+// Re-applying an unchanged catalog (every sync tick does) must keep each track's
+// local id stable — otherwise a browsed id 404s on a later play and queue rows
+// dangle. Regression for the delete+reinsert churn caught in manual e2e.
+func TestApplyCatalogKeepsStableIDs(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	rows := []store.CatalogRow{
+		{RemoteID: 1, Title: "One", ArtistName: "A", AlbumName: "Al"},
+		{RemoteID: 2, Title: "Two", ArtistName: "A", AlbumName: "Al"},
+	}
+	if err := ApplyCatalog(db, "home", rows); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := store.ListTracks(db, "", 0, 0)
+	if len(first) != 2 {
+		t.Fatalf("want 2 tracks, got %d", len(first))
+	}
+	ids := map[string]int64{first[0].Title: first[0].ID, first[1].Title: first[1].ID}
+
+	if err := ApplyCatalog(db, "home", rows); err != nil { // identical re-apply
+		t.Fatal(err)
+	}
+	again, _ := store.ListTracks(db, "", 0, 0)
+	if len(again) != 2 {
+		t.Fatalf("want 2 tracks after re-apply, got %d", len(again))
+	}
+	for _, tr := range again {
+		if tr.ID != ids[tr.Title] {
+			t.Fatalf("id for %q changed across sync: was %d now %d", tr.Title, ids[tr.Title], tr.ID)
+		}
+	}
+}

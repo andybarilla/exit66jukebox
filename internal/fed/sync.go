@@ -9,12 +9,14 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
-// ApplyCatalog replaces all cached rows for peer with the given catalog rows:
-// delete the peer's existing rows, then upsert the new set.
+// ApplyCatalog reconciles the cached rows for peer to the given catalog: upsert
+// each incoming row (which preserves its local id via ON CONFLICT), then delete
+// only the peer's rows that are no longer present. Reconciling in place keeps a
+// track's local id STABLE across syncs — a blanket delete+reinsert would mint a
+// fresh autoincrement id every sync cycle, 404ing ids a client already holds
+// (browse→play) and orphaning queue rows.
 func ApplyCatalog(db *sql.DB, peer string, rows []store.CatalogRow) error {
-	if err := store.DeleteRemoteTracks(db, peer); err != nil {
-		return err
-	}
+	keep := make([]int64, 0, len(rows))
 	for _, c := range rows {
 		if _, err := store.UpsertRemoteTrack(db, store.RemoteTrack{
 			SourcePeer: peer, RemoteID: c.RemoteID,
@@ -24,8 +26,9 @@ func ApplyCatalog(db *sql.DB, peer string, rows []store.CatalogRow) error {
 		}); err != nil {
 			return err
 		}
+		keep = append(keep, c.RemoteID)
 	}
-	return nil
+	return store.DeleteRemoteTracksExcept(db, peer, keep)
 }
 
 // PullAndApply (member side) fetches the merged catalog from the hub, applies
