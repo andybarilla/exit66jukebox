@@ -25,16 +25,18 @@ func TestRemoteUniqueIndexRejectsDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	_, err = db.Exec(`INSERT INTO artist(name, sort_key) VALUES('A','a')`)
-	if err != nil {
+	if _, err := db.Exec(`INSERT INTO artist(name, sort_key) VALUES('A','a')`); err != nil {
 		t.Fatal(err)
 	}
-	ins := `INSERT INTO track(path, source_peer, remote_id, title, artist_id, album_id, added_at)
-	        VALUES(?, 'home', 5, 't', 1, 0, 0)`
-	if _, err := db.Exec(ins, ""); err != nil {
+	if _, err := db.Exec(`INSERT INTO album(name, artist_id, sort_key) VALUES('Al', 1, 'al')`); err != nil {
+		t.Fatal(err)
+	}
+	ins := `INSERT INTO track(path, mod_time, size, source_peer, remote_id, title, artist_id, album_id, added_at)
+	        VALUES(?, 0, 0, 'home', 5, 't', 1, 1, 0)`
+	if _, err := db.Exec(ins, "fed://home/5#a"); err != nil {
 		t.Fatalf("first remote insert failed: %v", err)
 	}
-	if _, err := db.Exec(ins, ""); err == nil {
+	if _, err := db.Exec(ins, "fed://home/5#b"); err == nil {
 		t.Fatal("expected unique-index violation on duplicate (source_peer, remote_id)")
 	}
 }
