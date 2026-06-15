@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/andybarilla/exit66jukebox/internal/store"
@@ -19,6 +20,7 @@ import (
 type Relay struct {
 	reg      *Registry
 	db       *sql.DB
+	selfID   string
 	mu       sync.Mutex
 	catalogs map[string][]store.CatalogRow // peer -> its rows (for fan-out)
 }
@@ -27,11 +29,32 @@ func NewRelay(reg *Registry, db *sql.DB) *Relay {
 	return &Relay{reg: reg, db: db, catalogs: make(map[string][]store.CatalogRow)}
 }
 
+// SetSelf records the hub's own peer id so it publishes its local library to
+// members and serves its own tracks directly — the hub is a peer too, but it is
+// not present in its own registry.
+func (h *Relay) SetSelf(peerID string) { h.selfID = peerID }
+
 func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	peerID := r.PathValue("peer")
 	remoteID := r.PathValue("id")
 	if peerID == "" || remoteID == "" {
 		http.Error(w, "bad fed audio path", http.StatusBadRequest)
+		return
+	}
+	// The hub's own tracks aren't served over a session (the hub isn't in its
+	// registry); serve them from local disk, mirroring api.trackAudio's local path.
+	if h.selfID != "" && peerID == h.selfID {
+		id, err := strconv.ParseInt(remoteID, 10, 64)
+		if err != nil {
+			http.Error(w, "bad id", http.StatusBadRequest)
+			return
+		}
+		t, path, ok := store.GetTrack(h.db, id)
+		if !ok || t.SourcePeer != "" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.ServeFile(w, r, path)
 		return
 	}
 	peer := h.reg.Get(peerID)
@@ -155,8 +178,17 @@ func (h *Relay) serveMerged(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.mu.Unlock()
+	online := h.reg.IDs()
+	if h.selfID != "" {
+		online = append(online, h.selfID)
+		if h.selfID != exclude && h.db != nil {
+			if rows, err := store.ExportCatalog(h.db); err == nil && len(rows) > 0 {
+				cats[h.selfID] = rows
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(MergedCatalog{Catalogs: cats, Online: h.reg.IDs()})
+	json.NewEncoder(w).Encode(MergedCatalog{Catalogs: cats, Online: online})
 }
 
 // Routes returns the hub's federation mux (served over the session to members).

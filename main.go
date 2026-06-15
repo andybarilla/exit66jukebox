@@ -266,6 +266,7 @@ func main() {
 			// the hub's own browse sees remote tracks (catalog ingest lands here in a
 			// later task). It holds the registry and the hub's DB.
 			relay := fed.NewRelay(reg, db)
+			relay.SetSelf(cfg.Federation.PeerID)
 			fm.Relay = relay
 			fm.HubHandler = relay.Routes()
 		}
