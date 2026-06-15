@@ -271,6 +271,7 @@ func main() {
 		}
 		fm.Start()
 		srv.SetFedResolver(fed.NewResolverFor(fm))
+		srv.SetFedPeers(fm.OnlinePeers)
 		log.Printf("federation: role=%s peer=%s", cfg.Federation.Role, cfg.Federation.PeerID)
 	}
 
