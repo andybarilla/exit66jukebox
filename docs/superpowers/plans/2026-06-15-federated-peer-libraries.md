@@ -819,11 +819,19 @@ func (r *Registry) IDs() []string {
 	return out
 }
 
-// dialHandshake is the member side: send "token peerID\n" then nothing more on
-// the raw conn — the session takes over. Returns once the line is written.
+// dialHandshake is the member side: send "token peerID\n" on the raw conn, then
+// read the single-byte ack the hub sends on success. Returns an error if the hub
+// closes without acking (bad token / rejection). The ack round-trip is what lets
+// a member detect rejection; without it a write-only handshake can't. yamux.Client
+// is created by the caller AFTER this returns, so the ack byte is consumed here
+// and never collides with yamux framing.
 func dialHandshake(conn net.Conn, token, peerID string) error {
 	if _, err := fmt.Fprintf(conn, "%s %s\n", token, peerID); err != nil {
 		return err
+	}
+	var ack [1]byte
+	if _, err := conn.Read(ack[:]); err != nil {
+		return fmt.Errorf("rejected: %w", err)
 	}
 	return nil
 }
@@ -1110,6 +1118,12 @@ func acceptAndRegister(conn net.Conn, token string, reg *Registry) (*Peer, error
 	if subtle.ConstantTimeCompare([]byte(gotToken), []byte(token)) != 1 {
 		conn.Close()
 		return nil, fmt.Errorf("bad token")
+	}
+	// Single-byte ack before yamux handoff so the member can detect acceptance
+	// vs. rejection without stealing yamux framing bytes (see dialHandshake).
+	if _, err := conn.Write([]byte{1}); err != nil {
+		conn.Close()
+		return nil, err
 	}
 	sess, err := yamux.Server(&bufferedConn{Reader: br, Conn: conn}, nil)
 	if err != nil {
