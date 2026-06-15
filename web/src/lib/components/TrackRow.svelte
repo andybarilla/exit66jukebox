@@ -4,12 +4,14 @@
   import IconCheck from './icons/IconCheck.svelte';
   let { code = 'A6', title = 'Untitled', artist = 'Unknown', duration = '0:00',
         cover = null, gradient = null, tone = 'magenta', explicit = false,
-        trackNo = 0, playing = false, onAdd, onClick } = $props();
+        trackNo = 0, playing = false, onAdd, onClick,
+        sourcePeer = '', offline = false } = $props();
   let artFailed = $state(false);
   let justAdded = $state(false);
   const tile = $derived(gradient || toneGradient(tone));
   function handleAdd(e) {
     e.stopPropagation();
+    if (offline) return;
     justAdded = true;
     setTimeout(() => (justAdded = false), 600);
     onAdd();
@@ -17,7 +19,7 @@
 </script>
 <div class="tr" class:playing
   {...onClick ? { role: 'button', tabindex: 0, onclick: onClick, onkeydown: keyActivate(onClick) } : {}}
-  style="display:flex; align-items:center; gap:14px; padding:10px 12px; border-radius:var(--radius-md); cursor:pointer; transition:background var(--dur) var(--ease-out); border:1px solid {playing ? 'rgba(255,46,136,0.35)' : 'transparent'}; background:{playing ? 'rgba(255,46,136,0.08)' : 'transparent'};">
+  style="display:flex; align-items:center; gap:14px; padding:10px 12px; border-radius:var(--radius-md); cursor:pointer; transition:background var(--dur) var(--ease-out); border:1px solid {playing ? 'rgba(255,46,136,0.35)' : 'transparent'}; background:{playing ? 'rgba(255,46,136,0.08)' : 'transparent'}; opacity:{offline ? '0.55' : '1'};">
   {#if trackNo > 0}
     <span style="width:22px; flex:none; text-align:right; font-family:var(--font-mono); font-size:13px; color:var(--text-faint);">{trackNo}</span>
   {/if}
@@ -33,18 +35,20 @@
     <div style="display:flex; align-items:center; gap:8px;">
       <span style="font-family:var(--font-sans); font-weight:600; font-size:15px; color:{playing ? 'var(--neon-magenta-bright)' : 'var(--text-strong)'}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{title}</span>
       {#if explicit}<span style="font-family:var(--font-mono); font-size:9px; font-weight:700; color:var(--neon-amber); border:1px solid var(--neon-amber); border-radius:2px; padding:0 3px; line-height:13px; flex:none;">E</span>{/if}
+      {#if sourcePeer}<span style="font-family:var(--font-mono); font-size:9px; color:{offline ? 'var(--text-faint)' : 'var(--text-muted)'}; border:1px solid var(--border-default); border-radius:2px; padding:0 4px; line-height:13px; flex:none; white-space:nowrap;">{sourcePeer}</span>{/if}
     </div>
     <div style="font-family:var(--font-sans); font-size:13px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{artist}</div>
   </div>
   <span style="font-family:var(--font-mono); font-size:13px; color:var(--text-faint); flex:none;">{duration}</span>
   {#if onAdd}
-    <button class="add" class:added={justAdded} aria-label="Add to queue" onclick={handleAdd}
-      style="width:34px; height:34px; flex:none; border-radius:var(--radius-sm); display:inline-flex; align-items:center; justify-content:center; background:var(--bg-surface-raised); color:var(--text-muted); border:1px solid var(--border-default); cursor:pointer; line-height:1; transition:all var(--dur) var(--ease-out);">{#if justAdded}<IconCheck size={18} />{:else}<IconPlus size={18} />{/if}</button>
+    <button class="add" class:added={justAdded} aria-label="Add to queue" title={offline ? 'owner offline' : undefined}
+      disabled={offline} onclick={handleAdd}
+      style="width:34px; height:34px; flex:none; border-radius:var(--radius-sm); display:inline-flex; align-items:center; justify-content:center; background:var(--bg-surface-raised); color:var(--text-muted); border:1px solid var(--border-default); cursor:{offline ? 'not-allowed' : 'pointer'}; line-height:1; transition:all var(--dur) var(--ease-out);">{#if justAdded}<IconCheck size={18} />{:else}<IconPlus size={18} />{/if}</button>
   {/if}
 </div>
 <style>
   .tr:not(.playing):hover { background: var(--bg-surface-hover) !important; }
-  .tr:hover .add { background: var(--neon-magenta); color: var(--text-on-accent); box-shadow: var(--glow-soft-magenta); }
+  .tr:hover .add:not(:disabled) { background: var(--neon-magenta); color: var(--text-on-accent); box-shadow: var(--glow-soft-magenta); }
   .add.added { background: var(--neon-magenta); color: var(--text-on-accent); box-shadow: var(--glow-soft-magenta); animation: add-pulse 600ms var(--ease-out); }
   @keyframes add-pulse {
     0% { transform: scale(1); }

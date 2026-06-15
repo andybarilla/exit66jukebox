@@ -17,7 +17,8 @@
     <div style="padding-bottom:2px;">
       <TrackRow code={t.code} title={t.title} artist={t.artistName} duration={fmt(t.duration)}
         cover={t.cover} gradient={t.gradient} tone={t.tone}
-        playing={t.id === nowPlayingId} onAdd={() => onAdd(t)} />
+        playing={t.id === nowPlayingId} onAdd={() => onAdd(t)}
+        sourcePeer={t.sourcePeer} offline={t.offline} />
     </div>
   {/snippet}
 </Virtualizer>

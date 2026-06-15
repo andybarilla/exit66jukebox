@@ -28,7 +28,8 @@
             {#each album.tracks as t (t.id)}
               <TrackRow code={t.code} title={t.title} artist={t.artistName} duration={fmt(t.duration)}
                 cover={t.cover} gradient={t.gradient} tone={t.tone} trackNo={t.trackNo}
-                playing={t.id === nowPlayingId} onAdd={() => onAddTrack(t)} />
+                playing={t.id === nowPlayingId} onAdd={() => onAddTrack(t)}
+                sourcePeer={t.sourcePeer} offline={t.offline} />
               {#if t.links && t.links.length}
                 <div style="display:flex; flex-direction:column; gap:3px; margin:0 12px 6px 82px;">
                   {#each t.links as url (url)}
