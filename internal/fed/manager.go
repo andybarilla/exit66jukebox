@@ -1,9 +1,11 @@
 package fed
 
 import (
+	"database/sql"
 	"log"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/yamux"
@@ -22,8 +24,11 @@ type Manager struct {
 	MemberHandler http.Handler // served over session, member side
 	HubHandler    http.Handler // served over session, hub side
 	Registry      *Registry
-	Relay         *Relay // hub role: the single relay instance shared with HubHandler
+	Relay         *Relay  // hub role: the single relay instance shared with HubHandler
+	DB            *sql.DB // member: local DB the sync loop pushes/pulls against
 
+	mu         sync.Mutex     // guards online
+	online     []string       // member: peers the hub last reported online
 	hubSession *yamux.Session // member side: the live session to the hub
 }
 
@@ -93,6 +98,7 @@ func (m *Manager) runMember() {
 		m.hubSession = sess
 		// Register the hub as a pseudo-peer so the member can call it by client.
 		m.Registry.put(&Peer{ID: "@hub", Session: sess, Client: SessionClient(sess)})
+		go m.startSyncLoop(sess.CloseChan())
 		backoff = time.Second
 		if m.MemberHandler != nil {
 			_ = http.Serve(sess, m.MemberHandler) // blocks until session closes
@@ -111,4 +117,53 @@ func (m *Manager) HubClient() *http.Client {
 		return p.Client
 	}
 	return nil
+}
+
+// startSyncLoop (member) pushes the local catalog and pulls the merged catalog
+// on connect, then repeats on a ticker (push covers newly-scanned local tracks;
+// pull refreshes remote rows + liveness). Runs until the session closes.
+func (m *Manager) startSyncLoop(done <-chan struct{}) {
+	if m.DB == nil {
+		return
+	}
+	m.syncOnce()
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+			m.syncOnce()
+		}
+	}
+}
+
+func (m *Manager) syncOnce() {
+	hc := m.HubClient()
+	if hc == nil {
+		return
+	}
+	_ = PushCatalog(m.DB, hc, m.PeerID)
+	if online, err := PullAndApply(m.DB, hc, m.PeerID); err == nil {
+		m.setOnline(online)
+	}
+}
+
+func (m *Manager) setOnline(ids []string) {
+	m.mu.Lock()
+	m.online = ids
+	m.mu.Unlock()
+}
+
+// OnlinePeers returns the ids of peers currently online. The hub knows this
+// directly from its registry; a member uses the list the hub last reported,
+// since a member's own registry only contains the hub.
+func (m *Manager) OnlinePeers() []string {
+	if m.Role == "hub" {
+		return m.Registry.IDs()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.online...)
 }

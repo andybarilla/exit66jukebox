@@ -28,6 +28,27 @@ func ApplyCatalog(db *sql.DB, peer string, rows []store.CatalogRow) error {
 	return nil
 }
 
+// PullAndApply (member side) fetches the merged catalog from the hub, applies
+// each peer's rows into the local DB, and returns the hub-reported list of
+// online peers so the caller can update liveness.
+func PullAndApply(db *sql.DB, hubClient *http.Client, peerID string) ([]string, error) {
+	resp, err := hubClient.Get("http://@hub/fed/catalog/" + peerID + "/merged")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var merged MergedCatalog
+	if err := json.NewDecoder(resp.Body).Decode(&merged); err != nil {
+		return nil, err
+	}
+	for peer, rows := range merged.Catalogs {
+		if err := ApplyCatalog(db, peer, rows); err != nil {
+			return nil, err
+		}
+	}
+	return merged.Online, nil
+}
+
 // PushCatalog (member side) exports the local catalog and POSTs it to the hub.
 func PushCatalog(db *sql.DB, hubClient *http.Client, peerID string) error {
 	rows, err := store.ExportCatalog(db)

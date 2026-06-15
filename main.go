@@ -259,6 +259,7 @@ func main() {
 			HubListen:     cfg.Federation.Listen,  // hub: local listen addr
 			MemberHandler: srv.Handler(),
 			Registry:      reg,
+			DB:            db,
 		}
 		if cfg.Federation.Role == "hub" {
 			// One relay instance shared by the session handler and the resolver so
