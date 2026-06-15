@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -107,8 +108,8 @@ func main() {
 		log.Print("warning: MP3 silence generation failed (is ffmpeg installed?); the house stream will send nothing while idle")
 	}
 
-	// next pops the house queue and publishes now-playing; returns the file path
-	// for the broadcaster. Called repeatedly in the hub's single goroutine.
+	// next pops the house queue and publishes now-playing; returns the loopback
+	// audio URL for the broadcaster. Called repeatedly in the hub's single goroutine.
 	// Publishes a null now-playing once when the stream transitions from playing
 	// to idle (empty queue).
 	//
@@ -142,6 +143,11 @@ func main() {
 			log.Printf("scrobble: enqueue track %d: %v", prev.ID, err)
 		}
 	}
+	// The shared stream feeds ffmpeg the instance's own audio endpoint so remote
+	// tracks resolve through the same local/remote branch as browser playback.
+	_, selfPort, _ := net.SplitHostPort(cfg.Addr)
+	selfBaseURL := "http://127.0.0.1:" + selfPort
+
 	playing := false
 	next := func() (string, bool) {
 		tr, ok := jb.Next(houseID)
@@ -154,8 +160,7 @@ func main() {
 			}
 			return "", false
 		}
-		_, path, found := store.GetTrack(db, tr.ID)
-		if !found {
+		if _, _, found := store.GetTrack(db, tr.ID); !found {
 			return "", false
 		}
 		// A new track is starting: settle the one that just finished, then make
@@ -186,7 +191,7 @@ func main() {
 		// The pop removed this track from the queue; tell listeners so their
 		// "up next" view doesn't keep showing the now-playing track.
 		houseBus.Publish(events.Event{Type: "queue-changed", Data: houseID})
-		return path, true
+		return broadcast.SourceInput(selfBaseURL, tr.ID), true
 	}
 
 	// Single background drainer delivers queued scrobbles. ctx-aware so #23's

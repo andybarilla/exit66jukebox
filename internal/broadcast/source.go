@@ -1,19 +1,28 @@
 package broadcast
 
 import (
+	"fmt"
 	"io"
 	"os/exec"
 	"strconv"
 )
 
-// FFmpegSource transcodes any audio file to a real-time-paced MP3 byte stream
-// using ffmpeg's -re flag (read input at native rate), so the shared feed
+// SourceInput returns the ffmpeg -i argument for a track: the instance's own
+// loopback audio URL for the track's local id. Local and remote tracks both
+// resolve through /api/tracks/{id}/audio (which branches on source_peer), so the
+// broadcaster never needs to know which is which.
+func SourceInput(selfBaseURL string, localTrackID int64) string {
+	return fmt.Sprintf("%s/api/tracks/%d/audio", selfBaseURL, localTrackID)
+}
+
+// FFmpegSource transcodes an audio file or URL to a real-time-paced MP3 byte
+// stream using ffmpeg's -re flag (read input at native rate), so the shared feed
 // advances in real time and late joiners hear the current position.
 type FFmpegSource struct{}
 
-func (FFmpegSource) Open(path string) (io.ReadCloser, error) {
+func (FFmpegSource) Open(input string) (io.ReadCloser, error) {
 	cmd := exec.Command("ffmpeg",
-		"-re", "-i", path,
+		"-re", "-i", input,
 		"-vn", "-f", "mp3", "-b:a", "192k", "-")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
