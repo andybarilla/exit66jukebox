@@ -20,6 +20,14 @@ type Config struct {
 	// active. Sourced from EXIT66_MUTE_LOCAL_ON_CAST for now; a settings UI will
 	// replace the env source later. Defaults true when unset.
 	MuteLocalOnCast bool
+
+	// AdminPassword is the shared secret that unlocks admin mode (skip, queue
+	// removal/clear, shuffle, Sonos casting). Empty leaves the gate disabled and
+	// every action open. Unlike service tokens it's exposed as a flag as well as
+	// EXIT66_ADMIN_PASSWORD: a deliberately-soft LAN-party gate, not a service
+	// credential, so the no-process-list-leak rule is relaxed for ergonomics. A
+	// flag value wins over the env var when both are set.
+	AdminPassword string
 }
 
 // Services holds external-service credentials. They are read from the
@@ -96,12 +104,16 @@ func Parse(args []string) (Config, error) {
 	fs.IntVar(&c.HistoryWindow, "history", 25, "recently-played window")
 	fs.IntVar(&c.ScanWorkers, "workers", 8, "scan worker goroutines")
 	fs.Var(&c.Roots, "root", "library root (repeatable)")
+	fs.StringVar(&c.AdminPassword, "admin-password", "", "shared admin-mode password (or EXIT66_ADMIN_PASSWORD); empty disables the gate")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
 	c.Services = servicesFromEnv()
 	c.Federation = federationFromEnv()
 	c.MuteLocalOnCast = envBool("EXIT66_MUTE_LOCAL_ON_CAST", true)
+	if c.AdminPassword == "" {
+		c.AdminPassword = os.Getenv("EXIT66_ADMIN_PASSWORD")
+	}
 	return c, nil
 }
 

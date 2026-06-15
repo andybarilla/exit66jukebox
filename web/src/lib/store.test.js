@@ -7,6 +7,40 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
+describe('admin state', () => {
+  it('isAdmin is true by default (gate open until config says otherwise)', () => {
+    const s = createStore();
+    expect(s.isAdmin).toBe(true);
+    expect(s.adminRequired).toBe(false);
+  });
+
+  it('becomes locked when config reports admin_required with no valid token', () => {
+    const s = createStore();
+    s.applyAdminConfig({ admin_required: true, is_admin: false });
+    expect(s.adminRequired).toBe(true);
+    expect(s.isAdmin).toBe(false);
+  });
+
+  it('is unlocked when a valid token makes config report is_admin', () => {
+    vi.stubGlobal('localStorage', { getItem: () => 'tok-abc', setItem: () => {}, removeItem: () => {} });
+    const s = createStore();
+    s.applyAdminConfig({ admin_required: true, is_admin: true });
+    expect(s.adminRequired).toBe(true);
+    expect(s.isAdmin).toBe(true);
+  });
+
+  it('drops a stale token when config says the gate is on but is_admin is false', () => {
+    const removed = [];
+    vi.stubGlobal('localStorage', {
+      getItem: () => 'stale', setItem: () => {}, removeItem: (k) => removed.push(k),
+    });
+    const s = createStore();
+    s.applyAdminConfig({ admin_required: true, is_admin: false });
+    expect(removed).toContain('e66.admin');
+    expect(s.isAdmin).toBe(false);
+  });
+});
+
 describe('cast-active state', () => {
   it('defaults to false and is toggled by setCastActive', () => {
     const s = createStore();

@@ -2,7 +2,8 @@
   import Switch from './Switch.svelte';
   import QueueItem from './QueueItem.svelte';
   let { streamLabel = 'House', listeners = 0, shuffle = false, onToggleShuffle,
-        np = null, npPct = '0%', queue = [], isPhone = false, onClose, onRemove, onOpenAlbum } = $props();
+        np = null, npPct = '0%', queue = [], isPhone = false, canControl = true,
+        onClose, onRemove, onOpenAlbum } = $props();
   const canOpenNp = $derived(!!np?.albumId && !!onOpenAlbum);
   let npArtFailed = $state(false);
   // Reset the fallback when the now-playing track changes so a prior failed
@@ -16,7 +17,9 @@
       <div style="font-family:var(--font-mono); font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-faint); margin-top:4px;">{streamLabel} stream · {listeners} listening</div>
     </div>
     <div style="display:flex; align-items:center; gap:11px; flex:none;">
-      <span style="display:inline-flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-faint); white-space:nowrap;">Shuffle<Switch checked={shuffle} onChange={onToggleShuffle} tone="magenta" /></span>
+      {#if canControl}
+        <span style="display:inline-flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--text-faint); white-space:nowrap;">Shuffle<Switch checked={shuffle} onChange={onToggleShuffle} tone="magenta" /></span>
+      {/if}
       {#if isPhone}
         <button aria-label="Close lineup" onclick={onClose} style="width:32px; height:32px; flex:none; border:1px solid var(--border-default); background:var(--bg-surface-raised); color:var(--text-muted); border-radius:var(--radius-sm); cursor:pointer; font-size:15px; line-height:1;">✕</button>
       {/if}
@@ -67,7 +70,7 @@
         <QueueItem position={i + 1} code={q.code} title={q.title} artist={q.artistName}
           cover={q.cover} gradient={q.gradient} requester={q.requester} tone={q.tone}
           albumId={q.albumId} onOpenAlbum={onOpenAlbum ? () => onOpenAlbum(q) : undefined}
-          onRemove={() => onRemove(q)} />
+          onRemove={canControl ? () => onRemove(q) : undefined} />
       {/each}
     </div>
   {/if}

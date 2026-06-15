@@ -7,7 +7,7 @@
   import IconVolume from './icons/IconVolume.svelte';
   let { title = 'Nothing playing', artist = '—', code = 'A6', cover = null, gradient = null,
         tone = 'magenta', current = 0, duration = 0, playing = false, volume = 70,
-        albumId = null, onOpenAlbum, onPlayPause, onPrev, onNext, onSeek, onVolume } = $props();
+        albumId = null, canSkip = true, onOpenAlbum, onPlayPause, onPrev, onNext, onSeek, onVolume } = $props();
   const canOpenAlbum = $derived(!!albumId && !!onOpenAlbum);
   let artFailed = $state(false);
   // Reset the fallback when the cover changes so a prior failed load doesn't
@@ -51,7 +51,7 @@
     <div style="display:flex; align-items:center; gap:10px;">
       <button class="t" aria-label="Previous" onclick={onPrev} style="width:38px; height:38px;"><IconPrev size={20} /></button>
       <button class="t primary" aria-label={playing ? 'Pause' : 'Play'} onclick={onPlayPause} style="width:46px; height:46px;">{#if playing}<IconPause size={22} />{:else}<IconPlay size={22} />{/if}</button>
-      <button class="t" aria-label="Next" onclick={onNext} style="width:38px; height:38px;"><IconNext size={20} /></button>
+      {#if canSkip}<button class="t" aria-label="Next" onclick={onNext} style="width:38px; height:38px;"><IconNext size={20} /></button>{/if}
     </div>
     <div style="display:flex; align-items:center; gap:12px; width:100%; max-width:520px;">
       <span style="font-family:var(--font-mono); font-size:11px; color:var(--text-faint); width:38px; text-align:right;">{fmt(current)}</span>

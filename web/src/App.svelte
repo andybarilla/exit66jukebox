@@ -28,6 +28,9 @@
   const npPct = $derived((dur ? Math.min(100, (cur / dur) * 100) : 0) + '%');
   const streamLabel = $derived(s.stream === 'house' ? 'House' : 'Personal');
   const chip = $derived(`${streamLabel} · ${s.listeners}`);
+  // Privileged controls (skip/remove/clear/shuffle) show for an admin, or for any
+  // guest on their own personal stream (which the server never gates).
+  const canControl = $derived(s.isAdmin || s.stream === 'me');
 
   // Attempt playback and let the audio element's play/pause events drive the
   // `playing` flag. A blocked autoplay rejects without firing 'pause', so the
@@ -162,7 +165,9 @@
   <TopBar isPhone={s.isPhone} query={s.query} onSearch={(v) => (s.query = v)}
     streamChipLabel={chip} onToggleStream={() => s.toggleStream()} scan={s.scan}
     onToast={(tone, title, msg) => s.pushToast(tone, title, msg)}
-    onCastActive={(v) => s.setCastActive(v)} />
+    onCastActive={(v) => s.setCastActive(v)}
+    isAdmin={s.isAdmin} adminRequired={s.adminRequired}
+    onLogin={(p) => s.adminLogin(p)} onLogout={() => s.adminLogout()} />
 
   <!-- BODY -->
   <div style="display:flex; flex:1; min-height:0;">
@@ -209,7 +214,7 @@
         <div style="flex:1; min-height:0; display:flex; background:var(--bg-surface); background-image:var(--scanline); border:1.5px solid var(--neon-magenta); box-shadow:var(--shadow-lg), var(--glow-soft-magenta); border-radius:var(--radius-lg); padding:16px; box-sizing:border-box;">
           <Lineup streamLabel={streamLabel} listeners={s.listeners} shuffle={s.shuffle}
             onToggleShuffle={(v) => s.toggleShuffle(v)} np={np} npPct={npPct}
-            queue={s.queue} isPhone={false} onRemove={(q) => s.removeFromQueue(q)}
+            queue={s.queue} isPhone={false} canControl={canControl} onRemove={(q) => s.removeFromQueue(q)}
             onOpenAlbum={(item) => s.openAlbum({ id: item.albumId, name: item.albumName, artistName: item.artistName })} />
         </div>
       </aside>
@@ -223,7 +228,7 @@
         <NowPlayingBar title={np?.title || 'Nothing playing'} artist={np?.artistName || '—'}
           code={np?.code || 'A6'} cover={np?.cover} gradient={np?.gradient} tone={np?.tone || 'magenta'}
           albumId={np?.albumId} onOpenAlbum={np?.albumId ? () => s.openAlbum({ id: np.albumId, name: np.albumName, artistName: np.artistName }) : undefined}
-          current={cur} duration={dur} {playing} {volume}
+          current={cur} duration={dur} {playing} {volume} canSkip={canControl}
           onPlayPause={togglePlay} onPrev={onPrev} onNext={onNext} onSeek={onSeek}
           onVolume={(v) => { volume = v; if (audio) audio.volume = v / 100; }} />
       </div>
@@ -240,7 +245,7 @@
 
   <!-- MOBILE PLAYER -->
   {#if s.isPhone}
-    <MobilePlayer {np} {npPct} {playing} onPlayPause={togglePlay} onNext={onNext}
+    <MobilePlayer {np} {npPct} {playing} canSkip={canControl} onPlayPause={togglePlay} onNext={onNext}
       onOpenAlbum={np?.albumId ? () => s.openAlbum({ id: np.albumId, name: np.albumName, artistName: np.artistName }) : undefined} />
   {/if}
 
@@ -256,7 +261,7 @@
       <div style="position:relative; height:74vh; background:var(--bg-surface); background-image:var(--scanline); border-top:1.5px solid var(--neon-magenta); border-radius:var(--radius-lg) var(--radius-lg) 0 0; padding:18px; box-shadow:var(--shadow-xl); display:flex; box-sizing:border-box;">
         <Lineup streamLabel={streamLabel} listeners={s.listeners} shuffle={s.shuffle}
           onToggleShuffle={(v) => s.toggleShuffle(v)} np={np} npPct={npPct}
-          queue={s.queue} isPhone={true} onClose={() => s.closeLineup()} onRemove={(q) => s.removeFromQueue(q)}
+          queue={s.queue} isPhone={true} canControl={canControl} onClose={() => s.closeLineup()} onRemove={(q) => s.removeFromQueue(q)}
           onOpenAlbum={(item) => s.openAlbum({ id: item.albumId, name: item.albumName, artistName: item.artistName })} />
       </div>
     </div>

@@ -38,6 +38,15 @@ type Server struct {
 	// local <audio> while a Sonos cast is active. Sourced from config (env for now).
 	muteLocalOnCast bool
 
+	// adminPassword is the shared secret that unlocks admin mode. Empty (the
+	// default) leaves the gate disabled — every action stays open, matching every
+	// existing deploy. adminTokens holds the bearer tokens issued by a successful
+	// login; both guarded by adminMu (mirrors sonosMu / sonosIPs). This is a soft
+	// LAN-party gate, not real auth: no expiry, rotation, or per-user identity.
+	adminMu       sync.Mutex
+	adminPassword string
+	adminTokens   map[string]bool
+
 	// sonosIPs is the allowlist of IPs from the most recent discovery; casts are
 	// restricted to it so an arbitrary ip can't be used to make the server POST
 	// to an internal host (SSRF). sonosManual holds IPs added via /api/sonos/manual
@@ -63,6 +72,7 @@ func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 		hubs:        make(map[string]*broadcast.Hub),
 		buses:       make(map[string]*events.Bus),
 		nowPlaying:  make(map[string]*NowPlaying),
+		adminTokens: make(map[string]bool),
 		sonosIPs:    make(map[string]bool),
 		sonosManual: make(map[string]string),
 		manualVerify: func(ip string) (string, bool) {
@@ -107,6 +117,10 @@ func (s *Server) SetFedPeers(fn func() []string) { s.fedPeers = fn }
 // casting; exposed via GET /api/config.
 func (s *Server) SetMuteLocalOnCast(v bool) { s.muteLocalOnCast = v }
 
+// SetAdminPassword sets the shared admin secret. Empty leaves the gate disabled
+// (every action open). Sourced from config (env/flag) and threaded in by main.
+func (s *Server) SetAdminPassword(p string) { s.adminPassword = p }
+
 // RegisterStream attaches a broadcast hub, event bus, and now-playing tracker
 // for a shared stream id. np may be nil for streams that don't track current
 // track (GET /api/streams/{id} then reports now_playing: null).
@@ -134,11 +148,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/albums", s.listAlbums)
 	mux.HandleFunc("GET /api/tracks", s.listTracks)
 	mux.HandleFunc("GET /api/streams/{id}", s.getStream)
-	mux.HandleFunc("GET /api/streams/{id}/next", s.nextTrack)
+	// next/remove/clear/shuffle mutate the queue. They're gated only for the shared
+	// house stream (requireAdminShared); each guest's private "me" stream stays open
+	// so they can always drive their own queue.
+	mux.HandleFunc("GET /api/streams/{id}/next", s.requireAdminShared(s.nextTrack))
 	mux.HandleFunc("POST /api/streams/{id}/requests", s.request)
-	mux.HandleFunc("DELETE /api/streams/{id}/requests/{trackID}", s.removeRequest)
-	mux.HandleFunc("DELETE /api/streams/{id}/requests", s.clearRequests)
-	mux.HandleFunc("POST /api/streams/{id}/shuffle", s.setShuffle)
+	mux.HandleFunc("DELETE /api/streams/{id}/requests/{trackID}", s.requireAdminShared(s.removeRequest))
+	mux.HandleFunc("DELETE /api/streams/{id}/requests", s.requireAdminShared(s.clearRequests))
+	mux.HandleFunc("POST /api/streams/{id}/shuffle", s.requireAdminShared(s.setShuffle))
 	mux.HandleFunc("GET /api/tracks/{id}/audio", s.trackAudio)
 	mux.HandleFunc("GET /api/tracks/{id}/cover", s.trackCover)
 	mux.HandleFunc("GET /api/albums/{id}/cover", s.albumCover)
@@ -146,11 +163,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /stream/", s.streamAudio)
 	mux.HandleFunc("GET /api/streams/{id}/events", s.streamEvents)
 	mux.HandleFunc("GET /api/sonos/devices", s.sonosDevices)
-	mux.HandleFunc("POST /api/sonos/cast", s.sonosCast)
-	mux.HandleFunc("POST /api/sonos/stop", s.sonosStop)
+	// Casting drives the shared house stream onto the room speakers, so cast/stop
+	// and volume changes are admin-only. Discovery, manual add, and reading the
+	// volume stay open.
+	mux.HandleFunc("POST /api/sonos/cast", s.requireAdmin(s.sonosCast))
+	mux.HandleFunc("POST /api/sonos/stop", s.requireAdmin(s.sonosStop))
 	mux.HandleFunc("GET /api/sonos/volume", s.sonosGetVolume)
-	mux.HandleFunc("POST /api/sonos/volume", s.sonosSetVolume)
+	mux.HandleFunc("POST /api/sonos/volume", s.requireAdmin(s.sonosSetVolume))
 	mux.HandleFunc("POST /api/sonos/manual", s.sonosManualAdd)
+	mux.HandleFunc("POST /api/admin/login", s.adminLogin)
+	mux.HandleFunc("POST /api/admin/logout", s.adminLogout)
 	mux.HandleFunc("GET /api/discover/rediscover", s.discoverRediscover)
 	mux.HandleFunc("GET /api/discover/recent", s.discoverRecent)
 	mux.HandleFunc("GET /api/discover/genres", s.discoverGenres)

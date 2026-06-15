@@ -3,7 +3,8 @@ import {
   setShuffle, subscribeEvents, coverURL, albumCoverURL, HOUSE,
   discoverGenres, discoverRediscover, discoverRecent, discoverRecommended,
   getStation, startStation as apiStartStation, stopStation as apiStopStation,
-  scanStatus, getConfig,
+  scanStatus, getConfig, adminToken, clearAdminToken,
+  adminLogin as apiAdminLogin, adminLogout as apiAdminLogout,
 } from './api.js';
 import { gradientFor } from './format.js';
 import { createPager } from './pager.js';
@@ -39,6 +40,14 @@ export function createStore() {
   // castActive is lifted out of CastPanel so App can mute the local <audio>.
   let config = $state({ muteLocalOnCast: true, fedPeers: [] });
   let castActive = $state(false);
+
+  // Admin-mode state. The gate is a soft shared-password lock (#85): adminRequired
+  // mirrors the server's "a password is configured"; the token is the bearer held
+  // in localStorage. isAdmin is open until config proves a lock is in force, so the
+  // first paint shows controls rather than flashing them away. A token that the
+  // server rejects (e.g. after a restart) is dropped on the next config load.
+  let adminRequired = $state(false);
+  let adminTokenPresent = $state(!!adminToken());
 
   // per-stream live state
   let nowPlaying = $state({ house: null, me: null });
@@ -240,6 +249,12 @@ export function createStore() {
     get castActive() { return castActive; },
     setCastActive(v) { castActive = v; },
 
+    // adminRequired: a password is configured server-side. isAdmin: this client may
+    // use privileged controls — true when no gate is in force, or a valid token is
+    // held. Controls also stay enabled on the personal "me" stream regardless.
+    get adminRequired() { return adminRequired; },
+    get isAdmin() { return !adminRequired || adminTokenPresent; },
+
     // Personal is always "just you": the `me` stream has no broadcast hub, so
     // the backend reports 0 listeners for it. Never let that 0 surface here.
     get listeners() { return stream === 'me' ? 1 : (listeners.house || 0); },
@@ -283,6 +298,7 @@ export function createStore() {
             muteLocalOnCast: typeof c.mute_local_on_cast === 'boolean' ? c.mute_local_on_cast : config.muteLocalOnCast,
             fedPeers: Array.isArray(c.fed_peers) ? c.fed_peers : [],
           };
+          this.applyAdminConfig(c);
         })
         .catch(() => {});
       const s0 = await scanStatus().catch(() => null);
@@ -319,6 +335,30 @@ export function createStore() {
     async toggleShuffle(v) {
       shuffle[stream] = typeof v === 'boolean' ? v : !shuffle[stream];
       await setShuffle(stream, shuffle[stream]);
+    },
+
+    // applyAdminConfig reconciles local admin state with /api/config. A token the
+    // server no longer honours (is_admin false while a gate is in force) is stale;
+    // drop it so the UI doesn't claim admin it can't exercise.
+    applyAdminConfig(c) {
+      if (!c) return;
+      adminRequired = !!c.admin_required;
+      if (adminRequired && !c.is_admin && adminTokenPresent) {
+        clearAdminToken(); // stale token the server no longer honours
+        adminTokenPresent = false;
+      } else {
+        adminTokenPresent = !!adminToken();
+      }
+    },
+    async adminLogin(password) {
+      await apiAdminLogin(password);
+      adminTokenPresent = true;
+      pushToast('success', 'Admin mode', 'Privileged controls unlocked.');
+    },
+    async adminLogout() {
+      await apiAdminLogout();
+      adminTokenPresent = false;
+      pushToast('cyan', 'Locked', 'Admin controls hidden.');
     },
 
     refreshQueue(s) { return refreshQueue(s); },
