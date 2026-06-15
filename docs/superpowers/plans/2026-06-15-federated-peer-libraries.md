@@ -163,16 +163,23 @@ func TestRemoteUniqueIndexRejectsDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	_, err = db.Exec(`INSERT INTO artist(name, sort_key) VALUES('A','a')`)
-	if err != nil {
+	if _, err := db.Exec(`INSERT INTO artist(name, sort_key) VALUES('A','a')`); err != nil {
 		t.Fatal(err)
 	}
-	ins := `INSERT INTO track(path, source_peer, remote_id, title, artist_id, album_id, added_at)
-	        VALUES(?, 'home', 5, 't', 1, 0, 0)`
-	if _, err := db.Exec(ins, ""); err != nil {
+	if _, err := db.Exec(`INSERT INTO album(name, artist_id, sort_key) VALUES('Al', 1, 'al')`); err != nil {
+		t.Fatal(err)
+	}
+	// Distinct paths so the path UNIQUE constraint can't be what rejects the
+	// second row — this isolates idx_track_remote on (source_peer, remote_id).
+	// Remote rows use synthetic non-empty paths (never opened; audio resolution
+	// branches on source_peer first). artist_id/album_id reference the rows above
+	// so the foreign keys hold.
+	ins := `INSERT INTO track(path, mod_time, size, source_peer, remote_id, title, artist_id, album_id, added_at)
+	        VALUES(?, 0, 0, 'home', 5, 't', 1, 1, 0)`
+	if _, err := db.Exec(ins, "fed://home/5#a"); err != nil {
 		t.Fatalf("first remote insert failed: %v", err)
 	}
-	if _, err := db.Exec(ins, ""); err == nil {
+	if _, err := db.Exec(ins, "fed://home/5#b"); err == nil {
 		t.Fatal("expected unique-index violation on duplicate (source_peer, remote_id)")
 	}
 }
@@ -221,6 +228,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_track_remote
   ON track(source_peer, remote_id) WHERE source_peer <> '';
 ```
 
+> **Do not change anything else in the track table.** Specifically: keep `path TEXT NOT NULL UNIQUE` as-is (remote rows get a synthetic non-empty path in Task 3, so they don't collide and the UNIQUE constraint still protects local rows); keep `album_id INTEGER NOT NULL REFERENCES album(id)` (remote tracks get real album ids via `upsertAlbum` in Task 3); leave `mod_time`/`size` as they are. The only track-table changes are the two new columns and the new partial index.
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `go test ./internal/store/ -run TestRemote -v`
@@ -264,8 +273,10 @@ func TestUpsertRemoteTrackAndResolve(t *testing.T) {
 	if !ok {
 		t.Fatal("track not found")
 	}
-	if path != "" {
-		t.Fatalf("remote track should have empty path, got %q", path)
+	// Remote rows get a synthetic non-empty path (never opened — audio resolution
+	// branches on source_peer first); the source fields are what callers act on.
+	if path != "fed://home/42" {
+		t.Fatalf("expected synthetic remote path, got %q", path)
 	}
 	if tr.SourcePeer != "home" || tr.RemoteID != 42 {
 		t.Fatalf("source fields not returned: %+v", tr)
@@ -358,13 +369,18 @@ func UpsertRemoteTrack(db *sql.DB, rt RemoteTrack) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Synthetic non-empty path keeps the track.path UNIQUE constraint satisfied
+	// (remote rows never collide with local ones and are never opened as files).
+	// The ON CONFLICT target repeats the partial index's WHERE predicate, which
+	// SQLite requires to match a partial unique index.
+	synthPath := fmt.Sprintf("fed://%s/%d", rt.SourcePeer, rt.RemoteID)
 	_, err = tx.Exec(
 		`INSERT INTO track(path, source_peer, remote_id, title, artist_id, album_id, track_no, genre, duration, links, added_at)
-		 VALUES('', ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))
-		 ON CONFLICT(source_peer, remote_id) DO UPDATE SET
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))
+		 ON CONFLICT(source_peer, remote_id) WHERE source_peer <> '' DO UPDATE SET
 		   title=excluded.title, artist_id=excluded.artist_id, album_id=excluded.album_id,
 		   track_no=excluded.track_no, genre=excluded.genre, duration=excluded.duration, links=excluded.links`,
-		rt.SourcePeer, rt.RemoteID, rt.Title, artistID, albumID, rt.TrackNo, rt.Genre, rt.Duration,
+		synthPath, rt.SourcePeer, rt.RemoteID, rt.Title, artistID, albumID, rt.TrackNo, rt.Genre, rt.Duration,
 		strings.Join(rt.Links, "\n"),
 	)
 	if err != nil {
