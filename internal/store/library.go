@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
@@ -242,12 +243,113 @@ func scanIDs(db *sql.DB, q string, arg any) ([]int64, error) {
 // GetTrack returns a single track and its file path. ok=false if not found.
 func GetTrack(db *sql.DB, id int64) (t model.Track, path string, ok bool) {
 	err := db.QueryRow(
-		`SELECT id, path, title, artist_id, album_id, track_no, genre, duration, play_count
+		`SELECT id, path, title, artist_id, album_id, track_no, genre, duration, play_count, source_peer, remote_id
 		 FROM track WHERE id = ?`, id).Scan(
 		&t.ID, &path, &t.Title, &t.ArtistID, &t.AlbumID,
-		&t.TrackNo, &t.Genre, &t.Duration, &t.PlayCount)
+		&t.TrackNo, &t.Genre, &t.Duration, &t.PlayCount, &t.SourcePeer, &t.RemoteID)
 	if err != nil {
 		return model.Track{}, "", false
 	}
 	return t, path, true
+}
+
+// RemoteTrack is a track owned by another peer, received via catalog sync.
+type RemoteTrack struct {
+	SourcePeer  string
+	RemoteID    int64
+	Title       string
+	ArtistName  string
+	AlbumArtist string
+	AlbumName   string
+	TrackNo     int
+	Genre       string
+	Duration    int
+	Links       []string
+}
+
+// UpsertRemoteTrack inserts or updates a track owned by another peer, keyed by
+// (source_peer, remote_id). It reuses the local artist/album upsert path so a
+// remote album with the same name as a local one collapses into one browse row.
+// The row carries a synthetic non-empty path; audio resolution proxies it back
+// to its owner rather than opening a file.
+func UpsertRemoteTrack(db *sql.DB, rt RemoteTrack) (int64, error) {
+	if rt.AlbumArtist == "" {
+		rt.AlbumArtist = rt.ArtistName
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	artistID, err := upsertArtist(tx, rt.ArtistName)
+	if err != nil {
+		return 0, err
+	}
+	albumArtistID, err := upsertArtist(tx, rt.AlbumArtist)
+	if err != nil {
+		return 0, err
+	}
+	albumID, err := upsertAlbum(tx, rt.AlbumName, albumArtistID)
+	if err != nil {
+		return 0, err
+	}
+	// Synthetic non-empty path keeps the track.path UNIQUE constraint satisfied
+	// (remote rows never collide with local ones and are never opened as files).
+	synthPath := fmt.Sprintf("fed://%s/%d", rt.SourcePeer, rt.RemoteID)
+	_, err = tx.Exec(
+		`INSERT INTO track(path, mod_time, size, source_peer, remote_id, title, artist_id, album_id, track_no, genre, duration, links, added_at)
+		 VALUES(?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))
+		 ON CONFLICT(source_peer, remote_id) WHERE source_peer <> '' DO UPDATE SET
+		   title=excluded.title, artist_id=excluded.artist_id, album_id=excluded.album_id,
+		   track_no=excluded.track_no, genre=excluded.genre, duration=excluded.duration, links=excluded.links`,
+		synthPath, rt.SourcePeer, rt.RemoteID, rt.Title, artistID, albumID, rt.TrackNo, rt.Genre, rt.Duration,
+		strings.Join(rt.Links, "\n"),
+	)
+	if err != nil {
+		return 0, err
+	}
+	var id int64
+	if err = tx.QueryRow(
+		`SELECT id FROM track WHERE source_peer = ? AND remote_id = ?`, rt.SourcePeer, rt.RemoteID,
+	).Scan(&id); err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// DeleteRemoteTracks removes all cached tracks owned by a peer, then prunes
+// orphaned albums/artists. Called when a peer leaves the federation.
+func DeleteRemoteTracks(db *sql.DB, peer string) error {
+	if _, err := db.Exec(`DELETE FROM track WHERE source_peer = ?`, peer); err != nil {
+		return err
+	}
+	return PruneOrphans(db)
+}
+
+// DeleteRemoteTracksExcept removes a peer's cached tracks whose remote_id is not
+// in keep, then prunes orphans. Catalog sync upserts the incoming rows (which
+// preserves their local id via ON CONFLICT) and then calls this to drop only
+// tracks that truly disappeared — so a track's local id stays STABLE across
+// syncs. A blanket delete+reinsert would mint a new autoincrement id every sync,
+// breaking any id a client is already holding (browse→play) and any queue row.
+func DeleteRemoteTracksExcept(db *sql.DB, peer string, keep []int64) error {
+	if len(keep) == 0 {
+		return DeleteRemoteTracks(db, peer)
+	}
+	ph := strings.TrimRight(strings.Repeat("?,", len(keep)), ",")
+	args := make([]any, 0, len(keep)+1)
+	args = append(args, peer)
+	for _, id := range keep {
+		args = append(args, id)
+	}
+	if _, err := db.Exec(
+		`DELETE FROM track WHERE source_peer = ? AND remote_id NOT IN (`+ph+`)`, args...,
+	); err != nil {
+		return err
+	}
+	return PruneOrphans(db)
 }

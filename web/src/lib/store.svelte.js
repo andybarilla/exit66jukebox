@@ -38,7 +38,7 @@ export function createStore() {
   // Runtime config + cast state. config loads once on init; muteLocalOnCast
   // defaults true so a cast that starts before config resolves still mutes.
   // castActive is lifted out of CastPanel so App can mute the local <audio>.
-  let config = $state({ muteLocalOnCast: true });
+  let config = $state({ muteLocalOnCast: true, fedPeers: [] });
   let castActive = $state(false);
 
   // Admin-mode state. The gate is a soft shared-password lock (#85): adminRequired
@@ -130,6 +130,8 @@ export function createStore() {
       artistName: t.artist_name || 'Unknown', albumName: t.album_name || '',
       links: t.links || [],
       cover: coverURL(t.id), gradient: gradientFor(t.id),
+      sourcePeer: t.source_peer || '',
+      offline: !!t.source_peer && !config.fedPeers.includes(t.source_peer),
     };
   }
   function mapAlbum(a) {
@@ -243,6 +245,7 @@ export function createStore() {
 
     get scan() { return scan; },
     get muteLocalOnCast() { return config.muteLocalOnCast; },
+    get fedPeers() { return config.fedPeers; },
     get castActive() { return castActive; },
     setCastActive(v) { castActive = v; },
 
@@ -290,7 +293,11 @@ export function createStore() {
       // poll, triggering the reload that pulls in the last tracks.
       getConfig()
         .then((c) => {
-          if (c && typeof c.mute_local_on_cast === 'boolean') config = { muteLocalOnCast: c.mute_local_on_cast };
+          if (!c) return;
+          config = {
+            muteLocalOnCast: typeof c.mute_local_on_cast === 'boolean' ? c.mute_local_on_cast : config.muteLocalOnCast,
+            fedPeers: Array.isArray(c.fed_peers) ? c.fed_peers : [],
+          };
           this.applyAdminConfig(c);
         })
         .catch(() => {});

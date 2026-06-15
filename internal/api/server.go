@@ -12,6 +12,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/events"
+	"github.com/andybarilla/exit66jukebox/internal/fed"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/recommend"
 	"github.com/andybarilla/exit66jukebox/internal/scan"
@@ -27,9 +28,11 @@ type Server struct {
 	hubs       map[string]*broadcast.Hub
 	buses      map[string]*events.Bus
 	nowPlaying map[string]*NowPlaying // current-track trackers for shared streams
-	enrich     *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
-	recommend  *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
-	scan       *scan.Progress         // nil until SetScanProgress (no library); endpoint 503 while nil
+	enrich      *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
+	recommend   *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
+	scan        *scan.Progress         // nil until SetScanProgress (no library); endpoint 503 while nil
+	fedResolver fed.Resolver           // nil unless federation is configured
+	fedPeers    func() []string        // returns online peer ids; nil when federation off
 
 	// muteLocalOnCast is exposed via GET /api/config so the frontend can mute the
 	// local <audio> while a Sonos cast is active. Sourced from config (env for now).
@@ -101,6 +104,14 @@ func (s *Server) SetRecommendRunner(r *recommend.Runner) { s.recommend = r }
 // SetScanProgress attaches the library scan progress that backs GET /api/scan.
 // Left nil when no library is configured (no scan ever runs).
 func (s *Server) SetScanProgress(p *scan.Progress) { s.scan = p }
+
+// SetFedResolver attaches the federation resolver used to proxy audio for
+// tracks owned by other peers. Left nil when federation is off.
+func (s *Server) SetFedResolver(r fed.Resolver) { s.fedResolver = r }
+
+// SetFedPeers attaches a source of currently-online federation peer ids,
+// surfaced via GET /api/config so the UI can grey out offline peers' tracks.
+func (s *Server) SetFedPeers(fn func() []string) { s.fedPeers = fn }
 
 // SetMuteLocalOnCast records whether the frontend should mute local audio while
 // casting; exposed via GET /api/config.

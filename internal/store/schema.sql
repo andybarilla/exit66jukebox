@@ -28,9 +28,13 @@ CREATE TABLE IF NOT EXISTS track (
     duration   INTEGER NOT NULL DEFAULT 0,
     play_count INTEGER NOT NULL DEFAULT 0,
     added_at   INTEGER NOT NULL DEFAULT 0,
-    mbid       TEXT NOT NULL DEFAULT '',
-    links      TEXT NOT NULL DEFAULT ''
+    mbid        TEXT NOT NULL DEFAULT '',
+    links       TEXT NOT NULL DEFAULT '',
+    source_peer TEXT NOT NULL DEFAULT '',
+    remote_id   INTEGER NOT NULL DEFAULT 0
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_track_remote
+  ON track(source_peer, remote_id) WHERE source_peer <> '';
 CREATE INDEX IF NOT EXISTS idx_track_artist ON track(artist_id);
 CREATE INDEX IF NOT EXISTS idx_track_album  ON track(album_id);
 

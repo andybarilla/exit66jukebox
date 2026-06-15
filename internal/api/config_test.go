@@ -5,7 +5,23 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/andybarilla/exit66jukebox/internal/store"
 )
+
+func TestConfigIncludesFedPeers(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	srv := NewServer(db, nil, nil)
+	srv.SetFedPeers(func() []string { return []string{"home", "vps"} })
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/api/config", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, `"fed_peers"`) || !strings.Contains(body, `"home"`) {
+		t.Fatalf("expected fed_peers with home, got %s", body)
+	}
+}
 
 func TestConfigEndpointReflectsMuteFlag(t *testing.T) {
 	for _, tc := range []struct {

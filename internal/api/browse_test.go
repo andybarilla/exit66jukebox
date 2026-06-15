@@ -153,3 +153,18 @@ func TestNextTrackEnriched(t *testing.T) {
 		t.Fatalf("next track not enriched: %s", body)
 	}
 }
+
+func TestBrowseExposesSourcePeer(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	store.UpsertRemoteTrack(db, store.RemoteTrack{SourcePeer: "home", RemoteID: 1, Title: "R", ArtistName: "A", AlbumName: "Al"})
+	srv := NewServer(db, nil, nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/tracks", nil)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), `"source_peer":"home"`) {
+		t.Fatalf("expected source_peer in track JSON, got %s", rec.Body.String())
+	}
+}

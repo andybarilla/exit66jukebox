@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,6 +21,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/external"
+	"github.com/andybarilla/exit66jukebox/internal/fed"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/model"
 	"github.com/andybarilla/exit66jukebox/internal/recommend"
@@ -107,8 +109,8 @@ func main() {
 		log.Print("warning: MP3 silence generation failed (is ffmpeg installed?); the house stream will send nothing while idle")
 	}
 
-	// next pops the house queue and publishes now-playing; returns the file path
-	// for the broadcaster. Called repeatedly in the hub's single goroutine.
+	// next pops the house queue and publishes now-playing; returns the loopback
+	// audio URL for the broadcaster. Called repeatedly in the hub's single goroutine.
 	// Publishes a null now-playing once when the stream transitions from playing
 	// to idle (empty queue).
 	//
@@ -142,6 +144,11 @@ func main() {
 			log.Printf("scrobble: enqueue track %d: %v", prev.ID, err)
 		}
 	}
+	// The shared stream feeds ffmpeg the instance's own audio endpoint so remote
+	// tracks resolve through the same local/remote branch as browser playback.
+	_, selfPort, _ := net.SplitHostPort(cfg.Addr)
+	selfBaseURL := "http://127.0.0.1:" + selfPort
+
 	playing := false
 	next := func() (string, bool) {
 		tr, ok := jb.Next(houseID)
@@ -154,8 +161,7 @@ func main() {
 			}
 			return "", false
 		}
-		_, path, found := store.GetTrack(db, tr.ID)
-		if !found {
+		if _, _, found := store.GetTrack(db, tr.ID); !found {
 			return "", false
 		}
 		// A new track is starting: settle the one that just finished, then make
@@ -186,7 +192,7 @@ func main() {
 		// The pop removed this track from the queue; tell listeners so their
 		// "up next" view doesn't keep showing the now-playing track.
 		houseBus.Publish(events.Event{Type: "queue-changed", Data: houseID})
-		return path, true
+		return broadcast.SourceInput(selfBaseURL, tr.ID), true
 	}
 
 	// Single background drainer delivers queued scrobbles. ctx-aware so #23's
@@ -239,6 +245,36 @@ func main() {
 	if recLB != nil || recLF != nil {
 		srv.SetRecommendRunner(recommend.NewRunner(db, recLB, recLF))
 		log.Print("External recommendations enabled")
+	}
+
+	// Federation: dial/listen for peers and resolve remote-track audio through the
+	// relay. MemberHandler exposes this instance's API over the session so a hub
+	// can fetch /api/tracks/{id}/audio from it.
+	if cfg.Federation.Enabled() {
+		reg := fed.NewRegistry()
+		fm := &fed.Manager{
+			Role:          cfg.Federation.Role,
+			Token:         cfg.Federation.Token,
+			PeerID:        cfg.Federation.PeerID,
+			HubAddr:       cfg.Federation.HubAddr, // member: hub to dial
+			HubListen:     cfg.Federation.Listen,  // hub: local listen addr
+			MemberHandler: srv.Handler(),
+			Registry:      reg,
+			DB:            db,
+		}
+		if cfg.Federation.Role == "hub" {
+			// One relay instance shared by the session handler and the resolver so
+			// the hub's own browse sees remote tracks (catalog ingest lands here in a
+			// later task). It holds the registry and the hub's DB.
+			relay := fed.NewRelay(reg, db)
+			relay.SetSelf(cfg.Federation.PeerID)
+			fm.Relay = relay
+			fm.HubHandler = relay.Routes()
+		}
+		fm.Start()
+		srv.SetFedResolver(fed.NewResolverFor(fm))
+		srv.SetFedPeers(fm.OnlinePeers)
+		log.Printf("federation: role=%s peer=%s", cfg.Federation.Role, cfg.Federation.PeerID)
 	}
 
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)

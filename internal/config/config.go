@@ -14,6 +14,7 @@ type Config struct {
 	HistoryWindow int
 	ScanWorkers   int
 	Services      Services
+	Federation    Federation
 
 	// MuteLocalOnCast silences the browser's local <audio> while a Sonos cast is
 	// active. Sourced from EXIT66_MUTE_LOCAL_ON_CAST for now; a settings UI will
@@ -46,6 +47,32 @@ func (s Services) ListenBrainzEnabled() bool { return s.ListenBrainzToken != "" 
 // in the database, not config — this only covers the env half.
 func (s Services) LastfmConfigured() bool {
 	return s.LastfmAPIKey != "" && s.LastfmAPISecret != ""
+}
+
+// Federation holds peer-sharing config. Role is "hub", "member", or "" (off).
+// Like Services, the token comes from the environment, never a flag, so it
+// doesn't leak via the process list. HubAddr is the public host:port a member
+// dials; Listen is the hub's local listen address. PeerID is this instance's
+// stable identifier within the federation.
+type Federation struct {
+	Role    string // "hub" | "member" | ""
+	HubAddr string // members only: hub's public address to dial
+	Listen  string // hub only: local address to listen on (e.g. ":8443")
+	Token   string // shared secret presented at registration
+	PeerID  string // this instance's id (e.g. "home", "vps")
+}
+
+// Enabled reports whether federation is configured.
+func (f Federation) Enabled() bool { return f.Role == "hub" || f.Role == "member" }
+
+func federationFromEnv() Federation {
+	return Federation{
+		Role:    os.Getenv("EXIT66_FED_ROLE"),
+		HubAddr: os.Getenv("EXIT66_FED_HUB"),
+		Listen:  os.Getenv("EXIT66_FED_LISTEN"),
+		Token:   os.Getenv("EXIT66_FED_TOKEN"),
+		PeerID:  os.Getenv("EXIT66_FED_PEER_ID"),
+	}
 }
 
 // servicesFromEnv reads service credentials from the environment.
@@ -82,6 +109,7 @@ func Parse(args []string) (Config, error) {
 		return Config{}, err
 	}
 	c.Services = servicesFromEnv()
+	c.Federation = federationFromEnv()
 	c.MuteLocalOnCast = envBool("EXIT66_MUTE_LOCAL_ON_CAST", true)
 	if c.AdminPassword == "" {
 		c.AdminPassword = os.Getenv("EXIT66_ADMIN_PASSWORD")

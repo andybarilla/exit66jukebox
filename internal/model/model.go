@@ -28,9 +28,11 @@ type Track struct {
 	TrackNo   int    `json:"track_no"`
 	Genre     string `json:"genre"`
 	Duration  int      `json:"duration"`
-	PlayCount int      `json:"play_count"`
-	Links     []string `json:"links"`
-	Mbid      string   `json:"-"`
+	PlayCount  int      `json:"play_count"`
+	Links      []string `json:"links"`
+	Mbid       string   `json:"-"`
+	SourcePeer string   `json:"source_peer,omitempty"`
+	RemoteID   int64    `json:"-"`
 }
 
 // Stream owns a queue + fairness config. Kind is "private" or "shared".

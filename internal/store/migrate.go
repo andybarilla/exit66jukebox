@@ -75,6 +75,30 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	// Federation: remote rows carry their owning peer and the track's id on that
+	// peer. Local rows leave both empty/0 (#86). path is "" for remote tracks, so
+	// the path-unique index can't key them — a partial unique index on
+	// (source_peer, remote_id) covers remote rows instead (added in schema.sql).
+	if has, err := columnExists(db, "track", "source_peer"); err != nil {
+		return err
+	} else if !has {
+		if _, err := db.Exec(`ALTER TABLE track ADD COLUMN source_peer TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if has, err := columnExists(db, "track", "remote_id"); err != nil {
+		return err
+	} else if !has {
+		if _, err := db.Exec(`ALTER TABLE track ADD COLUMN remote_id INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_track_remote
+		 ON track(source_peer, remote_id) WHERE source_peer <> ''`,
+	); err != nil {
+		return err
+	}
 	return migrateLibraryVersion(db)
 }
 
