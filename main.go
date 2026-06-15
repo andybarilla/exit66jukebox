@@ -211,6 +211,7 @@ func main() {
 	srv := api.NewServer(db, jb, uiFS)
 	srv.SetListenAddr(cfg.Addr)
 	srv.SetMuteLocalOnCast(cfg.MuteLocalOnCast)
+	srv.SetAdminPassword(cfg.AdminPassword)
 	srv.RegisterStream(houseID, houseHub, houseBus, houseNP)
 	srv.SetScanProgress(scanProgress)
 

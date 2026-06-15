@@ -79,7 +79,42 @@ func TestMuteLocalOnCastDisabled(t *testing.T) {
 	}
 }
 
-// Tokens must never be exposed as flags (they would leak via the process list).
+func TestAdminPasswordFromEnv(t *testing.T) {
+	t.Setenv("EXIT66_ADMIN_PASSWORD", "hunter2")
+	c, err := Parse(nil)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if c.AdminPassword != "hunter2" {
+		t.Errorf("AdminPassword = %q, want hunter2", c.AdminPassword)
+	}
+}
+
+func TestAdminPasswordUnsetDisablesGate(t *testing.T) {
+	t.Setenv("EXIT66_ADMIN_PASSWORD", "")
+	c, err := Parse(nil)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if c.AdminPassword != "" {
+		t.Errorf("AdminPassword = %q, want empty (gate disabled)", c.AdminPassword)
+	}
+}
+
+// The flag wins over the env var when both are set.
+func TestAdminPasswordFlagOverridesEnv(t *testing.T) {
+	t.Setenv("EXIT66_ADMIN_PASSWORD", "from-env")
+	c, err := Parse([]string{"-admin-password", "from-flag"})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if c.AdminPassword != "from-flag" {
+		t.Errorf("AdminPassword = %q, want from-flag", c.AdminPassword)
+	}
+}
+
+// Service tokens must never be exposed as flags (they would leak via the process
+// list). The admin password is the deliberate exception (see AdminPassword).
 func TestTokenNotAFlag(t *testing.T) {
 	_, err := Parse([]string{"-listenbrainz-token", "x"})
 	if err == nil {
