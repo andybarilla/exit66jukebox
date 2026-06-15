@@ -21,6 +21,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/external"
+	"github.com/andybarilla/exit66jukebox/internal/fed"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/model"
 	"github.com/andybarilla/exit66jukebox/internal/recommend"
@@ -243,6 +244,33 @@ func main() {
 	if recLB != nil || recLF != nil {
 		srv.SetRecommendRunner(recommend.NewRunner(db, recLB, recLF))
 		log.Print("External recommendations enabled")
+	}
+
+	// Federation: dial/listen for peers and resolve remote-track audio through the
+	// relay. MemberHandler exposes this instance's API over the session so a hub
+	// can fetch /api/tracks/{id}/audio from it.
+	if cfg.Federation.Enabled() {
+		reg := fed.NewRegistry()
+		fm := &fed.Manager{
+			Role:          cfg.Federation.Role,
+			Token:         cfg.Federation.Token,
+			PeerID:        cfg.Federation.PeerID,
+			HubAddr:       cfg.Federation.HubAddr, // member: hub to dial
+			HubListen:     cfg.Federation.Listen,  // hub: local listen addr
+			MemberHandler: srv.Handler(),
+			Registry:      reg,
+		}
+		if cfg.Federation.Role == "hub" {
+			// One relay instance shared by the session handler and the resolver so
+			// the hub's own browse sees remote tracks (catalog ingest lands here in a
+			// later task). It holds the registry and the hub's DB.
+			relay := fed.NewRelay(reg, db)
+			fm.Relay = relay
+			fm.HubHandler = relay.Routes()
+		}
+		fm.Start()
+		srv.SetFedResolver(fed.NewResolverFor(fm))
+		log.Printf("federation: role=%s peer=%s", cfg.Federation.Role, cfg.Federation.PeerID)
 	}
 
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)
