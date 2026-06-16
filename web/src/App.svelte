@@ -24,8 +24,9 @@
   let playing = $state(true);
   let volume = $state(68);
   let showSignup = $state(false);
-  let showLogin = $state(false); // a guest (guest-access on) chose to log in
-  let adminOpen = $state(false);
+  let showAuth = $state(false);
+  let adminPanelOpen = $state(false);
+  const onInvitePath = window.location.pathname.startsWith('/invite/');
   let tickTimer, resizeHandler;
 
   // Active now-playing slice + derived progress %.
@@ -105,8 +106,19 @@
     if (audio && s.stream === 'me') audio.currentTime = t;
   }
 
+  // Called after login/signup/invite: adopt the user, run heavy loads (start is
+  // idempotent), and drop the auth overlay.
+  function afterLogin(u) {
+    s.setMe(u);
+    s.start();
+    showAuth = false;
+  }
+
   onMount(async () => {
-    await s.init();
+    // Lightweight auth/config check first; only run heavy loads once access is
+    // granted (logged in or guest access on), so they never 401 on the gate.
+    await s.bootstrap();
+    if (s.me || s.config.guestAccess) await s.start();
     s.onResize();
     resizeHandler = () => s.onResize();
     window.addEventListener('resize', resizeHandler);
@@ -134,6 +146,12 @@
     window.removeEventListener('resize', resizeHandler);
     s.teardown();
     if (audio) { audio.pause(); audio.src = ''; }
+  });
+
+  // When a user logs in (any path), ensure heavy loads have run (start() is
+  // guarded/idempotent) and dismiss the auth overlay.
+  $effect(() => {
+    if (s.me) { s.start(); showAuth = false; }
   });
 
   // re-apply audio when the user switches streams
@@ -170,24 +188,25 @@
 <div style="position:relative; height:100vh; width:100%; display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; background:var(--grid-glow), var(--bg-base); font-family:var(--font-sans); color:var(--text-body);">
 
 {#if !s.authChecked}
-  <!-- waiting for /me round-trip — render nothing -->
-{:else if window.location.pathname.startsWith('/invite/')}
-  <InviteAccept onLoggedIn={(u) => { s.setMe(u); window.history.replaceState(null, '', '/'); }} />
-{:else if !s.me && (!s.config.guestAccess || showLogin)}
+  <!-- waiting for the /me round-trip — render a minimal splash -->
+  <div style="flex:1;"></div>
+{:else if onInvitePath}
+  <InviteAccept onLoggedIn={(u) => { s.setMe(u); s.start(); window.history.replaceState(null, '', '/'); }} />
+{:else if (!s.me && !s.config.guestAccess) || showAuth}
   {#if showSignup}
-    <Signup onLoggedIn={(u) => { s.setMe(u); showLogin = false; }} onSwitchToLogin={() => (showSignup = false)} />
+    <Signup onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />
   {:else}
     <Login canSignup={s.config.signupEnabled || s.config.needsBootstrap}
            onSwitchToSignup={() => (showSignup = true)}
-           onLoggedIn={(u) => { s.setMe(u); showLogin = false; }} />
+           onLoggedIn={afterLogin} />
   {/if}
 {:else}
   <TopBar isPhone={s.isPhone} query={s.query} onSearch={(v) => (s.query = v)}
     streamChipLabel={chip} onToggleStream={() => s.toggleStream()} scan={s.scan}
     onToast={(tone, title, msg) => s.pushToast(tone, title, msg)}
     onCastActive={(v) => s.setCastActive(v)}
-    isAdmin={s.isAdmin} me={s.me} onLogout={() => s.signOut()} onOpenSettings={() => (adminOpen = true)}
-    onLogin={() => (showLogin = true)} />
+    isAdmin={s.isAdmin} me={s.me} onLogout={() => s.signOut()}
+    onOpenSettings={() => (adminPanelOpen = true)} onLogin={() => (showAuth = true)} />
 
   <!-- BODY -->
   <div style="display:flex; flex:1; min-height:0;">
@@ -303,8 +322,8 @@
 
   <audio bind:this={audio} style="display:none;"></audio>
 
-  {#if adminOpen}
-    <AdminPanel onClose={() => (adminOpen = false)} />
+  {#if adminPanelOpen}
+    <AdminPanel onClose={() => (adminPanelOpen = false)} />
   {/if}
 {/if}
 </div>

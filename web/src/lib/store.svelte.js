@@ -63,6 +63,7 @@ export function createStore() {
 
   let _uid = 0;
   let _esHouse = null;
+  let _started = false;
 
   const pagers = {
     albums: createPager((q, off, lim) => listAlbums(q, off, lim), PAGE_SIZE),
@@ -242,6 +243,7 @@ export function createStore() {
     pushToast,
 
     get scan() { return scan; },
+    get config() { return config; },
     get muteLocalOnCast() { return config.muteLocalOnCast; },
     get fedPeers() { return config.fedPeers; },
     get castActive() { return castActive; },
@@ -285,11 +287,11 @@ export function createStore() {
     get detailAlbum() { return detailAlbum; },
 
     // ----- actions -----
-    async init() {
-      // Seed scan state before the initial load so a scan that finishes *during*
-      // the first fetch is still seen as a true→false transition by the first
-      // poll, triggering the reload that pulls in the last tracks.
-      getConfig()
+    // bootstrap loads only the lightweight auth/config state needed to decide
+    // whether the user has access. Heavy data loads live in start(), gated on
+    // access being granted, so they never 401 for a logged-out guest.
+    async bootstrap() {
+      await getConfig()
         .then((c) => {
           if (!c) return;
           config = {
@@ -303,6 +305,15 @@ export function createStore() {
         })
         .catch(() => {});
       fetchMe().then((u) => { me = u; }).catch(() => {}).finally(() => { authChecked = true; });
+    },
+    // start runs the heavy loads once access is granted. Guarded so calling it
+    // again (e.g. after login) is a no-op.
+    async start() {
+      if (_started) return;
+      _started = true;
+      // Seed scan state before the initial load so a scan that finishes *during*
+      // the first fetch is still seen as a true→false transition by the first
+      // poll, triggering the reload that pulls in the last tracks.
       const s0 = await scanStatus().catch(() => null);
       scan = s0;
       _scanWasRunning = !!(s0 && s0.running);
@@ -319,6 +330,7 @@ export function createStore() {
         }
       });
     },
+    async init() { await this.bootstrap(); await this.start(); },
     teardown() {
       if (_esHouse) { _esHouse(); _esHouse = null; }
       if (_scanTimer) { clearTimeout(_scanTimer); _scanTimer = null; }
