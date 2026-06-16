@@ -14,11 +14,17 @@
   import MobilePlayer from './lib/components/MobilePlayer.svelte';
   import AlbumDialog from './lib/components/AlbumDialog.svelte';
   import Toast from './lib/components/Toast.svelte';
+  import Login from './lib/components/Login.svelte';
+  import Signup from './lib/components/Signup.svelte';
+  import InviteAccept from './lib/components/InviteAccept.svelte';
+  import AdminPanel from './lib/components/AdminPanel.svelte';
 
   const s = createStore();
   let audio;
   let playing = $state(true);
   let volume = $state(68);
+  let showSignup = $state(false);
+  let adminOpen = $state(false);
   let tickTimer, resizeHandler;
 
   // Active now-playing slice + derived progress %.
@@ -162,12 +168,24 @@
 
 <div style="position:relative; height:100vh; width:100%; display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box; background:var(--grid-glow), var(--bg-base); font-family:var(--font-sans); color:var(--text-body);">
 
+{#if !s.authChecked}
+  <!-- waiting for /me round-trip — render nothing -->
+{:else if window.location.pathname.startsWith('/invite/')}
+  <InviteAccept onLoggedIn={(u) => { s.setMe(u); window.history.replaceState(null, '', '/'); }} />
+{:else if !s.me && !s.config.guestAccess}
+  {#if showSignup}
+    <Signup onLoggedIn={(u) => s.setMe(u)} onSwitchToLogin={() => (showSignup = false)} />
+  {:else}
+    <Login canSignup={s.config.signupEnabled || s.config.needsBootstrap}
+           onSwitchToSignup={() => (showSignup = true)}
+           onLoggedIn={(u) => s.setMe(u)} />
+  {/if}
+{:else}
   <TopBar isPhone={s.isPhone} query={s.query} onSearch={(v) => (s.query = v)}
     streamChipLabel={chip} onToggleStream={() => s.toggleStream()} scan={s.scan}
     onToast={(tone, title, msg) => s.pushToast(tone, title, msg)}
     onCastActive={(v) => s.setCastActive(v)}
-    isAdmin={s.isAdmin} adminRequired={s.adminRequired}
-    onLogin={(p) => s.adminLogin(p)} onLogout={() => s.adminLogout()} />
+    isAdmin={s.isAdmin} me={s.me} onLogout={() => s.signOut()} onOpenSettings={() => (adminOpen = true)} />
 
   <!-- BODY -->
   <div style="display:flex; flex:1; min-height:0;">
@@ -282,4 +300,9 @@
   </div>
 
   <audio bind:this={audio} style="display:none;"></audio>
+
+  {#if adminOpen}
+    <AdminPanel onClose={() => (adminOpen = false)} />
+  {/if}
+{/if}
 </div>

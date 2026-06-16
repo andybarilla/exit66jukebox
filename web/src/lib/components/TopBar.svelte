@@ -6,28 +6,9 @@
   let {
     isPhone = false, query = '', onSearch, streamChipLabel = '', onToggleStream,
     scan = null, onToast = () => {}, onCastActive = () => {},
-    isAdmin = true, adminRequired = false, onLogin = async () => {}, onLogout = () => {},
+    isAdmin = false, me = null, onLogout = () => {}, onOpenSettings = () => {}, onLogin = () => {},
   } = $props();
   let ind = $derived(scanIndicator(scan));
-
-  // Admin lock control state — only meaningful when a password gate is configured.
-  let lockOpen = $state(false);
-  let password = $state('');
-  let submitting = $state(false);
-  let loginError = $state('');
-
-  async function submitLogin() {
-    if (!password || submitting) return;
-    submitting = true; loginError = '';
-    try {
-      await onLogin(password);
-      password = ''; lockOpen = false;
-    } catch (_) {
-      loginError = 'Incorrect password.';
-    } finally {
-      submitting = false;
-    }
-  }
 </script>
 
 {#snippet scanChip()}
@@ -38,33 +19,26 @@
   {/if}
 {/snippet}
 
-{#snippet adminControl()}
-  {#if adminRequired}
-    <div style="position:relative; flex:none;">
+{#snippet accountControl()}
+  {#if me}
+    <div style="display:inline-flex; align-items:center; gap:8px; flex:none;">
+      <span style="font-family:var(--font-sans); font-size:13px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px;">{me.display_name || me.email}</span>
       {#if isAdmin}
-        <button onclick={onLogout} title="Admin mode active — click to lock"
-          style="display:inline-flex; align-items:center; gap:7px; padding:7px 12px; border:1px solid var(--neon-cyan); border-radius:var(--radius-sm); background:rgba(34,224,238,0.06); font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--neon-cyan); cursor:pointer; white-space:nowrap;">
-          <span aria-hidden="true">🔓</span>Admin
+        <button onclick={onOpenSettings} title="Admin settings"
+          style="display:inline-flex; align-items:center; gap:5px; padding:5px 10px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:transparent; font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-muted); cursor:pointer; white-space:nowrap;">
+          ⚙ Settings
         </button>
-      {:else}
-        <button onclick={() => (lockOpen = !lockOpen)} aria-label="Unlock admin mode" aria-expanded={lockOpen}
-          style="display:inline-flex; align-items:center; gap:7px; padding:7px 12px; border:1px solid var(--border-default); border-radius:var(--radius-sm); background:transparent; font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); cursor:pointer; white-space:nowrap;">
-          <span aria-hidden="true">🔒</span>Admin
-        </button>
-        {#if lockOpen}
-          <div role="button" tabindex="-1" aria-label="Close" onclick={() => (lockOpen = false)} onkeydown={(e) => { if (e.key === 'Escape') lockOpen = false; }} style="position:fixed; inset:0; z-index:80;"></div>
-          <form onsubmit={(e) => { e.preventDefault(); submitLogin(); }} style="position:absolute; right:0; top:calc(100% + 8px); z-index:81; width:248px; max-width:calc(100vw - 28px); background:var(--bg-surface); background-image:var(--scanline); border:1.5px solid var(--neon-cyan); border-radius:var(--radius-md); box-shadow:var(--shadow-lg); padding:14px; box-sizing:border-box; display:flex; flex-direction:column; gap:10px;">
-            <span style="font-family:var(--font-display); font-weight:700; font-size:13px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-strong);">Unlock admin</span>
-            <!-- svelte-ignore a11y_autofocus -->
-            <input bind:value={password} type="password" autocomplete="current-password" autofocus placeholder="Admin password" aria-label="Admin password"
-              style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid var(--border-default); border-radius:var(--radius-sm); background:var(--ink-950); color:var(--text-body); font-family:var(--font-mono); font-size:12px;" />
-            {#if loginError}<span style="font-family:var(--font-mono); font-size:10px; color:var(--neon-magenta-bright);">{loginError}</span>{/if}
-            <button type="submit" disabled={submitting || !password}
-              style="padding:8px 0; border:1px solid var(--neon-cyan); border-radius:var(--radius-sm); background:rgba(34,224,238,0.08); color:var(--neon-cyan); font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer;">{submitting ? 'Unlocking…' : 'Unlock'}</button>
-          </form>
-        {/if}
       {/if}
+      <button onclick={onLogout} title="Log out"
+        style="display:inline-flex; align-items:center; gap:5px; padding:5px 10px; border:1px solid var(--border-default); border-radius:var(--radius-sm); background:transparent; font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-muted); cursor:pointer; white-space:nowrap;">
+        Log out
+      </button>
     </div>
+  {:else}
+    <button onclick={onLogin} title="Log in"
+      style="display:inline-flex; align-items:center; gap:5px; padding:5px 10px; border:1px solid var(--neon-cyan); border-radius:var(--radius-sm); background:rgba(34,224,238,0.06); font-family:var(--font-mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--neon-cyan); cursor:pointer; white-space:nowrap;">
+      Log in
+    </button>
   {/if}
 {/snippet}
 {#if !isPhone}
@@ -78,10 +52,10 @@
     </div>
     <div style="display:flex; align-items:center; gap:14px; flex:none;">
       {@render scanChip()}
-      {@render adminControl()}
+      {@render accountControl()}
       {#if isAdmin}<CastPanel {onToast} {onCastActive} />{/if}
       <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid var(--border-default); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{streamChipLabel} listening</span>
-      <Avatar name="You" ring="cyan" size="sm" />
+      <Avatar name={me?.display_name || 'Guest'} ring="cyan" size="sm" />
     </div>
   </header>
 {:else}
@@ -92,7 +66,7 @@
         <div style="font-family:var(--font-display); font-weight:700; font-size:15px; letter-spacing:0.06em; color:var(--text-strong);">EXIT&nbsp;<span style="color:var(--neon-cyan);">66</span></div>
       </div>
       <div style="display:flex; align-items:center; gap:9px;">
-        {@render adminControl()}
+        {@render accountControl()}
         {#if isAdmin}<CastPanel {onToast} {onCastActive} />{/if}
         <button onclick={onToggleStream} style="display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--bg-surface); font-family:var(--font-mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-body); cursor:pointer; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{streamChipLabel}</button>
       </div>
