@@ -3,9 +3,9 @@ import {
   setShuffle, subscribeEvents, coverURL, albumCoverURL, HOUSE,
   discoverGenres, discoverRediscover, discoverRecent, discoverRecommended,
   getStation, startStation as apiStartStation, stopStation as apiStopStation,
-  scanStatus, getConfig, adminToken, clearAdminToken,
-  adminLogin as apiAdminLogin, adminLogout as apiAdminLogout,
+  scanStatus, getConfig,
 } from './api.js';
+import { fetchMe, logout as apiLogout } from './auth.js';
 import { gradientFor } from './format.js';
 import { createPager } from './pager.js';
 
@@ -38,16 +38,14 @@ export function createStore() {
   // Runtime config + cast state. config loads once on init; muteLocalOnCast
   // defaults true so a cast that starts before config resolves still mutes.
   // castActive is lifted out of CastPanel so App can mute the local <audio>.
-  let config = $state({ muteLocalOnCast: true, fedPeers: [] });
+  let config = $state({ muteLocalOnCast: true, fedPeers: [], guestAccess: false, signupEnabled: false, needsBootstrap: false, authenticated: false });
   let castActive = $state(false);
 
-  // Admin-mode state. The gate is a soft shared-password lock (#85): adminRequired
-  // mirrors the server's "a password is configured"; the token is the bearer held
-  // in localStorage. isAdmin is open until config proves a lock is in force, so the
-  // first paint shows controls rather than flashing them away. A token that the
-  // server rejects (e.g. after a restart) is dropped on the next config load.
-  let adminRequired = $state(false);
-  let adminTokenPresent = $state(!!adminToken());
+  // Auth state. me is the current user ({id,email,display_name,is_admin}) or null.
+  // authChecked is set true after the first /me round-trip so the UI can gate on
+  // "have we checked yet" vs "definitely logged out".
+  let me = $state(null);
+  let authChecked = $state(false);
 
   // per-stream live state
   let nowPlaying = $state({ house: null, me: null });
@@ -65,6 +63,7 @@ export function createStore() {
 
   let _uid = 0;
   let _esHouse = null;
+  let _started = false;
 
   const pagers = {
     albums: createPager((q, off, lim) => listAlbums(q, off, lim), PAGE_SIZE),
@@ -244,16 +243,17 @@ export function createStore() {
     pushToast,
 
     get scan() { return scan; },
+    get config() { return config; },
     get muteLocalOnCast() { return config.muteLocalOnCast; },
     get fedPeers() { return config.fedPeers; },
     get castActive() { return castActive; },
     setCastActive(v) { castActive = v; },
 
-    // adminRequired: a password is configured server-side. isAdmin: this client may
-    // use privileged controls — true when no gate is in force, or a valid token is
-    // held. Controls also stay enabled on the personal "me" stream regardless.
-    get adminRequired() { return adminRequired; },
-    get isAdmin() { return !adminRequired || adminTokenPresent; },
+    get me() { return me; },
+    get authChecked() { return authChecked; },
+    get isAdmin() { return me?.is_admin === true; },
+    setMe(u) { me = u; },
+    async signOut() { await apiLogout(); me = null; },
 
     // Personal is always "just you": the `me` stream has no broadcast hub, so
     // the backend reports 0 listeners for it. Never let that 0 surface here.
@@ -287,20 +287,33 @@ export function createStore() {
     get detailAlbum() { return detailAlbum; },
 
     // ----- actions -----
-    async init() {
-      // Seed scan state before the initial load so a scan that finishes *during*
-      // the first fetch is still seen as a true→false transition by the first
-      // poll, triggering the reload that pulls in the last tracks.
-      getConfig()
+    // bootstrap loads only the lightweight auth/config state needed to decide
+    // whether the user has access. Heavy data loads live in start(), gated on
+    // access being granted, so they never 401 for a logged-out guest.
+    async bootstrap() {
+      await getConfig()
         .then((c) => {
           if (!c) return;
           config = {
             muteLocalOnCast: typeof c.mute_local_on_cast === 'boolean' ? c.mute_local_on_cast : config.muteLocalOnCast,
             fedPeers: Array.isArray(c.fed_peers) ? c.fed_peers : [],
+            guestAccess: !!c.guest_access,
+            signupEnabled: !!c.signup_enabled,
+            needsBootstrap: !!c.needs_bootstrap,
+            authenticated: !!c.authenticated,
           };
-          this.applyAdminConfig(c);
         })
         .catch(() => {});
+      fetchMe().then((u) => { me = u; }).catch(() => {}).finally(() => { authChecked = true; });
+    },
+    // start runs the heavy loads once access is granted. Guarded so calling it
+    // again (e.g. after login) is a no-op.
+    async start() {
+      if (_started) return;
+      _started = true;
+      // Seed scan state before the initial load so a scan that finishes *during*
+      // the first fetch is still seen as a true→false transition by the first
+      // poll, triggering the reload that pulls in the last tracks.
       const s0 = await scanStatus().catch(() => null);
       scan = s0;
       _scanWasRunning = !!(s0 && s0.running);
@@ -317,6 +330,7 @@ export function createStore() {
         }
       });
     },
+    async init() { await this.bootstrap(); await this.start(); },
     teardown() {
       if (_esHouse) { _esHouse(); _esHouse = null; }
       if (_scanTimer) { clearTimeout(_scanTimer); _scanTimer = null; }
@@ -335,30 +349,6 @@ export function createStore() {
     async toggleShuffle(v) {
       shuffle[stream] = typeof v === 'boolean' ? v : !shuffle[stream];
       await setShuffle(stream, shuffle[stream]);
-    },
-
-    // applyAdminConfig reconciles local admin state with /api/config. A token the
-    // server no longer honours (is_admin false while a gate is in force) is stale;
-    // drop it so the UI doesn't claim admin it can't exercise.
-    applyAdminConfig(c) {
-      if (!c) return;
-      adminRequired = !!c.admin_required;
-      if (adminRequired && !c.is_admin && adminTokenPresent) {
-        clearAdminToken(); // stale token the server no longer honours
-        adminTokenPresent = false;
-      } else {
-        adminTokenPresent = !!adminToken();
-      }
-    },
-    async adminLogin(password) {
-      await apiAdminLogin(password);
-      adminTokenPresent = true;
-      pushToast('success', 'Admin mode', 'Privileged controls unlocked.');
-    },
-    async adminLogout() {
-      await apiAdminLogout();
-      adminTokenPresent = false;
-      pushToast('cyan', 'Locked', 'Admin controls hidden.');
     },
 
     refreshQueue(s) { return refreshQueue(s); },

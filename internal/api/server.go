@@ -38,14 +38,13 @@ type Server struct {
 	// local <audio> while a Sonos cast is active. Sourced from config (env for now).
 	muteLocalOnCast bool
 
-	// adminPassword is the shared secret that unlocks admin mode. Empty (the
-	// default) leaves the gate disabled — every action stays open, matching every
-	// existing deploy. adminTokens holds the bearer tokens issued by a successful
-	// login; both guarded by adminMu (mirrors sonosMu / sonosIPs). This is a soft
-	// LAN-party gate, not real auth: no expiry, rotation, or per-user identity.
-	adminMu       sync.Mutex
-	adminPassword string
-	adminTokens   map[string]bool
+	// signingSecret is the HMAC secret used to sign Sonos media URLs; loaded once
+	// at startup from the store (store.MediaSigningSecret).
+	signingSecret []byte
+	// loginAttempts throttles the password form per client IP (soft brute-force
+	// guard); guarded by loginMu.
+	loginMu       sync.Mutex
+	loginAttempts map[string][]int64 // ip -> recent attempt unix-millis
 
 	// sonosIPs is the allowlist of IPs from the most recent discovery; casts are
 	// restricted to it so an arbitrary ip can't be used to make the server POST
@@ -55,6 +54,10 @@ type Server struct {
 	sonosMu     sync.Mutex
 	sonosIPs    map[string]bool
 	sonosManual map[string]string
+
+	// emailInvite, when non-nil (SMTP configured), sends an invite link to an
+	// address. Best-effort: called in a goroutine, errors logged not surfaced.
+	emailInvite func(to, link string)
 
 	// manualVerify confirms a manually-entered IP actually serves a Sonos
 	// descriptor before it's trusted (injectable for tests).
@@ -72,8 +75,8 @@ func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 		hubs:        make(map[string]*broadcast.Hub),
 		buses:       make(map[string]*events.Bus),
 		nowPlaying:  make(map[string]*NowPlaying),
-		adminTokens: make(map[string]bool),
-		sonosIPs:    make(map[string]bool),
+		loginAttempts: make(map[string][]int64),
+		sonosIPs:      make(map[string]bool),
 		sonosManual: make(map[string]string),
 		manualVerify: func(ip string) (string, bool) {
 			return sonos.Verify(sonos.DescriptorURL(ip))
@@ -117,9 +120,12 @@ func (s *Server) SetFedPeers(fn func() []string) { s.fedPeers = fn }
 // casting; exposed via GET /api/config.
 func (s *Server) SetMuteLocalOnCast(v bool) { s.muteLocalOnCast = v }
 
-// SetAdminPassword sets the shared admin secret. Empty leaves the gate disabled
-// (every action open). Sourced from config (env/flag) and threaded in by main.
-func (s *Server) SetAdminPassword(p string) { s.adminPassword = p }
+// SetInviteEmailer attaches the optional SMTP invite sender.
+func (s *Server) SetInviteEmailer(fn func(to, link string)) { s.emailInvite = fn }
+
+// SetSigningSecret records the HMAC secret used to sign Sonos media URLs.
+// Loaded once at startup from the store (store.MediaSigningSecret).
+func (s *Server) SetSigningSecret(secret []byte) { s.signingSecret = secret }
 
 // RegisterStream attaches a broadcast hub, event bus, and now-playing tracker
 // for a shared stream id. np may be nil for streams that don't track current
@@ -160,7 +166,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tracks/{id}/cover", s.trackCover)
 	mux.HandleFunc("GET /api/albums/{id}/cover", s.albumCover)
 	mux.HandleFunc("GET /api/albums/{id}/tracks", s.albumTracks)
-	mux.HandleFunc("GET /stream/", s.streamAudio)
+	mux.HandleFunc("GET /stream/", s.streamAudioGuarded)
 	mux.HandleFunc("GET /api/streams/{id}/events", s.streamEvents)
 	mux.HandleFunc("GET /api/sonos/devices", s.sonosDevices)
 	// Casting drives the shared house stream onto the room speakers, so cast/stop
@@ -171,19 +177,29 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sonos/volume", s.sonosGetVolume)
 	mux.HandleFunc("POST /api/sonos/volume", s.requireAdmin(s.sonosSetVolume))
 	mux.HandleFunc("POST /api/sonos/manual", s.sonosManualAdd)
-	mux.HandleFunc("POST /api/admin/login", s.adminLogin)
-	mux.HandleFunc("POST /api/admin/logout", s.adminLogout)
+	mux.HandleFunc("POST /api/auth/signup", s.signup)
+	mux.HandleFunc("POST /api/auth/login", s.login)
+	mux.HandleFunc("POST /api/auth/logout", s.logout)
+	mux.HandleFunc("GET /api/auth/me", s.me)
+	mux.HandleFunc("POST /api/auth/invite/accept", s.inviteAccept)
 	mux.HandleFunc("GET /api/discover/rediscover", s.discoverRediscover)
 	mux.HandleFunc("GET /api/discover/recent", s.discoverRecent)
 	mux.HandleFunc("GET /api/discover/genres", s.discoverGenres)
 	mux.HandleFunc("GET /api/discover/recommended", s.discoverRecommended)
-	mux.HandleFunc("POST /api/enrich", s.enrichStart)
+	mux.HandleFunc("POST /api/enrich", s.requireAdmin(s.enrichStart))
 	mux.HandleFunc("GET /api/enrich", s.enrichStatus)
 	mux.HandleFunc("GET /api/scan", s.scanStatus)
 	mux.HandleFunc("GET /api/config", s.getConfig)
 	mux.HandleFunc("GET /api/streams/{id}/station", s.getStationHandler)
-	mux.HandleFunc("POST /api/streams/{id}/station", s.startStationHandler)
-	mux.HandleFunc("DELETE /api/streams/{id}/station", s.stopStationHandler)
+	mux.HandleFunc("POST /api/streams/{id}/station", s.requireAdminShared(s.startStationHandler))
+	mux.HandleFunc("DELETE /api/streams/{id}/station", s.requireAdminShared(s.stopStationHandler))
+	mux.HandleFunc("GET /api/admin/settings", s.requireAdmin(s.getAdminSettings))
+	mux.HandleFunc("POST /api/admin/settings", s.requireAdmin(s.setAdminSettings))
+	mux.HandleFunc("POST /api/admin/invites", s.requireAdmin(s.createInvite))
+	mux.HandleFunc("GET /api/admin/invites", s.requireAdmin(s.listInvites))
+	mux.HandleFunc("DELETE /api/admin/invites/{id}", s.requireAdmin(s.deleteInvite))
+	mux.HandleFunc("GET /api/admin/users", s.requireAdmin(s.listUsers))
+	mux.HandleFunc("DELETE /api/admin/users/{id}", s.requireAdmin(s.deleteUser))
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}

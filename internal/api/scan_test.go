@@ -10,7 +10,7 @@ import (
 )
 
 func TestScanEndpoint503WithoutProgress(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/scan", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -20,7 +20,7 @@ func TestScanEndpoint503WithoutProgress(t *testing.T) {
 }
 
 func TestScanEndpointReportsSnapshot(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	var p scan.Progress
 	p.SetRunning(true)
 	srv.SetScanProgress(&p)

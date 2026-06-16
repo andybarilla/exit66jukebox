@@ -42,7 +42,7 @@ func (noCover) FetchFrontCover(context.Context, string) ([]byte, string, bool, e
 // returns, exactly as net/http does in production (httptest.NewRecorder does
 // not, which is why the original endpoint test missed this).
 func TestEnrichPassOutlivesRequest(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Song"}, "Artist", "", "Album")
 
 	called := make(chan struct{}, 1)
@@ -55,7 +55,10 @@ func TestEnrichPassOutlivesRequest(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	resp, err := http.Post(ts.URL+"/api/enrich", "", nil)
+	// POST /api/enrich is admin-gated; authenticate as an admin.
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/enrich", nil)
+	req.AddCookie(adminSession(t, srv.db))
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}

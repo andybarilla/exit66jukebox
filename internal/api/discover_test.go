@@ -13,7 +13,7 @@ import (
 )
 
 func TestDiscoverRediscoverEndpoint(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "A", Genre: "Rock"}, "B", "", "X")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/discover/rediscover?genre=Rock", nil)
@@ -32,7 +32,7 @@ func TestDiscoverRediscoverEndpoint(t *testing.T) {
 }
 
 func TestDiscoverGenresEndpoint(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "A", Genre: "Rock"}, "B", "", "X")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/discover/genres", nil)
@@ -44,7 +44,7 @@ func TestDiscoverGenresEndpoint(t *testing.T) {
 }
 
 func TestStationStartGetStopEndpoints(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	for _, p := range []string{"/m/1.mp3", "/m/2.mp3", "/m/3.mp3"} {
 		store.UpsertTrack(srv.db, model.Track{Path: p, Title: p, Genre: "Rock"}, "B", "", "X")
 	}
@@ -86,7 +86,7 @@ func TestStationStartGetStopEndpoints(t *testing.T) {
 }
 
 func TestDiscoverRecommendedNoRunnerReturnsEmptyArray(t *testing.T) {
-	srv := newTestServer(t) // no recommend runner wired
+	srv, _ := newTestServer(t) // no recommend runner wired
 	req := httptest.NewRequest(http.MethodGet, "/api/discover/recommended", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -99,7 +99,7 @@ func TestDiscoverRecommendedNoRunnerReturnsEmptyArray(t *testing.T) {
 }
 
 func TestDiscoverRecommendedServesRunnerCache(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	// A runner with no configured sources serves an empty (non-null) array.
 	srv.SetRecommendRunner(recommend.NewRunner(srv.db, nil, nil))
 	req := httptest.NewRequest(http.MethodGet, "/api/discover/recommended", nil)

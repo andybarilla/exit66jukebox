@@ -49,6 +49,19 @@ func (s *Server) streamAudio(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// streamAudioGuarded authorizes a /stream/ request by EITHER a session/guest
+// (mediaAllowed) OR a valid path-scoped signed token (the Sonos cast, which
+// fetches with no cookie), then serves the stream. The /stream/ route is not
+// under /api/, so the top-level auth middleware doesn't cover it — this is its
+// gate.
+func (s *Server) streamAudioGuarded(w http.ResponseWriter, r *http.Request) {
+	if s.mediaAllowed(r) || s.signedOK(r) {
+		s.streamAudio(w, r)
+		return
+	}
+	writeErr(w, http.StatusUnauthorized, "login required")
+}
+
 // streamEvents is an SSE endpoint pushing now-playing/queue-changed events.
 func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	bus, ok := s.buses[r.PathValue("id")]

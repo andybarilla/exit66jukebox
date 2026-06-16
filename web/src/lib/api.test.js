@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import {
   listTracks, listAlbums, listArtists, discoverRecommended,
   getSonosVolume, setSonosVolume, addManualSonos, nextHouse, getConfig,
-  adminLogin, adminLogout, removeRequest, setShuffle, castSonos,
+  removeRequest, setShuffle, castSonos,
 } from './api.js';
 
 function mockFetch(items, totalHeader) {
@@ -103,62 +103,3 @@ describe('getConfig', () => {
   });
 });
 
-describe('admin auth', () => {
-  let stored;
-  beforeEach(() => {
-    stored = {};
-    vi.stubGlobal('localStorage', {
-      getItem: (k) => (k in stored ? stored[k] : null),
-      setItem: (k, v) => { stored[k] = String(v); },
-      removeItem: (k) => { delete stored[k]; },
-    });
-  });
-
-  it('adminLogin posts the password and stores the issued token', async () => {
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ token: 'tok-abc' }) }));
-    const ok = await adminLogin('hunter2');
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe('/api/admin/login');
-    expect(opts.method).toBe('POST');
-    expect(JSON.parse(opts.body)).toEqual({ password: 'hunter2' });
-    expect(ok).toBe(true);
-    expect(stored['e66.admin']).toBe('tok-abc');
-  });
-
-  it('adminLogin throws and stores nothing on a bad password', async () => {
-    global.fetch = vi.fn(async () => ({ ok: false, json: async () => ({ error: 'incorrect password' }) }));
-    await expect(adminLogin('nope')).rejects.toThrow();
-    expect(stored['e66.admin']).toBeUndefined();
-  });
-
-  it('adminLogout posts with the bearer token then clears it', async () => {
-    stored['e66.admin'] = 'tok-abc';
-    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }));
-    await adminLogout();
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe('/api/admin/logout');
-    expect(opts.method).toBe('POST');
-    expect(opts.headers.Authorization).toBe('Bearer tok-abc');
-    expect(stored['e66.admin']).toBeUndefined();
-  });
-
-  it('attaches the bearer token to privileged calls when present', async () => {
-    stored['e66.admin'] = 'tok-abc';
-    global.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
-    await nextHouse();
-    await setShuffle('house', true);
-    await removeRequest('house', 7);
-    await castSonos('192.168.1.5');
-    await getConfig();
-    for (const [, opts] of global.fetch.mock.calls) {
-      expect(opts?.headers?.Authorization).toBe('Bearer tok-abc');
-    }
-  });
-
-  it('omits the Authorization header when no token is stored', async () => {
-    global.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
-    await nextHouse();
-    const opts = global.fetch.mock.calls[0][1] || {};
-    expect(opts.headers?.Authorization).toBeUndefined();
-  });
-});
