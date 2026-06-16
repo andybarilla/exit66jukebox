@@ -65,28 +65,42 @@ func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// isHTTPS reports whether the original request was HTTPS, honoring a reverse
-// proxy's X-Forwarded-Proto.
-func isHTTPS(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-}
-
-// clientIP extracts a throttle key from the request. X-Forwarded-For is honored
-// only when the immediate peer is loopback/private (a real reverse proxy);
-// otherwise it is attacker-controlled, so a public client can't rotate the
-// header to mint a fresh throttle key each request and escape the limit.
-func clientIP(r *http.Request) string {
+// fromTrustedProxy reports whether the immediate TCP peer is a loopback/private
+// address — plausibly our own reverse proxy, whose forwarded headers
+// (X-Forwarded-For / -Proto) we may trust. A public peer's headers are
+// attacker-controlled and must be ignored.
+func fromTrustedProxy(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	if peer := net.ParseIP(host); peer != nil && (peer.IsLoopback() || peer.IsPrivate()) {
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
+}
+
+// isHTTPS reports whether the original request was HTTPS. A proxy's
+// X-Forwarded-Proto is honored only from a trusted peer, so a direct public
+// client can't force Secure cookies (which would break a plain-HTTP LAN deploy).
+func isHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return fromTrustedProxy(r) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+// clientIP extracts a throttle key from the request. X-Forwarded-For is honored
+// only from a trusted (loopback/private) peer; otherwise it is attacker-
+// controlled, so a public client can't rotate the header to mint a fresh
+// throttle key each request and escape the limit.
+func clientIP(r *http.Request) string {
+	if fromTrustedProxy(r) {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			return strings.TrimSpace(strings.Split(xff, ",")[0])
 		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
 	}
 	return host
 }
@@ -315,6 +329,15 @@ func (s *Server) allowAttempt(key string) bool {
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	cutoff := now - window
+	// Opportunistic sweep so rotating ips/emails can't grow the map without bound
+	// (a key's last entry is its most recent attempt; all-stale keys are dropped).
+	if len(s.loginAttempts) > 4096 {
+		for k, ts := range s.loginAttempts {
+			if len(ts) == 0 || ts[len(ts)-1] <= cutoff {
+				delete(s.loginAttempts, k)
+			}
+		}
+	}
 	kept := s.loginAttempts[key][:0]
 	for _, t := range s.loginAttempts[key] {
 		if t > cutoff {
