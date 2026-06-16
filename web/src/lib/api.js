@@ -1,50 +1,5 @@
 const SESSION = 'me'; // single private stream id for v1; replaced by real session later
 
-const ADMIN_TOKEN_KEY = 'e66.admin';
-
-// adminToken returns the stored admin bearer token, or '' when not logged in (or
-// when there's no localStorage, e.g. a non-browser import).
-export function adminToken() {
-  if (typeof localStorage === 'undefined') return '';
-  return localStorage.getItem(ADMIN_TOKEN_KEY) || '';
-}
-
-// authHeaders returns the Authorization header for privileged calls, or {} when
-// no token is stored (so the server's default-open gate still serves guests).
-function authHeaders() {
-  const t = adminToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
-}
-
-// clearAdminToken forgets the stored token synchronously.
-export function clearAdminToken() {
-  if (typeof localStorage !== 'undefined') localStorage.removeItem(ADMIN_TOKEN_KEY);
-}
-
-// adminLogin exchanges the shared password for a bearer token, persisting it on
-// success. Resolves true, or throws when the server rejects the password.
-export async function adminLogin(password) {
-  const r = await fetch('/api/admin/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
-  });
-  if (!r.ok) throw new Error('login failed');
-  const body = await r.json();
-  if (!body.token) throw new Error('login failed');
-  localStorage.setItem(ADMIN_TOKEN_KEY, body.token);
-  return true;
-}
-
-// adminLogout revokes the token server-side and clears it locally.
-export async function adminLogout() {
-  try {
-    await fetch('/api/admin/logout', { method: 'POST', headers: authHeaders() });
-  } finally {
-    clearAdminToken();
-  }
-}
-
 // listPage fetches one page of a browse list, returning the rows plus the
 // unpaged total from X-Total-Count (falling back to the page length when the
 // header is absent so the caller's paging still terminates).
@@ -112,11 +67,11 @@ export async function listSonos() {
   return r.json(); // [{name, ip}]
 }
 export async function castSonos(ip) {
-  const r = await fetch('/api/sonos/cast', { method: 'POST', headers: authHeaders(), body: new URLSearchParams({ ip }) });
+  const r = await fetch('/api/sonos/cast', { method: 'POST', body: new URLSearchParams({ ip }) });
   return r.json();
 }
 export async function stopSonos(ip) {
-  const r = await fetch('/api/sonos/stop', { method: 'POST', headers: authHeaders(), body: new URLSearchParams({ ip }) });
+  const r = await fetch('/api/sonos/stop', { method: 'POST', body: new URLSearchParams({ ip }) });
   return r.json();
 }
 export async function getSonosVolume(ip) {
@@ -125,7 +80,7 @@ export async function getSonosVolume(ip) {
 }
 export async function setSonosVolume(ip, volume) {
   const body = new URLSearchParams({ ip, volume: String(volume) });
-  const r = await fetch('/api/sonos/volume', { method: 'POST', headers: authHeaders(), body });
+  const r = await fetch('/api/sonos/volume', { method: 'POST', body });
   return r.json();
 }
 // addManualSonos registers a hand-entered Sonos IP for networks where SSDP
@@ -136,9 +91,8 @@ export async function addManualSonos(ip) {
   return r.json(); // { name, ip }
 }
 // nextHouse advances the shared house queue (the Sonos cast surface's Next).
-// Admin-gated server-side, so it carries the bearer token.
 export async function nextHouse() {
-  const r = await fetch(`/api/streams/${HOUSE}/next`, { headers: authHeaders() });
+  const r = await fetch(`/api/streams/${HOUSE}/next`);
   return r.json();
 }
 
@@ -199,18 +153,18 @@ export async function requestTo(streamId, id, { kind = 'track', by = 'You' } = {
 // open on a guest's "me" stream; the token rides along and is ignored server-side
 // for non-shared streams.
 export async function removeRequest(streamId, trackId) {
-  const r = await fetch(`/api/streams/${streamId}/requests/${trackId}`, { method: 'DELETE', headers: authHeaders() });
+  const r = await fetch(`/api/streams/${streamId}/requests/${trackId}`, { method: 'DELETE' });
   return r.json();
 }
 
 export async function clearQueue(streamId) {
-  const r = await fetch(`/api/streams/${streamId}/requests`, { method: 'DELETE', headers: authHeaders() });
+  const r = await fetch(`/api/streams/${streamId}/requests`, { method: 'DELETE' });
   return r.json();
 }
 
 export async function setShuffle(streamId, on) {
   const body = new URLSearchParams({ value: on ? 'true' : 'false' });
-  const r = await fetch(`/api/streams/${streamId}/shuffle`, { method: 'POST', headers: authHeaders(), body });
+  const r = await fetch(`/api/streams/${streamId}/shuffle`, { method: 'POST', body });
   return r.json();
 }
 
@@ -219,6 +173,6 @@ export function albumCoverURL(albumId) { return `/api/albums/${albumId}/cover`; 
 // getConfig returns runtime settings (e.g. mute_local_on_cast). This is the seam
 // a future settings UI will read/write; today it's sourced from server env.
 export async function getConfig() {
-  const r = await fetch('/api/config', { headers: authHeaders() });
+  const r = await fetch('/api/config');
   return r.json(); // { mute_local_on_cast, admin_required, is_admin }
 }
