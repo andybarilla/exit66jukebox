@@ -1,6 +1,7 @@
 package email
 
 import (
+	"net/smtp"
 	"strings"
 	"testing"
 )
@@ -30,5 +31,20 @@ func TestSendInviteDisabledIsNoop(t *testing.T) {
 	s := New(Config{}) // disabled
 	if err := s.SendInvite("x@y.com", "link"); err != nil {
 		t.Fatalf("disabled SendInvite should be a no-op nil, got %v", err)
+	}
+}
+
+func TestSendInviteRejectsHeaderInjection(t *testing.T) {
+	s := New(Config{Host: "smtp.example.com", Port: "587", From: "jukebox@host"})
+	called := false
+	s.send = func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+		called = true
+		return nil
+	}
+	if err := s.SendInvite("victim@host\r\nBcc: evil@host", "https://hub/invite/abc"); err == nil {
+		t.Fatal("CRLF in recipient accepted")
+	}
+	if called {
+		t.Fatal("send invoked despite invalid recipient")
 	}
 }

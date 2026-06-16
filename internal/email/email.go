@@ -5,7 +5,9 @@ package email
 
 import (
 	"fmt"
+	"net/mail"
 	"net/smtp"
+	"strings"
 )
 
 // Config holds SMTP settings, read from the environment by main.
@@ -35,6 +37,15 @@ func (s *Sender) Enabled() bool { return s.cfg.Host != "" }
 func (s *Sender) SendInvite(to, link string) error {
 	if !s.Enabled() {
 		return nil
+	}
+	// Guard against header injection: a recipient, link, or From containing CR/LF
+	// could inject extra SMTP headers (e.g. a hidden Bcc). Validate the address
+	// and reject control characters before building the message.
+	if _, err := mail.ParseAddress(to); err != nil {
+		return fmt.Errorf("invalid recipient address: %w", err)
+	}
+	if strings.ContainsAny(to, "\r\n") || strings.ContainsAny(link, "\r\n") || strings.ContainsAny(s.cfg.From, "\r\n") {
+		return fmt.Errorf("invalid header value")
 	}
 	var auth smtp.Auth
 	if s.cfg.User != "" {
