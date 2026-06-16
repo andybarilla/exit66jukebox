@@ -12,6 +12,21 @@
 
 ---
 
+## Amendment (2026-06-16): media-auth design correction
+
+During implementation, reading the actual cast/stream code corrected three assumptions in Tasks 12, 13, and 16. The implemented design is:
+
+- **The Sonos cast streams `/stream/house.mp3`, not per-track audio.** `sonosCast` → `houseStreamURL` → `streamURL` casts the continuous house MP3 feed. So the signed-URL carve-out lives on the `/stream/` endpoint, not `/api/tracks/{id}/audio`.
+- **The signed media token is path-scoped, not track-scoped.** `internal/auth` exposes `SignPath(secret, urlPath, exp)` / `VerifyPath(secret, token, urlPath, now)` (replaced the track-scoped `SignMedia`/`VerifyMedia`). The Sonos cast URL gets `?sig=SignPath(secret, "/stream/house.mp3", exp)`; `streamAudioGuarded` validates it against the request path.
+- **The ffmpeg house source fetches `/api/tracks/{id}/audio` over loopback** (`127.0.0.1`, no cookie). So per-track audio and covers need no signed URL — they are authorized by a session **or** the guest toggle **or** a loopback peer. Sonos does not fetch cover art, so covers need no carve-out at all.
+- **Implications for Task 16's middleware:** the top-level `/api/*` gate must allow a loopback peer through (for the ffmpeg source). It must **not** use a generic `?sig=` passthrough (that would let any route be reached with a bogus token); signed-URL validation belongs only to the `/stream/` route's own guard. Helpers `mediaAllowed(r)` (session/guest/loopback) and `isLoopback(r)` live in `internal/api/auth.go` and are reused by the middleware. `/stream/` is not under `/api/`, so it carries its own `streamAudioGuarded`.
+
+Tasks 1–3, 12, 13 below describe the original track-scoped approach; the committed code follows this amendment. Tasks 12/13 landed as: amend `internal/auth/sign.go` to path-scoped; guard `/stream/` (session/guest/loopback/signed); sign the cast URL in `houseStreamURL`. No guards were added to `audio.go`/`cover.go` (the Task 16 middleware covers them).
+
+A follow-up security hardening also landed: the login throttle keys on both client IP and target email, and `X-Forwarded-For` is honored only from a loopback/private immediate peer (so it can't be spoofed to bypass the limit).
+
+---
+
 ## File Structure
 
 **New files:**
