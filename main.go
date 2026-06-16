@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/api"
+	"github.com/andybarilla/exit66jukebox/internal/auth"
 	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/config"
 	"github.com/andybarilla/exit66jukebox/internal/email"
@@ -201,7 +202,13 @@ func main() {
 		// The pop removed this track from the queue; tell listeners so their
 		// "up next" view doesn't keep showing the now-playing track.
 		houseBus.Publish(events.Event{Type: "queue-changed", Data: houseID})
-		return broadcast.SourceInput(selfBaseURL, tr.ID), true
+		// The ffmpeg house source fetches this URL with no session cookie. Auth no
+		// longer trusts loopback (a same-host reverse proxy would make every request
+		// look local), so the URL carries a path-scoped signed token instead.
+		src := broadcast.SourceInput(selfBaseURL, tr.ID)
+		sig := auth.SignPath(signingSecret, fmt.Sprintf("/api/tracks/%d/audio", tr.ID),
+			time.Now().Add(2*time.Hour).Unix())
+		return src + "?sig=" + sig, true
 	}
 
 	// Single background drainer delivers queued scrobbles. ctx-aware so #23's

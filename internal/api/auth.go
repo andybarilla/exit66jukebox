@@ -257,38 +257,35 @@ func (s *Server) inviteAccept(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"id": uid, "email": inv.Email, "is_admin": inv.IsAdmin})
 }
 
-// mediaAllowed reports whether a media request is authorized by a session, the
-// guest toggle, or a loopback origin (the server's own ffmpeg house source, which
-// fetches /api/tracks/{id}/audio over 127.0.0.1 with no cookie).
+// mediaAllowed reports whether the request carries a valid session or guest
+// access is enabled. It deliberately does NOT trust the peer address: behind a
+// same-host reverse proxy every request arrives from 127.0.0.1, so a loopback
+// bypass would open the whole API to the internet. Cookie-less internal callers
+// (the ffmpeg house source) and Sonos use signed URLs instead — see signedOK.
 func (s *Server) mediaAllowed(r *http.Request) bool {
 	if _, ok := s.currentUser(r); ok {
 		return true
 	}
-	if store.GuestAccessEnabled(s.db) {
-		return true
-	}
-	return isLoopback(r)
+	return store.GuestAccessEnabled(s.db)
 }
 
-// isLoopback reports whether the request's TCP peer is a loopback address.
-func isLoopback(r *http.Request) bool {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+// signedOK reports whether the request carries a path-scoped signed token valid
+// for its own URL path (the Sonos cast and the ffmpeg house source both fetch
+// with no cookie). A forged or wrong-path token fails VerifyPath.
+func (s *Server) signedOK(r *http.Request) bool {
+	sig := r.URL.Query().Get("sig")
+	return sig != "" && auth.VerifyPath(s.signingSecret, sig, r.URL.Path, time.Now().Unix())
 }
 
 // RequireAuthMiddleware gates the public listener's API routes. Anything not
 // under /api/ (the static SPA shell, and /stream/ which self-guards) passes
-// through; open auth/config endpoints pass; otherwise a request must satisfy
-// mediaAllowed (valid session, guest access on, or loopback origin). This is the
-// production gate; it wraps ONLY the public http.Server, never the federation
-// MemberHandler.
+// through; open auth/config endpoints pass; otherwise the request needs a valid
+// session, the guest toggle, or a valid signed token for its path (the ffmpeg
+// house source fetches /api/tracks/{id}/audio this way). This is the production
+// gate; it wraps ONLY the public http.Server, never the federation MemberHandler.
 func (s *Server) RequireAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") || isOpenPath(r.URL.Path) || s.mediaAllowed(r) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || isOpenPath(r.URL.Path) || s.mediaAllowed(r) || s.signedOK(r) {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
-
-	"github.com/andybarilla/exit66jukebox/internal/auth"
 )
 
 // streamAudio fans the shared stream's continuous MP3 feed to this listener.
@@ -52,18 +49,13 @@ func (s *Server) streamAudio(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// streamAudioGuarded authorizes a /stream/ request by EITHER a session/guest/
-// loopback (mediaAllowed) OR a valid path-scoped signed token (the Sonos cast,
-// which fetches with no cookie), then serves the stream. The /stream/ route is
-// not under /api/, so the top-level auth middleware doesn't cover it — this is
-// its gate.
+// streamAudioGuarded authorizes a /stream/ request by EITHER a session/guest
+// (mediaAllowed) OR a valid path-scoped signed token (the Sonos cast, which
+// fetches with no cookie), then serves the stream. The /stream/ route is not
+// under /api/, so the top-level auth middleware doesn't cover it — this is its
+// gate.
 func (s *Server) streamAudioGuarded(w http.ResponseWriter, r *http.Request) {
-	if s.mediaAllowed(r) {
-		s.streamAudio(w, r)
-		return
-	}
-	if sig := r.URL.Query().Get("sig"); sig != "" &&
-		auth.VerifyPath(s.signingSecret, sig, r.URL.Path, time.Now().Unix()) {
+	if s.mediaAllowed(r) || s.signedOK(r) {
 		s.streamAudio(w, r)
 		return
 	}

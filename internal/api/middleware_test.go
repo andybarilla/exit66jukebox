@@ -53,7 +53,7 @@ func TestMiddlewareAllowsStaticAndStream(t *testing.T) {
 	}
 }
 
-func TestMiddlewareAllowsSessionAndLoopback(t *testing.T) {
+func TestMiddlewareAllowsSessionAndSignedURL(t *testing.T) {
 	s, db := newTestServer(t)
 	uid, _ := store.CreateUser(db, "a@b.com", "A", "h", false)
 	raw, _ := auth.GenerateToken()
@@ -70,12 +70,28 @@ func TestMiddlewareAllowsSessionAndLoopback(t *testing.T) {
 		t.Fatalf("session: want 200, got %d", rec.Code)
 	}
 
-	// loopback (ffmpeg house source), no cookie
+	// signed URL (ffmpeg house source), no cookie, valid for this exact path
+	tok := auth.SignPath([]byte("test-secret"), "/api/tracks/5/audio", 4_000_000_000)
 	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest("GET", "/api/tracks/5/audio", nil)
-	req2.RemoteAddr = "127.0.0.1:5555"
+	req2 := httptest.NewRequest("GET", "/api/tracks/5/audio?sig="+tok, nil)
+	req2.RemoteAddr = "203.0.113.9:1"
 	h.ServeHTTP(rec2, req2)
 	if rec2.Code != 200 {
-		t.Fatalf("loopback: want 200, got %d", rec2.Code)
+		t.Fatalf("signed url: want 200, got %d", rec2.Code)
+	}
+}
+
+// TestMiddlewareLoopbackNotTrusted locks in the fix: a loopback peer with no
+// cookie/guest/signed-token is NOT trusted, so a same-host reverse proxy can't
+// be used to bypass auth.
+func TestMiddlewareLoopbackNotTrusted(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.RequireAuthMiddleware(okHandler())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/tracks", nil)
+	req.RemoteAddr = "127.0.0.1:5555"
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("loopback without auth: want 401, got %d", rec.Code)
 	}
 }

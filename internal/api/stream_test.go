@@ -6,12 +6,15 @@ import (
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/auth"
+	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
 func TestStreamAudioUnknownStreamIs404(t *testing.T) {
 	srv, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodGet, "/stream/nope.mp3", nil)
-	req.RemoteAddr = "127.0.0.1:1234" // loopback passes auth guard
+	// A valid signed token passes the auth guard so we reach the unknown-stream
+	// 404 rather than the 401 gate.
+	tok := auth.SignPath([]byte("test-secret"), "/stream/nope.mp3", 4_000_000_000)
+	req := httptest.NewRequest(http.MethodGet, "/stream/nope.mp3?sig="+tok, nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -52,13 +55,17 @@ func TestStreamAllowsSignedURL(t *testing.T) {
 	}
 }
 
-func TestStreamAllowsLoopback(t *testing.T) {
-	s, _ := newTestServer(t)
+func TestStreamAllowsSession(t *testing.T) {
+	s, db := newTestServer(t)
+	uid, _ := store.CreateUser(db, "a@b.com", "A", "h", false)
+	raw, _ := auth.GenerateToken()
+	store.CreateSession(db, auth.HashToken(raw), uid, 4_000_000_000)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/stream/house.mp3", nil)
-	req.RemoteAddr = "127.0.0.1:5555"
+	req.RemoteAddr = "203.0.113.5:1234" // not loopback — only the cookie authorizes
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: raw})
 	s.streamAudioGuarded(rec, req)
 	if rec.Code == http.StatusUnauthorized {
-		t.Fatalf("loopback: should pass auth, got 401")
+		t.Fatalf("session: should pass auth, got 401")
 	}
 }
