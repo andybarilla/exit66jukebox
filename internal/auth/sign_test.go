@@ -2,29 +2,32 @@ package auth
 
 import "testing"
 
-func TestSignVerifyMedia(t *testing.T) {
+func TestSignVerifyPath(t *testing.T) {
 	secret := []byte("server-secret")
-	tok := SignMedia(secret, 42, 1_000_000)
-	if id, ok := VerifyMedia(secret, tok, 999_000); !ok || id != 42 {
-		t.Fatalf("valid token rejected: id=%d ok=%v", id, ok)
+	tok := SignPath(secret, "/stream/house.mp3", 1_000_000)
+	if !VerifyPath(secret, tok, "/stream/house.mp3", 999_000) {
+		t.Fatal("valid token rejected")
 	}
 }
 
-func TestVerifyMediaExpired(t *testing.T) {
+func TestVerifyPathExpired(t *testing.T) {
 	secret := []byte("s")
-	tok := SignMedia(secret, 1, 100)
-	if _, ok := VerifyMedia(secret, tok, 101); ok {
+	tok := SignPath(secret, "/stream/house.mp3", 100)
+	if VerifyPath(secret, tok, "/stream/house.mp3", 101) {
 		t.Fatal("expired token accepted")
 	}
 }
 
-func TestVerifyMediaTampered(t *testing.T) {
+func TestVerifyPathTampered(t *testing.T) {
 	secret := []byte("s")
-	tok := SignMedia(secret, 1, 1_000_000)
-	if _, ok := VerifyMedia([]byte("other"), tok, 1); ok {
+	tok := SignPath(secret, "/stream/house.mp3", 1_000_000)
+	if VerifyPath([]byte("other"), tok, "/stream/house.mp3", 1) {
 		t.Fatal("forged token accepted under wrong secret")
 	}
-	if _, ok := VerifyMedia(secret, tok+"x", 1); ok {
+	if VerifyPath(secret, tok, "/stream/evil.mp3", 1) {
+		t.Fatal("token valid for a different path")
+	}
+	if VerifyPath(secret, tok+"x", "/stream/house.mp3", 1) {
 		t.Fatal("mutated token accepted")
 	}
 }

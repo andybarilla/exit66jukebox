@@ -8,42 +8,35 @@ import (
 	"strings"
 )
 
-// SignMedia returns a token authorizing access to trackID until expUnix (unix
-// seconds). Format: "<trackID>.<exp>.<sig-b64>", where sig = HMAC(secret,
-// "<trackID>.<exp>"). Used for Sonos casts, which fetch audio with no cookie.
-func SignMedia(secret []byte, trackID, expUnix int64) string {
-	msg := strconv.FormatInt(trackID, 10) + "." + strconv.FormatInt(expUnix, 10)
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(msg))
-	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	return msg + "." + sig
+// SignPath returns a token authorizing GET access to urlPath until expUnix (unix
+// seconds). Format: "<exp>.<sig>", sig = HMAC(secret, urlPath + "." + exp). Used
+// for Sonos casts, which fetch the house stream URL with no cookie.
+func SignPath(secret []byte, urlPath string, expUnix int64) string {
+	exp := strconv.FormatInt(expUnix, 10)
+	sig := base64.RawURLEncoding.EncodeToString(mac(secret, urlPath+"."+exp))
+	return exp + "." + sig
 }
 
-// VerifyMedia checks a token against secret and the current time nowUnix,
-// returning the authorized trackID. ok is false for malformed, forged, or
-// expired tokens.
-func VerifyMedia(secret []byte, token string, nowUnix int64) (trackID int64, ok bool) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return 0, false
+// VerifyPath reports whether token authorizes urlPath at nowUnix. False for
+// malformed, forged, expired, or wrong-path tokens.
+func VerifyPath(secret []byte, token, urlPath string, nowUnix int64) bool {
+	parts := strings.SplitN(token, ".", 2)
+	if len(parts) != 2 {
+		return false
 	}
-	id, err := strconv.ParseInt(parts[0], 10, 64)
+	exp, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return 0, false
+		return false
 	}
-	exp, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return 0, false
+	want := base64.RawURLEncoding.EncodeToString(mac(secret, urlPath+"."+parts[0]))
+	if !hmac.Equal([]byte(want), []byte(parts[1])) {
+		return false
 	}
-	msg := parts[0] + "." + parts[1]
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(msg))
-	want := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(want), []byte(parts[2])) {
-		return 0, false
-	}
-	if nowUnix >= exp {
-		return 0, false
-	}
-	return id, true
+	return nowUnix < exp
+}
+
+func mac(secret []byte, msg string) []byte {
+	m := hmac.New(sha256.New, secret)
+	m.Write([]byte(msg))
+	return m.Sum(nil)
 }
