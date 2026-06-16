@@ -55,6 +55,10 @@ type Server struct {
 	sonosIPs    map[string]bool
 	sonosManual map[string]string
 
+	// emailInvite, when non-nil (SMTP configured), sends an invite link to an
+	// address. Best-effort: called in a goroutine, errors logged not surfaced.
+	emailInvite func(to, link string)
+
 	// manualVerify confirms a manually-entered IP actually serves a Sonos
 	// descriptor before it's trusted (injectable for tests).
 	manualVerify func(ip string) (name string, ok bool)
@@ -115,6 +119,9 @@ func (s *Server) SetFedPeers(fn func() []string) { s.fedPeers = fn }
 // SetMuteLocalOnCast records whether the frontend should mute local audio while
 // casting; exposed via GET /api/config.
 func (s *Server) SetMuteLocalOnCast(v bool) { s.muteLocalOnCast = v }
+
+// SetInviteEmailer attaches the optional SMTP invite sender.
+func (s *Server) SetInviteEmailer(fn func(to, link string)) { s.emailInvite = fn }
 
 // SetSigningSecret records the HMAC secret used to sign Sonos media URLs.
 // Loaded once at startup from the store (store.MediaSigningSecret).
@@ -186,6 +193,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/streams/{id}/station", s.getStationHandler)
 	mux.HandleFunc("POST /api/streams/{id}/station", s.startStationHandler)
 	mux.HandleFunc("DELETE /api/streams/{id}/station", s.stopStationHandler)
+	mux.HandleFunc("GET /api/admin/settings", s.requireAdmin(s.getAdminSettings))
+	mux.HandleFunc("POST /api/admin/settings", s.requireAdmin(s.setAdminSettings))
+	mux.HandleFunc("POST /api/admin/invites", s.requireAdmin(s.createInvite))
+	mux.HandleFunc("GET /api/admin/invites", s.requireAdmin(s.listInvites))
+	mux.HandleFunc("DELETE /api/admin/invites/{id}", s.requireAdmin(s.deleteInvite))
+	mux.HandleFunc("GET /api/admin/users", s.requireAdmin(s.listUsers))
+	mux.HandleFunc("DELETE /api/admin/users/{id}", s.requireAdmin(s.deleteUser))
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}
