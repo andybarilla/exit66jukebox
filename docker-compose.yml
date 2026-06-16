@@ -1,0 +1,28 @@
+services:
+  exit66jukebox:
+    build: .
+    image: exit66jukebox:latest
+    restart: unless-stopped
+    ports:
+      - "${EXIT66_HOST_PORT:-8066}:8066"
+    environment:
+      EXIT66_LISTENBRAINZ_TOKEN: ${EXIT66_LISTENBRAINZ_TOKEN:-}
+      EXIT66_LASTFM_API_KEY: ${EXIT66_LASTFM_API_KEY:-}
+      EXIT66_LASTFM_API_SECRET: ${EXIT66_LASTFM_API_SECRET:-}
+      EXIT66_MUTE_LOCAL_ON_CAST: ${EXIT66_MUTE_LOCAL_ON_CAST:-true}
+      EXIT66_SMTP_HOST: ${EXIT66_SMTP_HOST:-}
+      EXIT66_SMTP_PORT: ${EXIT66_SMTP_PORT:-587}
+      EXIT66_SMTP_USER: ${EXIT66_SMTP_USER:-}
+      EXIT66_SMTP_PASS: ${EXIT66_SMTP_PASS:-}
+      EXIT66_SMTP_FROM: ${EXIT66_SMTP_FROM:-}
+      EXIT66_FED_ROLE: ${EXIT66_FED_ROLE:-}
+      EXIT66_FED_HUB: ${EXIT66_FED_HUB:-}
+      EXIT66_FED_LISTEN: ${EXIT66_FED_LISTEN:-}
+      EXIT66_FED_TOKEN: ${EXIT66_FED_TOKEN:-}
+      EXIT66_FED_PEER_ID: ${EXIT66_FED_PEER_ID:-}
+    volumes:
+      - exit66-data:/data
+      - ${EXIT66_MUSIC_DIR:-./music}:/music:ro
+
+volumes:
+  exit66-data:
