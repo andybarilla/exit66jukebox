@@ -18,6 +18,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/api"
 	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/config"
+	"github.com/andybarilla/exit66jukebox/internal/email"
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/external"
@@ -49,6 +50,14 @@ func main() {
 		log.Fatalf("open db: %v", err)
 	}
 	defer db.Close()
+
+	if err := store.PurgeExpiredSessions(db); err != nil {
+		log.Printf("purge sessions: %v", err)
+	}
+	signingSecret, err := store.MediaSigningSecret(db)
+	if err != nil {
+		log.Fatalf("signing secret: %v", err)
+	}
 
 	jb := jukebox.New(db, jukebox.Config{HistoryWindow: cfg.HistoryWindow})
 
@@ -217,7 +226,19 @@ func main() {
 	srv := api.NewServer(db, jb, uiFS)
 	srv.SetListenAddr(cfg.Addr)
 	srv.SetMuteLocalOnCast(cfg.MuteLocalOnCast)
-	srv.SetAdminPassword(cfg.AdminPassword)
+	srv.SetSigningSecret(signingSecret)
+	mailer := email.New(email.Config{
+		Host: cfg.SMTP.Host, Port: cfg.SMTP.Port, User: cfg.SMTP.User,
+		Pass: cfg.SMTP.Pass, From: cfg.SMTP.From,
+	})
+	if mailer.Enabled() {
+		srv.SetInviteEmailer(func(to, link string) {
+			if err := mailer.SendInvite(to, link); err != nil {
+				log.Printf("invite email to %s: %v", to, err)
+			}
+		})
+		log.Print("SMTP invite email enabled")
+	}
 	srv.RegisterStream(houseID, houseHub, houseBus, houseNP)
 	srv.SetScanProgress(scanProgress)
 
@@ -278,7 +299,8 @@ func main() {
 	}
 
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)
-	httpServer := &http.Server{Addr: cfg.Addr, Handler: srv.Handler()}
+	publicHandler := srv.RequireAuthMiddleware(srv.Handler())
+	httpServer := &http.Server{Addr: cfg.Addr, Handler: publicHandler}
 	go func() {
 		// ListenAndServe returns ErrServerClosed on a graceful Shutdown; only a
 		// real bind/serve failure is fatal.

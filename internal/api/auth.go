@@ -280,6 +280,34 @@ func isLoopback(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// RequireAuthMiddleware gates the public listener's API routes. Anything not
+// under /api/ (the static SPA shell, and /stream/ which self-guards) passes
+// through; open auth/config endpoints pass; otherwise a request must satisfy
+// mediaAllowed (valid session, guest access on, or loopback origin). This is the
+// production gate; it wraps ONLY the public http.Server, never the federation
+// MemberHandler.
+func (s *Server) RequireAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || isOpenPath(r.URL.Path) || s.mediaAllowed(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeErr(w, http.StatusUnauthorized, "login required")
+	})
+}
+
+// isOpenPath lists API routes reachable without authentication: the auth
+// endpoints and /api/config (so the unauthenticated SPA can decide whether to
+// show login, signup, or first-run bootstrap).
+func isOpenPath(p string) bool {
+	switch p {
+	case "/api/auth/login", "/api/auth/signup", "/api/auth/logout",
+		"/api/auth/me", "/api/auth/invite/accept", "/api/config":
+		return true
+	}
+	return false
+}
+
 // allowAttempt records an attempt under key and reports whether key is still
 // under the limit (10 attempts / 60s sliding window). Login keys on both the
 // client IP and the target email so neither dimension alone can be brute-forced.
