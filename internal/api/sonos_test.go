@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -8,13 +9,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andybarilla/exit66jukebox/internal/auth"
 	"github.com/andybarilla/exit66jukebox/internal/sonos"
+	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
+// adminSession seeds an admin user + session and returns the session cookie, so
+// admin-gated routes can be exercised for their handler-level validation.
+func adminSession(t *testing.T, db *sql.DB) *http.Cookie {
+	t.Helper()
+	uid, _ := store.CreateUser(db, "admin@test", "Admin", "h", true)
+	raw, _ := auth.GenerateToken()
+	store.CreateSession(db, auth.HashToken(raw), uid, 4_000_000_000)
+	return &http.Cookie{Name: sessionCookie, Value: raw}
+}
+
 func TestSonosCastRequiresIP(t *testing.T) {
-	srv := newTestServer(t)
+	srv, db := newTestServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/sonos/cast", strings.NewReader(""))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(adminSession(t, db))
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -55,7 +69,7 @@ func formPost(srv *Server, path, body string) *httptest.ResponseRecorder {
 }
 
 func TestManualRejectsNonPrivateIP(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	verified := false
 	srv.manualVerify = func(string) (string, bool) { verified = true; return "X", true }
 	rec := formPost(srv, "/api/sonos/manual", "ip=8.8.8.8")
@@ -68,7 +82,7 @@ func TestManualRejectsNonPrivateIP(t *testing.T) {
 }
 
 func TestManualRejectsUnverifiableIP(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	srv.manualVerify = func(string) (string, bool) { return "", false }
 	rec := formPost(srv, "/api/sonos/manual", "ip=192.168.1.77")
 	if rec.Code != http.StatusBadGateway {
@@ -77,7 +91,7 @@ func TestManualRejectsUnverifiableIP(t *testing.T) {
 }
 
 func TestManualAddsVerifiedIP(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	srv.manualVerify = func(ip string) (string, bool) { return "Kitchen", true }
 	rec := formPost(srv, "/api/sonos/manual", "ip=192.168.1.77")
 	if rec.Code != http.StatusOK {
@@ -103,7 +117,7 @@ func TestManualAddsVerifiedIP(t *testing.T) {
 }
 
 func TestDeviceListMergesManual(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	srv.sonosManual["192.168.1.77"] = "Kitchen"
 	list := srv.deviceList([]sonos.Device{{Name: "Den", IP: "192.168.1.5"}})
 	names := map[string]string{}
@@ -131,7 +145,7 @@ func devicesJSON(t *testing.T, srv *Server) []sonos.Device {
 }
 
 func TestSonosDevicesFallsBackToScanWhenEmpty(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	srv.sonosDiscover = func() ([]sonos.Device, error) { return nil, nil }
 	srv.scanUnicast = func() []sonos.Device { return []sonos.Device{{Name: "Kitchen", IP: "192.168.1.48"}} }
 
@@ -146,7 +160,7 @@ func TestSonosDevicesFallsBackToScanWhenEmpty(t *testing.T) {
 }
 
 func TestSonosDevicesFallsBackOnDiscoverError(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	srv.sonosDiscover = func() ([]sonos.Device, error) { return nil, errors.New("multicast dead") }
 	scanned := false
 	srv.scanUnicast = func() []sonos.Device {
@@ -164,7 +178,7 @@ func TestSonosDevicesFallsBackOnDiscoverError(t *testing.T) {
 }
 
 func TestSonosDevicesSkipsScanWhenDiscoverFindsDevices(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	srv.sonosDiscover = func() ([]sonos.Device, error) {
 		return []sonos.Device{{Name: "Family Room", IP: "192.168.1.45"}}, nil
 	}
@@ -181,25 +195,31 @@ func TestSonosDevicesSkipsScanWhenDiscoverFindsDevices(t *testing.T) {
 }
 
 func TestVolumeRejectsUndiscoveredIP(t *testing.T) {
-	srv := newTestServer(t)
+	srv, db := newTestServer(t)
 	get := httptest.NewRequest(http.MethodGet, "/api/sonos/volume?ip=192.168.1.99", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, get)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("GET volume: want 400 for undiscovered ip, got %d", rec.Code)
 	}
-	rec = formPost(srv, "/api/sonos/volume", "ip=192.168.1.99&volume=50")
+	post := httptest.NewRequest(http.MethodPost, "/api/sonos/volume",
+		strings.NewReader("ip=192.168.1.99&volume=50"))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.AddCookie(adminSession(t, db))
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, post)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("POST volume: want 400 for undiscovered ip, got %d", rec.Code)
 	}
 }
 
 func TestSonosCastRejectsUndiscoveredIP(t *testing.T) {
-	srv := newTestServer(t)
+	srv, db := newTestServer(t)
 	// A valid private IP that was never discovered must be rejected (SSRF guard:
 	// the server only casts to IPs that announced themselves via discovery).
 	req := httptest.NewRequest(http.MethodPost, "/api/sonos/cast", strings.NewReader("ip=192.168.1.99"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(adminSession(t, db))
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {

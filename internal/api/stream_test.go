@@ -7,7 +7,7 @@ import (
 )
 
 func TestStreamAudioUnknownStreamIs404(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/stream/nope.mp3", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -17,7 +17,7 @@ func TestStreamAudioUnknownStreamIs404(t *testing.T) {
 }
 
 func TestEventsUnknownStreamIs404(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/streams/nope/events", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)

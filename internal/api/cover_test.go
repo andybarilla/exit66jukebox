@@ -12,7 +12,7 @@ import (
 )
 
 func TestTrackCoverMissingArtIs404(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/no/such/file.mp3", Title: "X"}, "A", "", "B")
 	req := httptest.NewRequest(http.MethodGet, "/api/tracks/"+strconv.FormatInt(id, 10)+"/cover", nil)
 	rec := httptest.NewRecorder()
@@ -23,7 +23,7 @@ func TestTrackCoverMissingArtIs404(t *testing.T) {
 }
 
 func TestTrackCoverUnknownIdIs404(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/tracks/9999/cover", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -33,7 +33,7 @@ func TestTrackCoverUnknownIdIs404(t *testing.T) {
 }
 
 func TestTrackCoverServesEmbeddedArt(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	// testdata/art.mp3 carries an embedded MJPEG cover (path relative to package dir).
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "testdata/art.mp3", Title: "Art"}, "AA", "", "AL")
 	req := httptest.NewRequest(http.MethodGet, "/api/tracks/"+strconv.FormatInt(id, 10)+"/cover", nil)

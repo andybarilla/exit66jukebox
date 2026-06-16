@@ -42,7 +42,7 @@ func (noCover) FetchFrontCover(context.Context, string) ([]byte, string, bool, e
 // returns, exactly as net/http does in production (httptest.NewRecorder does
 // not, which is why the original endpoint test missed this).
 func TestEnrichPassOutlivesRequest(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Song"}, "Artist", "", "Album")
 
 	called := make(chan struct{}, 1)

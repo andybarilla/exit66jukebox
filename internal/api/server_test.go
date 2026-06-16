@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,7 +14,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
-func newTestServer(t *testing.T) *Server {
+func newTestServer(t *testing.T) (*Server, *sql.DB) {
 	t.Helper()
 	db, err := store.Open(":memory:")
 	if err != nil {
@@ -21,11 +22,13 @@ func newTestServer(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { db.Close() })
 	jb := jukebox.New(db, jukebox.Config{HistoryWindow: 5})
-	return NewServer(db, jb, nil)
+	s := NewServer(db, jb, nil)
+	s.SetSigningSecret([]byte("test-secret"))
+	return s, db
 }
 
 func TestArtistsEndpointReturnsJSON(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/artists", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -42,7 +45,7 @@ func TestArtistsEndpointReturnsJSON(t *testing.T) {
 }
 
 func TestRequestRecordsRequesterAndStreamReturnsIt(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}, "by": {"Mira"}}
@@ -66,7 +69,7 @@ func TestRequestRecordsRequesterAndStreamReturnsIt(t *testing.T) {
 }
 
 func TestGetStreamNowPlayingWhenPlaying(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 	np := NewNowPlaying()
 	tr, _, _ := store.GetTrack(srv.db, id)
@@ -91,7 +94,7 @@ func TestGetStreamNowPlayingWhenPlaying(t *testing.T) {
 }
 
 func TestGetStreamNowPlayingNullWhenIdle(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	srv.nowPlaying["house"] = NewNowPlaying() // tracker present but idle
 
 	rec := httptest.NewRecorder()
@@ -102,7 +105,7 @@ func TestGetStreamNowPlayingNullWhenIdle(t *testing.T) {
 }
 
 func TestGetStreamNowPlayingNullForUntrackedStream(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/streams/me", nil))
 	if !strings.Contains(rec.Body.String(), `"now_playing":null`) {
@@ -111,7 +114,7 @@ func TestGetStreamNowPlayingNullForUntrackedStream(t *testing.T) {
 }
 
 func TestRequestThenNextRoundTrip(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}}

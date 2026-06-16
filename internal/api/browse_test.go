@@ -31,7 +31,7 @@ func get(t *testing.T, srv *Server, path string) *httptest.ResponseRecorder {
 }
 
 func TestTracksEndpointEnriched(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	seedAPILibrary(t, srv)
 	rec := get(t, srv, "/api/tracks")
 
@@ -55,7 +55,7 @@ func TestTracksEndpointEnriched(t *testing.T) {
 }
 
 func TestTracksEndpointCodeSearch(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	seedAPILibrary(t, srv)
 	rec := get(t, srv, "/api/tracks?search=B1")
 	var tracks []model.EnrichedTrack
@@ -66,7 +66,7 @@ func TestTracksEndpointCodeSearch(t *testing.T) {
 }
 
 func TestAlbumsEndpointEnriched(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	seedAPILibrary(t, srv)
 	rec := get(t, srv, "/api/albums")
 	var albums []model.EnrichedAlbum
@@ -84,7 +84,7 @@ func TestAlbumsEndpointEnriched(t *testing.T) {
 }
 
 func TestAlbumTracksEndpoint(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	seedAPILibrary(t, srv)
 	var albumID int64
 	srv.db.QueryRow(`SELECT id FROM album WHERE name = 'Abbey Road'`).Scan(&albumID)
@@ -97,7 +97,7 @@ func TestAlbumTracksEndpoint(t *testing.T) {
 }
 
 func TestQueueItemsEnriched(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	seedAPILibrary(t, srv)
 	var moneyID int64
 	srv.db.QueryRow(`SELECT id FROM track WHERE title = 'Money'`).Scan(&moneyID)
@@ -115,7 +115,7 @@ func TestQueueItemsEnriched(t *testing.T) {
 }
 
 func TestDiscoverEnriched(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	seedAPILibrary(t, srv)
 	// No genre filter → "recent" returns the seeded tracks (added_at is set on
 	// upsert), so this asserts real enrichment rather than passing on an empty list.
@@ -136,7 +136,7 @@ func TestDiscoverEnriched(t *testing.T) {
 }
 
 func TestNextTrackEnriched(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	seedAPILibrary(t, srv)
 	var moneyID int64
 	srv.db.QueryRow(`SELECT id FROM track WHERE title = 'Money'`).Scan(&moneyID)

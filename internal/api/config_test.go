@@ -31,7 +31,7 @@ func TestConfigEndpointReflectsMuteFlag(t *testing.T) {
 		{true, `"mute_local_on_cast":true`},
 		{false, `"mute_local_on_cast":false`},
 	} {
-		srv := newTestServer(t)
+		srv, _ := newTestServer(t)
 		srv.SetMuteLocalOnCast(tc.mute)
 
 		rec := httptest.NewRecorder()

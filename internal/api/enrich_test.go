@@ -15,7 +15,7 @@ import (
 )
 
 func TestEnrichEndpoint503WithoutRunner(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	for _, method := range []string{http.MethodPost, http.MethodGet} {
 		req := httptest.NewRequest(method, "/api/enrich", nil)
 		rec := httptest.NewRecorder()
@@ -27,7 +27,7 @@ func TestEnrichEndpoint503WithoutRunner(t *testing.T) {
 }
 
 func TestEnrichStartReturnsStatusAndFlipsRunning(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	// A runner over an empty DB: Start flips running and the pass finishes with
 	// nothing to do. mb/ca are never called (no targets), so nil is safe.
 	srv.SetEnrichRunner(enrich.NewRunner(srv.db, nil, nil, t.TempDir()))
@@ -54,7 +54,7 @@ func TestEnrichStartReturnsStatusAndFlipsRunning(t *testing.T) {
 }
 
 func TestServeCoverFallsBackToCachedCover(t *testing.T) {
-	srv := newTestServer(t)
+	srv, _ := newTestServer(t)
 	// Track file does not exist => no embedded art => fall back to album cover.
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/no/such/file.mp3", Title: "X"}, "A", "", "B")
 	tr, _, _ := store.GetTrack(srv.db, id)
