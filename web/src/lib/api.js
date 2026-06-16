@@ -150,8 +150,7 @@ export async function requestTo(streamId, id, { kind = 'track', by = 'You' } = {
 }
 
 // removeRequest/clearQueue/setShuffle are admin-gated on the house stream and
-// open on a guest's "me" stream; the token rides along and is ignored server-side
-// for non-shared streams.
+// open on a guest's "me" stream; the session cookie authenticates server-side.
 export async function removeRequest(streamId, trackId) {
   const r = await fetch(`/api/streams/${streamId}/requests/${trackId}`, { method: 'DELETE' });
   return r.json();
@@ -174,5 +173,5 @@ export function albumCoverURL(albumId) { return `/api/albums/${albumId}/cover`; 
 // a future settings UI will read/write; today it's sourced from server env.
 export async function getConfig() {
   const r = await fetch('/api/config');
-  return r.json(); // { mute_local_on_cast, admin_required, is_admin }
+  return r.json(); // { mute_local_on_cast, fed_peers, authenticated, is_admin, guest_access, signup_enabled, needs_bootstrap }
 }
