@@ -4,7 +4,9 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/andybarilla/exit66jukebox/internal/auth"
 	"github.com/andybarilla/exit66jukebox/internal/sonos"
 )
 
@@ -20,14 +22,17 @@ func streamURL(ip, listenAddr string) string {
 	return "http://" + net.JoinHostPort(ip, port) + "/stream/house.mp3"
 }
 
-// houseStreamURL returns a Sonos-reachable URL for the house stream using the
-// server's detected outbound LAN IP and configured port.
+// houseStreamURL returns a Sonos-reachable, signed URL for the house stream. The
+// signed token authorizes the speaker (which has no session cookie) to fetch
+// /stream/house.mp3 until it expires.
 func (s *Server) houseStreamURL() string {
 	ip := sonos.OutboundIP()
 	if ip == "" {
 		ip = "127.0.0.1" // last resort; not Sonos-reachable, but never panics
 	}
-	return streamURL(ip, s.listenAddr)
+	base := streamURL(ip, s.listenAddr)
+	exp := time.Now().Add(6 * time.Hour).Unix()
+	return base + "?sig=" + auth.SignPath(s.signingSecret, "/stream/house.mp3", exp)
 }
 
 // rememberDevices records the discovered device IPs as the cast allowlist.

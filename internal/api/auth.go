@@ -251,6 +251,29 @@ func (s *Server) inviteAccept(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"id": uid, "email": inv.Email, "is_admin": inv.IsAdmin})
 }
 
+// mediaAllowed reports whether a media request is authorized by a session, the
+// guest toggle, or a loopback origin (the server's own ffmpeg house source, which
+// fetches /api/tracks/{id}/audio over 127.0.0.1 with no cookie).
+func (s *Server) mediaAllowed(r *http.Request) bool {
+	if _, ok := s.currentUser(r); ok {
+		return true
+	}
+	if store.GuestAccessEnabled(s.db) {
+		return true
+	}
+	return isLoopback(r)
+}
+
+// isLoopback reports whether the request's TCP peer is a loopback address.
+func isLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // allowLogin records an attempt for ip and reports whether it's under the limit
 // (10 attempts / 60s sliding window).
 func (s *Server) allowLogin(ip string) bool {
