@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -120,5 +121,21 @@ func TestInviteAcceptCreatesUser(t *testing.T) {
 	s.inviteAccept(rec2, httptest.NewRequest("POST", "/api/auth/invite/accept", strings.NewReader(body)))
 	if rec2.Code == 200 {
 		t.Fatal("invite reused")
+	}
+}
+
+func TestLoginThrottlePerEmailDefeatsIPRotation(t *testing.T) {
+	s, _ := newTestServer(t)
+	body := `{"email":"victim@b.com","password":"x"}`
+	var last int
+	for i := 0; i < 12; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(body))
+		req.RemoteAddr = "203.0.113." + strconv.Itoa(i) + ":1234" // distinct public IP each attempt
+		s.login(rec, req)
+		last = rec.Code
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("per-email throttle should trip despite rotating IPs: got %d", last)
 	}
 }

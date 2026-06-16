@@ -74,14 +74,19 @@ func isHTTPS(r *http.Request) bool {
 	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
-// clientIP extracts a throttling key from the request (proxy-aware).
+// clientIP extracts a throttle key from the request. X-Forwarded-For is honored
+// only when the immediate peer is loopback/private (a real reverse proxy);
+// otherwise it is attacker-controlled, so a public client can't rotate the
+// header to mint a fresh throttle key each request and escape the limit.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if peer := net.ParseIP(host); peer != nil && (peer.IsLoopback() || peer.IsPrivate()) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			return strings.TrimSpace(strings.Split(xff, ",")[0])
+		}
 	}
 	return host
 }
@@ -151,19 +156,20 @@ type loginReq struct {
 	Password string `json:"password"`
 }
 
-// login validates credentials and issues a session cookie. Throttled per IP.
+// login validates credentials and issues a session cookie. Throttled on both
+// the client IP and the target email so a single account can't be brute-forced
+// even if the attacker rotates X-Forwarded-For across many apparent IPs.
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
-	if !s.allowLogin(ip) {
-		writeErr(w, http.StatusTooManyRequests, "too many attempts; wait a minute")
-		return
-	}
 	var req loginReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	if !s.allowAttempt("ip:"+clientIP(r)) || !s.allowAttempt("email:"+req.Email) {
+		writeErr(w, http.StatusTooManyRequests, "too many attempts; wait a minute")
+		return
+	}
 	u, ok, err := store.GetUserByEmail(s.db, req.Email)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "db error")
@@ -274,22 +280,23 @@ func isLoopback(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// allowLogin records an attempt for ip and reports whether it's under the limit
-// (10 attempts / 60s sliding window).
-func (s *Server) allowLogin(ip string) bool {
+// allowAttempt records an attempt under key and reports whether key is still
+// under the limit (10 attempts / 60s sliding window). Login keys on both the
+// client IP and the target email so neither dimension alone can be brute-forced.
+func (s *Server) allowAttempt(key string) bool {
 	const window = 60 * 1000
 	const maxAttempts = 10
 	now := time.Now().UnixMilli()
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
 	cutoff := now - window
-	kept := s.loginAttempts[ip][:0]
-	for _, t := range s.loginAttempts[ip] {
+	kept := s.loginAttempts[key][:0]
+	for _, t := range s.loginAttempts[key] {
 		if t > cutoff {
 			kept = append(kept, t)
 		}
 	}
 	kept = append(kept, now)
-	s.loginAttempts[ip] = kept
+	s.loginAttempts[key] = kept
 	return len(kept) <= maxAttempts
 }
