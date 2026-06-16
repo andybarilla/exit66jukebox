@@ -24,6 +24,7 @@
   let playing = $state(true);
   let volume = $state(68);
   let showSignup = $state(false);
+  let showLogin = $state(false); // a guest (guest-access on) chose to log in
   let adminOpen = $state(false);
   let tickTimer, resizeHandler;
 
@@ -172,20 +173,21 @@
   <!-- waiting for /me round-trip — render nothing -->
 {:else if window.location.pathname.startsWith('/invite/')}
   <InviteAccept onLoggedIn={(u) => { s.setMe(u); window.history.replaceState(null, '', '/'); }} />
-{:else if !s.me && !s.config.guestAccess}
+{:else if !s.me && (!s.config.guestAccess || showLogin)}
   {#if showSignup}
-    <Signup onLoggedIn={(u) => s.setMe(u)} onSwitchToLogin={() => (showSignup = false)} />
+    <Signup onLoggedIn={(u) => { s.setMe(u); showLogin = false; }} onSwitchToLogin={() => (showSignup = false)} />
   {:else}
     <Login canSignup={s.config.signupEnabled || s.config.needsBootstrap}
            onSwitchToSignup={() => (showSignup = true)}
-           onLoggedIn={(u) => s.setMe(u)} />
+           onLoggedIn={(u) => { s.setMe(u); showLogin = false; }} />
   {/if}
 {:else}
   <TopBar isPhone={s.isPhone} query={s.query} onSearch={(v) => (s.query = v)}
     streamChipLabel={chip} onToggleStream={() => s.toggleStream()} scan={s.scan}
     onToast={(tone, title, msg) => s.pushToast(tone, title, msg)}
     onCastActive={(v) => s.setCastActive(v)}
-    isAdmin={s.isAdmin} me={s.me} onLogout={() => s.signOut()} onOpenSettings={() => (adminOpen = true)} />
+    isAdmin={s.isAdmin} me={s.me} onLogout={() => s.signOut()} onOpenSettings={() => (adminOpen = true)}
+    onLogin={() => (showLogin = true)} />
 
   <!-- BODY -->
   <div style="display:flex; flex:1; min-height:0;">
