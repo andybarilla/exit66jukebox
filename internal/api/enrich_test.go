@@ -15,9 +15,11 @@ import (
 )
 
 func TestEnrichEndpoint503WithoutRunner(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, db := newTestServer(t)
+	cookie := adminSession(t, db) // POST /api/enrich is admin-gated
 	for _, method := range []string{http.MethodPost, http.MethodGet} {
 		req := httptest.NewRequest(method, "/api/enrich", nil)
+		req.AddCookie(cookie)
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
@@ -27,12 +29,13 @@ func TestEnrichEndpoint503WithoutRunner(t *testing.T) {
 }
 
 func TestEnrichStartReturnsStatusAndFlipsRunning(t *testing.T) {
-	srv, _ := newTestServer(t)
+	srv, db := newTestServer(t)
 	// A runner over an empty DB: Start flips running and the pass finishes with
 	// nothing to do. mb/ca are never called (no targets), so nil is safe.
 	srv.SetEnrichRunner(enrich.NewRunner(srv.db, nil, nil, t.TempDir()))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/enrich", nil)
+	req.AddCookie(adminSession(t, db)) // POST /api/enrich is admin-gated
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

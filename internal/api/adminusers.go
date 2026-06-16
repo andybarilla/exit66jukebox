@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/auth"
@@ -57,6 +58,14 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 	var req createInviteReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	// An invite is redeemed against its stored email (inviteAccept rejects a
+	// blank one) and the accept screen never collects an address, so a blank
+	// email here would mint a permanently dead link. Require it.
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	if req.Email == "" {
+		writeErr(w, http.StatusBadRequest, "email is required")
 		return
 	}
 	u, _ := s.currentUser(r)

@@ -61,3 +61,47 @@ func TestAdminNonAdminForbidden(t *testing.T) {
 		t.Fatalf("want 403, got %d", rec.Code)
 	}
 }
+
+// nonAdminCookie seeds a non-admin account + session and returns its cookie.
+func nonAdminCookie(t *testing.T, db *sql.DB) *http.Cookie {
+	t.Helper()
+	uid, _ := store.CreateUser(db, "user@b.com", "U", "h", false)
+	raw, _ := auth.GenerateToken()
+	store.CreateSession(db, auth.HashToken(raw), uid, 4_000_000_000)
+	return &http.Cookie{Name: sessionCookie, Value: raw}
+}
+
+func TestCreateInviteRequiresEmail(t *testing.T) {
+	s, db := newTestServer(t)
+	req := adminReq(t, db, "POST", "/api/admin/invites", `{"email":"","is_admin":false}`)
+	rec := httptest.NewRecorder()
+	s.requireAdmin(s.createInvite)(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("blank-email invite: want 400, got %d (%s)", rec.Code, rec.Body)
+	}
+}
+
+func TestHouseStationRequiresAdmin(t *testing.T) {
+	s, db := newTestServer(t)
+	cookie := nonAdminCookie(t, db)
+	for _, method := range []string{"POST", "DELETE"} {
+		req := httptest.NewRequest(method, "/api/streams/house/station", strings.NewReader(`{"genre":"rock"}`))
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s house station as non-admin: want 403, got %d", method, rec.Code)
+		}
+	}
+}
+
+func TestEnrichPostRequiresAdmin(t *testing.T) {
+	s, db := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/enrich", nil)
+	req.AddCookie(nonAdminCookie(t, db))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-admin POST /api/enrich: want 403, got %d", rec.Code)
+	}
+}
