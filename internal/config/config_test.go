@@ -79,42 +79,23 @@ func TestMuteLocalOnCastDisabled(t *testing.T) {
 	}
 }
 
-func TestAdminPasswordFromEnv(t *testing.T) {
-	t.Setenv("EXIT66_ADMIN_PASSWORD", "hunter2")
+func TestSMTPFromEnv(t *testing.T) {
+	t.Setenv("EXIT66_SMTP_HOST", "smtp.example.com")
+	t.Setenv("EXIT66_SMTP_FROM", "jukebox@example.com")
 	c, err := Parse(nil)
 	if err != nil {
-		t.Fatalf("Parse: %v", err)
+		t.Fatal(err)
 	}
-	if c.AdminPassword != "hunter2" {
-		t.Errorf("AdminPassword = %q, want hunter2", c.AdminPassword)
+	if c.SMTP.Host != "smtp.example.com" || c.SMTP.From != "jukebox@example.com" {
+		t.Fatalf("SMTP not parsed: %+v", c.SMTP)
 	}
-}
-
-func TestAdminPasswordUnsetDisablesGate(t *testing.T) {
-	t.Setenv("EXIT66_ADMIN_PASSWORD", "")
-	c, err := Parse(nil)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if c.AdminPassword != "" {
-		t.Errorf("AdminPassword = %q, want empty (gate disabled)", c.AdminPassword)
-	}
-}
-
-// The flag wins over the env var when both are set.
-func TestAdminPasswordFlagOverridesEnv(t *testing.T) {
-	t.Setenv("EXIT66_ADMIN_PASSWORD", "from-env")
-	c, err := Parse([]string{"-admin-password", "from-flag"})
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if c.AdminPassword != "from-flag" {
-		t.Errorf("AdminPassword = %q, want from-flag", c.AdminPassword)
+	if c.SMTP.Port != "587" {
+		t.Fatalf("default port: want 587, got %q", c.SMTP.Port)
 	}
 }
 
 // Service tokens must never be exposed as flags (they would leak via the process
-// list). The admin password is the deliberate exception (see AdminPassword).
+// list).
 func TestTokenNotAFlag(t *testing.T) {
 	_, err := Parse([]string{"-listenbrainz-token", "x"})
 	if err == nil {
