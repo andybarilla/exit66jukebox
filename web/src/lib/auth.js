@@ -37,6 +37,9 @@ export const getSettings = () => fetch('/api/admin/settings').then((r) => r.json
 export const setSettings = (s) => postJSON('/api/admin/settings', s);
 export const getLibraries = () => fetch('/api/admin/libraries').then((r) => r.json());
 export const setLibraries = (s) => postJSON('/api/admin/libraries', s);
+export const getFederationPeers = () => fetch('/api/admin/federation/peers').then((r) => r.json());
+export const addFederationPeer = (peer) => postJSON('/api/admin/federation/peers', peer);
+export const approveFederationPeer = (peerID) => postJSON(`/api/admin/federation/peers/${encodeURIComponent(peerID)}/approve`, {});
 export const createInvite = (email, is_admin) => postJSON('/api/admin/invites', { email, is_admin });
 export const listInvites = () => fetch('/api/admin/invites').then((r) => r.json());
 export const deleteInvite = (id) => fetch(`/api/admin/invites/${id}`, { method: 'DELETE' });

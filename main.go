@@ -295,7 +295,7 @@ func main() {
 			Token:         fedSettings.Token,
 			PeerID:        fedSettings.PeerID,
 			HubAddr:       fedSettings.HubAddr, // member: hub to dial
-			HubListen:     fedSettings.Listen,  // hub: local listen addr
+			HubListen:     fedSettings.Listen,  // hub/peer: local listen addr
 			MemberHandler: srv.Handler(),
 			Registry:      reg,
 			DB:            db,
@@ -308,6 +308,9 @@ func main() {
 			relay.SetSelf(fedSettings.PeerID)
 			fm.Relay = relay
 			fm.HubHandler = relay.Routes()
+		}
+		if fedSettings.Role == "peer" {
+			fm.PeerHandler = fed.PeerRoutes(db, srv.Handler())
 		}
 		fm.Start()
 		srv.SetFedResolver(fed.NewResolverFor(fm))
