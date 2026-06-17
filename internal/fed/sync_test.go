@@ -170,3 +170,40 @@ func TestApplyCatalogKeepsStableIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyCatalogStoresSourceLibraryID(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	if err := ApplyCatalog(db, "peer-a", []store.CatalogRow{{RemoteID: 7, SourceLibraryID: "library-a", Title: "Song", ArtistName: "Artist", AlbumName: "Album"}}); err != nil {
+		t.Fatalf("apply catalog: %v", err)
+	}
+	tracks, _ := store.ListTracks(db, "", 0, 0)
+	if len(tracks) != 1 || tracks[0].SourceLibraryID != "library-a" || tracks[0].RemoteID != 7 {
+		t.Fatalf("remote track source fields = %+v", tracks)
+	}
+}
+
+func TestApplyCatalogPrunesOnlyRequestedPeerLibrary(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	seed := []struct {
+		peer string
+		row  store.CatalogRow
+	}{
+		{"peer-a", store.CatalogRow{RemoteID: 1, SourceLibraryID: "library-a", Title: "Keep", ArtistName: "Artist", AlbumName: "Album"}},
+		{"peer-a", store.CatalogRow{RemoteID: 2, SourceLibraryID: "library-b", Title: "Other Library", ArtistName: "Artist", AlbumName: "Album"}},
+		{"peer-b", store.CatalogRow{RemoteID: 1, SourceLibraryID: "library-a", Title: "Other Peer", ArtistName: "Artist", AlbumName: "Album"}},
+	}
+	for _, item := range seed {
+		if err := ApplyCatalog(db, item.peer, []store.CatalogRow{item.row}); err != nil {
+			t.Fatalf("seed catalog: %v", err)
+		}
+	}
+	if err := ApplyCatalog(db, "peer-a", []store.CatalogRow{{RemoteID: 1, SourceLibraryID: "library-a", Title: "Keep", ArtistName: "Artist", AlbumName: "Album"}}); err != nil {
+		t.Fatalf("apply replacement: %v", err)
+	}
+	tracks, _ := store.ListTracks(db, "", 0, 0)
+	if len(tracks) != 3 {
+		t.Fatalf("per-library prune should keep other peer/library rows, got %+v", tracks)
+	}
+}

@@ -397,3 +397,27 @@ func DeleteRemoteLibraryTracksExcept(db *sql.DB, peer, sourceLibraryID string, k
 	}
 	return PruneOrphans(db)
 }
+
+func DeleteRemoteTracksExceptForLibrary(db *sql.DB, peer, sourceLibraryID string, keep []int64) error {
+	if sourceLibraryID == "" {
+		return DeleteRemoteTracksExcept(db, peer, keep)
+	}
+	if len(keep) == 0 {
+		if _, err := db.Exec(`DELETE FROM track WHERE source_peer = ? AND source_library_id = ?`, peer, sourceLibraryID); err != nil {
+			return err
+		}
+		return PruneOrphans(db)
+	}
+	ph := strings.TrimRight(strings.Repeat("?,", len(keep)), ",")
+	args := make([]any, 0, len(keep)+2)
+	args = append(args, peer, sourceLibraryID)
+	for _, id := range keep {
+		args = append(args, id)
+	}
+	if _, err := db.Exec(
+		`DELETE FROM track WHERE source_peer = ? AND source_library_id = ? AND remote_id NOT IN (`+ph+`)`, args...,
+	); err != nil {
+		return err
+	}
+	return PruneOrphans(db)
+}
