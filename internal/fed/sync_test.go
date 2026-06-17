@@ -212,3 +212,21 @@ func TestApplyCatalogPrunesOnlyRequestedPeerLibrary(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyCatalogKeepsMixedEmptyAndNamedLibraries(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+
+	rows := []store.CatalogRow{
+		{RemoteID: 1, SourceLibraryID: "library-a", Title: "Library Track", ArtistName: "Artist", AlbumName: "Album"},
+		{RemoteID: 2, SourceLibraryID: "", Title: "Unassigned Track", ArtistName: "Artist", AlbumName: "Album"},
+	}
+	if err := ApplyCatalog(db, "peer-a", rows); err != nil {
+		t.Fatalf("apply mixed catalog: %v", err)
+	}
+
+	tracks, _ := store.ListTracks(db, "", 0, 0)
+	if len(tracks) != 2 {
+		t.Fatalf("mixed empty and named libraries should both be kept, got %+v", tracks)
+	}
+}

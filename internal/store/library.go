@@ -399,9 +399,6 @@ func DeleteRemoteLibraryTracksExcept(db *sql.DB, peer, sourceLibraryID string, k
 }
 
 func DeleteRemoteTracksExceptForLibrary(db *sql.DB, peer, sourceLibraryID string, keep []int64) error {
-	if sourceLibraryID == "" {
-		return DeleteRemoteTracksExcept(db, peer, keep)
-	}
 	if len(keep) == 0 {
 		if _, err := db.Exec(`DELETE FROM track WHERE source_peer = ? AND source_library_id = ?`, peer, sourceLibraryID); err != nil {
 			return err
