@@ -37,3 +37,17 @@ func TestHandshakeRejectsBadToken(t *testing.T) {
 		t.Fatal("bad-token peer must not register")
 	}
 }
+
+func TestRegistryRemovePeerKeepsNewerSession(t *testing.T) {
+	reg := NewRegistry()
+	oldPeer := &Peer{ID: "peer-a"}
+	newPeer := &Peer{ID: "peer-a"}
+	reg.put(oldPeer)
+	reg.put(newPeer)
+
+	reg.remove("peer-a", oldPeer)
+
+	if got := reg.Get("peer-a"); got != newPeer {
+		t.Fatalf("registry peer = %p, want newer peer %p", got, newPeer)
+	}
+}

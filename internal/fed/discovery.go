@@ -28,21 +28,53 @@ func StartLANDiscovery(ctx context.Context, db *sql.DB, selfID, displayName, add
 	go listenForLANPeers(ctx, db, announcement.PeerID)
 }
 
-func parseLANPeerAnnouncement(data []byte) (store.FederationPeer, bool) {
+func parseLANPeerAnnouncement(data []byte, sender *net.UDPAddr) (store.FederationPeer, bool) {
 	var msg lanPeerAnnouncement
 	if err := json.Unmarshal(data, &msg); err != nil {
+		return store.FederationPeer{}, false
+	}
+	address, ok := lanDialAddress(strings.TrimSpace(msg.Address), sender)
+	if !ok {
 		return store.FederationPeer{}, false
 	}
 	peer := store.FederationPeer{
 		PeerID:      strings.TrimSpace(msg.PeerID),
 		DisplayName: strings.TrimSpace(msg.DisplayName),
-		Address:     strings.TrimSpace(msg.Address),
+		Address:     address,
 		Status:      store.PeerStatusPending,
 	}
-	if peer.PeerID == "" || peer.Address == "" {
+	if peer.PeerID == "" {
 		return store.FederationPeer{}, false
 	}
 	return peer, true
+}
+
+func lanDialAddress(address string, sender *net.UDPAddr) (string, bool) {
+	if address == "" {
+		return "", false
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || port == "" {
+		return "", false
+	}
+	parsedHost := net.ParseIP(host)
+	if strings.EqualFold(host, "localhost") {
+		return lanDialAddressFromSender(sender, port)
+	}
+	if host != "" && parsedHost == nil {
+		return address, true
+	}
+	if parsedHost != nil && !parsedHost.IsUnspecified() && !parsedHost.IsLoopback() {
+		return address, true
+	}
+	return lanDialAddressFromSender(sender, port)
+}
+
+func lanDialAddressFromSender(sender *net.UDPAddr, port string) (string, bool) {
+	if sender == nil || sender.IP == nil {
+		return "", false
+	}
+	return net.JoinHostPort(sender.IP.String(), port), true
 }
 
 func broadcastLANPeer(ctx context.Context, msg lanPeerAnnouncement) {
@@ -84,7 +116,7 @@ func listenForLANPeers(ctx context.Context, db *sql.DB, selfID string) {
 	buf := make([]byte, 4096)
 	for {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
-		n, _, err := conn.ReadFromUDP(buf)
+		n, sender, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			select {
 			case <-ctx.Done():
@@ -93,7 +125,7 @@ func listenForLANPeers(ctx context.Context, db *sql.DB, selfID string) {
 				continue
 			}
 		}
-		peer, ok := parseLANPeerAnnouncement(buf[:n])
+		peer, ok := parseLANPeerAnnouncement(buf[:n], sender)
 		if !ok || peer.PeerID == selfID {
 			continue
 		}

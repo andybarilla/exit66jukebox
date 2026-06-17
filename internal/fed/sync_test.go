@@ -203,7 +203,12 @@ func TestApplyCatalogPrunesOnlyRequestedPeerLibrary(t *testing.T) {
 		t.Fatalf("apply replacement: %v", err)
 	}
 	tracks, _ := store.ListTracks(db, "", 0, 0)
-	if len(tracks) != 3 {
-		t.Fatalf("per-library prune should keep other peer/library rows, got %+v", tracks)
+	if len(tracks) != 2 {
+		t.Fatalf("per-library prune should remove absent libraries and keep other peers, got %+v", tracks)
+	}
+	for _, track := range tracks {
+		if track.SourcePeer == "peer-a" && track.SourceLibraryID == "library-b" {
+			t.Fatalf("absent library-b track should be pruned: %+v", tracks)
+		}
 	}
 }

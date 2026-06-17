@@ -40,9 +40,12 @@ func (r *Registry) put(p *Peer) {
 	r.peers[p.ID] = p
 }
 
-func (r *Registry) remove(id string) {
+func (r *Registry) remove(id string, peer *Peer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if peer != nil && r.peers[id] != peer {
+		return
+	}
 	delete(r.peers, id)
 }
 
@@ -120,7 +123,7 @@ func acceptPeer(conn net.Conn, token string, reg *Registry) error {
 	if err != nil {
 		return err
 	}
-	defer reg.remove(p.ID)
+	defer reg.remove(p.ID, p)
 	<-p.Session.CloseChan()
 	return nil
 }

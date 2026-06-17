@@ -421,3 +421,27 @@ func DeleteRemoteTracksExceptForLibrary(db *sql.DB, peer, sourceLibraryID string
 	}
 	return PruneOrphans(db)
 }
+
+func DeleteRemoteTracksInLibrary(db *sql.DB, peer, sourceLibraryID string) error {
+	if _, err := db.Exec(`DELETE FROM track WHERE source_peer = ? AND source_library_id = ?`, peer, sourceLibraryID); err != nil {
+		return err
+	}
+	return PruneOrphans(db)
+}
+
+func RemoteSourceLibraryIDs(db *sql.DB, peer string) ([]string, error) {
+	rows, err := db.Query(`SELECT DISTINCT source_library_id FROM track WHERE source_peer = ?`, peer)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

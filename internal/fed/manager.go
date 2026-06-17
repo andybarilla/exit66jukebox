@@ -90,7 +90,7 @@ func (m *Manager) servePeerConn(conn net.Conn) {
 	if err != nil {
 		return
 	}
-	defer m.Registry.remove(p.ID)
+	defer m.Registry.remove(p.ID, p)
 	if !m.acceptsPeer(p.ID) {
 		if m.DB != nil {
 			_ = store.SaveFederationPeer(m.DB, store.FederationPeer{PeerID: p.ID, Address: conn.RemoteAddr().String(), Status: store.PeerStatusPending, TokenAuthenticated: true})
@@ -143,7 +143,7 @@ func (m *Manager) dialPeer(peerID, addr string) {
 	} else {
 		<-sess.CloseChan()
 	}
-	m.Registry.remove(peerID)
+	m.Registry.remove(peerID, p)
 	sess.Close()
 }
 
@@ -194,7 +194,7 @@ func (m *Manager) serveHubConn(conn net.Conn) {
 	if err != nil {
 		return
 	}
-	defer m.Registry.remove(p.ID)
+	defer m.Registry.remove(p.ID, p)
 	if m.HubHandler != nil {
 		_ = http.Serve(p.Session, m.HubHandler)
 	} else {
@@ -224,7 +224,8 @@ func (m *Manager) runMember() {
 		}
 		m.hubSession = sess
 		// Register the hub as a pseudo-peer so the member can call it by client.
-		m.Registry.put(&Peer{ID: "@hub", Session: sess, Client: SessionClient(sess), BaseURL: "http://@hub"})
+		p := &Peer{ID: "@hub", Session: sess, Client: SessionClient(sess), BaseURL: "http://@hub"}
+		m.Registry.put(p)
 		go m.startSyncLoop(sess.CloseChan())
 		backoff = time.Second
 		if m.MemberHandler != nil {
@@ -232,7 +233,7 @@ func (m *Manager) runMember() {
 		} else {
 			<-sess.CloseChan()
 		}
-		m.Registry.remove("@hub")
+		m.Registry.remove("@hub", p)
 		sess.Close()
 	}
 }

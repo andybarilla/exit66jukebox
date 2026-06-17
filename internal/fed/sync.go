@@ -19,6 +19,10 @@ func ApplyCatalog(db *sql.DB, peer string, rows []store.CatalogRow) error {
 	if len(rows) == 0 {
 		return store.DeleteRemoteTracks(db, peer)
 	}
+	existingLibraries, err := store.RemoteSourceLibraryIDs(db, peer)
+	if err != nil {
+		return err
+	}
 	keepByLibrary := map[string][]int64{}
 	for _, c := range rows {
 		sourceLibraryID := c.SourceLibraryID
@@ -37,6 +41,14 @@ func ApplyCatalog(db *sql.DB, peer string, rows []store.CatalogRow) error {
 	}
 	for sourceLibraryID, keep := range keepByLibrary {
 		if err := store.DeleteRemoteLibraryTracksExcept(db, peer, sourceLibraryID, keep); err != nil {
+			return err
+		}
+	}
+	for _, sourceLibraryID := range existingLibraries {
+		if _, ok := keepByLibrary[sourceLibraryID]; ok {
+			continue
+		}
+		if err := store.DeleteRemoteTracksInLibrary(db, peer, sourceLibraryID); err != nil {
 			return err
 		}
 	}
