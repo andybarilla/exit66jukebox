@@ -82,3 +82,26 @@ func TestFederationSettingsValidationAndRoundTrip(t *testing.T) {
 		t.Fatalf("federation settings = %#v, want %#v", got, want)
 	}
 }
+
+func TestDisabledFederationComparisonIgnoresOperationalFields(t *testing.T) {
+	a := FederationSettings{Enabled: false, Token: "secret", PeerID: "peer", HubAddr: "hub", Listen: ":9443"}
+	b := FederationSettings{Enabled: false}
+	if !FederationSettingsEqual(a, b) {
+		t.Fatalf("disabled federation settings should compare equal: %#v %#v", a, b)
+	}
+}
+
+func TestDisabledFederationSavePreservesOperationalFields(t *testing.T) {
+	db := mustOpenMem(t)
+	want := FederationSettings{Enabled: false, Token: "secret", PeerID: "peer", HubAddr: "hub", Listen: ":9443"}
+	if err := SaveFederationSettings(db, want); err != nil {
+		t.Fatalf("save federation: %v", err)
+	}
+	got, ok, err := LoadFederationSettings(db)
+	if err != nil || !ok {
+		t.Fatalf("load federation: ok=%v err=%v", ok, err)
+	}
+	if got != want {
+		t.Fatalf("disabled federation settings = %#v, want %#v", got, want)
+	}
+}

@@ -45,12 +45,8 @@ func (s *Server) setAdminLibraries(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if err := store.SaveLocalLibraries(s.db, req.LocalLibraries); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	settings := s.federationSettingsForSave(req.Federation)
-	if err := store.SaveFederationSettings(s.db, settings); err != nil {
+	if err := store.SaveLibraryConfiguration(s.db, req.LocalLibraries, settings); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -64,6 +65,48 @@ func TestActiveScrobbleServices(t *testing.T) {
 	}
 	if got := activeScrobbleServices(false, nil); len(got) != 0 {
 		t.Errorf("none = %v, want empty", got)
+	}
+}
+
+func TestStartupLibraryRootsSeedFlagsThenUseEnabledDBRoots(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	cliRoot := filepath.Clean("/music/roots/../library")
+
+	roots, err := startupLibraryRoots(db, []string{cliRoot})
+	if err != nil {
+		t.Fatalf("startup roots: %v", err)
+	}
+	if !eq(roots, []string{cliRoot}) {
+		t.Fatalf("startup roots = %v, want [%s]", roots, cliRoot)
+	}
+
+	if err := store.SaveLocalLibraries(db, []store.LocalLibrary{{Path: cliRoot, Enabled: false}}); err != nil {
+		t.Fatalf("save disabled library: %v", err)
+	}
+	roots, err = startupLibraryRoots(db, []string{cliRoot})
+	if err != nil {
+		t.Fatalf("startup roots after disable: %v", err)
+	}
+	if len(roots) != 0 {
+		t.Fatalf("disabled DB library should suppress CLI root, got %v", roots)
+	}
+}
+
+func TestFederationSettingsPreferDBOverEnv(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	dbSettings := store.FederationSettings{Enabled: true, Role: "hub", Listen: ":9443", Token: "db-token", PeerID: "db-peer"}
+	if err := store.SaveFederationSettings(db, dbSettings); err != nil {
+		t.Fatalf("save federation settings: %v", err)
+	}
+
+	got, err := federationSettings(db, config.Federation{Role: "member", HubAddr: "env-hub", Token: "env-token", PeerID: "env-peer"})
+	if err != nil {
+		t.Fatalf("federation settings: %v", err)
+	}
+	if got != dbSettings {
+		t.Fatalf("federation settings = %#v, want %#v", got, dbSettings)
 	}
 }
 

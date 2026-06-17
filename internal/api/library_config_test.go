@@ -29,6 +29,29 @@ func TestAdminLibrariesSaveValidatesPathsAndPreservesSettings(t *testing.T) {
 	}
 }
 
+func TestAdminLibrariesSaveRejectsInvalidFederationWithoutSavingLibraries(t *testing.T) {
+	s, db := newTestServer(t)
+	if err := store.SaveLocalLibraries(db, []store.LocalLibrary{{Path: "/original", Enabled: true}}); err != nil {
+		t.Fatalf("save original library: %v", err)
+	}
+	body := `{"local_libraries":[{"path":"/changed","enabled":true}],"federation":{"enabled":true,"role":"member","token":"secret","peer_id":"peer"}}`
+	req := adminReq(t, db, http.MethodPost, "/api/admin/libraries", body)
+	rec := httptest.NewRecorder()
+
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid federation: want 400, got %d (%s)", rec.Code, rec.Body)
+	}
+	libs, err := store.ListLocalLibraries(db)
+	if err != nil {
+		t.Fatalf("list libraries: %v", err)
+	}
+	if len(libs) != 1 || libs[0].Path != "/original" {
+		t.Fatalf("library changes should not persist after invalid federation: %#v", libs)
+	}
+}
+
 func TestAdminLibrariesSaveAndScanRejectsConcurrentScan(t *testing.T) {
 	s, db := newTestServer(t)
 	p := &scan.Progress{}

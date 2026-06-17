@@ -57,6 +57,29 @@ func SaveLocalLibraries(db *sql.DB, libs []LocalLibrary) error {
 	return saveLocalLibraries(db, libs, true)
 }
 
+func SaveLibraryConfiguration(db *sql.DB, libs []LocalLibrary, settings FederationSettings) error {
+	normalizedLibs, err := normalizeLocalLibraries(libs)
+	if err != nil {
+		return err
+	}
+	settings = normalizeFederationSettings(settings)
+	if err := validateFederationSettings(settings); err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := saveLocalLibrariesTx(tx, normalizedLibs, true); err != nil {
+		return err
+	}
+	if err := saveFederationSettingsTx(tx, settings); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func saveLocalLibraries(db *sql.DB, libs []LocalLibrary, markInitialized bool) error {
 	normalized, err := normalizeLocalLibraries(libs)
 	if err != nil {
@@ -67,10 +90,17 @@ func saveLocalLibraries(db *sql.DB, libs []LocalLibrary, markInitialized bool) e
 		return err
 	}
 	defer tx.Rollback()
+	if err := saveLocalLibrariesTx(tx, normalized, markInitialized); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func saveLocalLibrariesTx(tx *sql.Tx, libs []LocalLibrary, markInitialized bool) error {
 	if _, err := tx.Exec(`DELETE FROM local_library`); err != nil {
 		return err
 	}
-	for _, lib := range normalized {
+	for _, lib := range libs {
 		if _, err := tx.Exec(
 			`INSERT INTO local_library(path, enabled, name, created_at, updated_at)
 			 VALUES(?, ?, ?, strftime('%s','now'), strftime('%s','now'))`,
@@ -87,7 +117,7 @@ func saveLocalLibraries(db *sql.DB, libs []LocalLibrary, markInitialized bool) e
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func normalizeLocalLibraries(libs []LocalLibrary) ([]LocalLibrary, error) {
@@ -171,13 +201,21 @@ func SaveFederationSettings(db *sql.DB, settings FederationSettings) error {
 	if err := validateFederationSettings(settings); err != nil {
 		return err
 	}
-	_, err := db.Exec(
-		`INSERT INTO federation_settings(id, enabled, role, hub_addr, listen, token, peer_id, created_at, updated_at)
-		 VALUES(1, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
-		 ON CONFLICT(id) DO UPDATE SET
-		   enabled=excluded.enabled, role=excluded.role, hub_addr=excluded.hub_addr,
-		   listen=excluded.listen, token=excluded.token, peer_id=excluded.peer_id,
-		   updated_at=strftime('%s','now')`,
+	_, err := db.Exec(federationSettingsUpsertSQL,
+		boolToInt(settings.Enabled), settings.Role, settings.HubAddr, settings.Listen, settings.Token, settings.PeerID,
+	)
+	return err
+}
+
+const federationSettingsUpsertSQL = `INSERT INTO federation_settings(id, enabled, role, hub_addr, listen, token, peer_id, created_at, updated_at)
+	 VALUES(1, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+	 ON CONFLICT(id) DO UPDATE SET
+	   enabled=excluded.enabled, role=excluded.role, hub_addr=excluded.hub_addr,
+	   listen=excluded.listen, token=excluded.token, peer_id=excluded.peer_id,
+	   updated_at=strftime('%s','now')`
+
+func saveFederationSettingsTx(tx *sql.Tx, settings FederationSettings) error {
+	_, err := tx.Exec(federationSettingsUpsertSQL,
 		boolToInt(settings.Enabled), settings.Role, settings.HubAddr, settings.Listen, settings.Token, settings.PeerID,
 	)
 	return err
@@ -234,5 +272,17 @@ func validateFederationSettings(settings FederationSettings) error {
 }
 
 func FederationSettingsEqual(a, b FederationSettings) bool {
-	return normalizeFederationSettings(a) == normalizeFederationSettings(b)
+	return comparableFederationSettings(a) == comparableFederationSettings(b)
+}
+
+func comparableFederationSettings(settings FederationSettings) FederationSettings {
+	settings = normalizeFederationSettings(settings)
+	if settings.Enabled {
+		return settings
+	}
+	settings.HubAddr = ""
+	settings.Listen = ""
+	settings.Token = ""
+	settings.PeerID = ""
+	return settings
 }
