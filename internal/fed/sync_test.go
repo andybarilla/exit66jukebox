@@ -40,6 +40,27 @@ func TestApplyCatalogReplacesPeerRows(t *testing.T) {
 	}
 }
 
+func TestApplyCatalogReplacesOnlyOneSourceLibrary(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+
+	first := []store.CatalogRow{{SourceLibraryID: "library-a", RemoteID: 1, Title: "One", ArtistName: "A", AlbumName: "Al"}}
+	second := []store.CatalogRow{{SourceLibraryID: "library-b", RemoteID: 1, Title: "Two", ArtistName: "A", AlbumName: "Al"}}
+	if err := ApplyCatalog(db, "home", first); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyCatalog(db, "home", second); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyCatalog(db, "home", []store.CatalogRow{{SourceLibraryID: "library-a", RemoteID: 1, Title: "One Updated", ArtistName: "A", AlbumName: "Al"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.ListTracks(db, "", 0, 0)
+	if len(got) != 2 {
+		t.Fatalf("expected replacing one source library to keep the other, got %d tracks", len(got))
+	}
+}
+
 func TestServeMergedIncludesHubOwnLibrary(t *testing.T) {
 	hubDB, _ := store.Open(":memory:")
 	defer hubDB.Close()

@@ -57,6 +57,56 @@ func SaveLocalLibraries(db *sql.DB, libs []LocalLibrary) error {
 	return saveLocalLibraries(db, libs, true)
 }
 
+func EnsureLocalLibrary(db *sql.DB, path, name string) (int64, error) {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "." {
+		path = ""
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = path
+	}
+	if _, err := db.Exec(
+		`INSERT INTO local_library(path, enabled, name, created_at, updated_at)
+		 VALUES(?, 1, ?, strftime('%s','now'), strftime('%s','now'))
+		 ON CONFLICT(path) DO UPDATE SET name = COALESCE(NULLIF(excluded.name, ''), local_library.name), updated_at = strftime('%s','now')`,
+		path, name,
+	); err != nil {
+		return 0, err
+	}
+	var id int64
+	err := db.QueryRow(`SELECT id FROM local_library WHERE path = ?`, path).Scan(&id)
+	return id, err
+}
+
+func EnsureRemoteLibrary(db *sql.DB, peer, sourceLibraryID, name string) (int64, error) {
+	peer = strings.TrimSpace(peer)
+	sourceLibraryID = strings.TrimSpace(sourceLibraryID)
+	if peer == "" {
+		return 0, errors.New("remote library peer cannot be blank")
+	}
+	if sourceLibraryID == "" {
+		sourceLibraryID = DefaultRemoteSourceLibraryID
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = sourceLibraryID
+	}
+	if _, err := db.Exec(
+		`INSERT INTO remote_library(source_peer, source_library_id, name, created_at, updated_at)
+		 VALUES(?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+		 ON CONFLICT(source_peer, source_library_id) DO UPDATE SET name = excluded.name, updated_at = strftime('%s','now')`,
+		peer, sourceLibraryID, name,
+	); err != nil {
+		return 0, err
+	}
+	var id int64
+	err := db.QueryRow(
+		`SELECT id FROM remote_library WHERE source_peer = ? AND source_library_id = ?`, peer, sourceLibraryID,
+	).Scan(&id)
+	return id, err
+}
+
 func SaveLibraryConfiguration(db *sql.DB, libs []LocalLibrary, settings FederationSettings) error {
 	normalizedLibs, err := normalizeLocalLibraries(libs)
 	if err != nil {
@@ -97,15 +147,60 @@ func saveLocalLibraries(db *sql.DB, libs []LocalLibrary, markInitialized bool) e
 }
 
 func saveLocalLibrariesTx(tx *sql.Tx, libs []LocalLibrary, markInitialized bool) error {
-	if _, err := tx.Exec(`DELETE FROM local_library`); err != nil {
-		return err
-	}
+	keepIDs := make([]int64, 0, len(libs))
 	for _, lib := range libs {
-		if _, err := tx.Exec(
+		if lib.ID > 0 {
+			if _, err := tx.Exec(
+				`INSERT INTO local_library(id, path, enabled, name, created_at, updated_at)
+				 VALUES(?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+				 ON CONFLICT(id) DO UPDATE SET
+				   path=excluded.path, enabled=excluded.enabled, name=excluded.name,
+				   updated_at=strftime('%s','now')`,
+				lib.ID, lib.Path, boolToInt(lib.Enabled), lib.Name,
+			); err != nil {
+				return err
+			}
+			keepIDs = append(keepIDs, lib.ID)
+			continue
+		}
+		var existingID int64
+		if err := tx.QueryRow(`SELECT id FROM local_library WHERE path = ?`, lib.Path).Scan(&existingID); err == nil {
+			if _, err := tx.Exec(
+				`UPDATE local_library SET enabled = ?, name = ?, updated_at = strftime('%s','now') WHERE id = ?`,
+				boolToInt(lib.Enabled), lib.Name, existingID,
+			); err != nil {
+				return err
+			}
+			keepIDs = append(keepIDs, existingID)
+			continue
+		} else if err != sql.ErrNoRows {
+			return err
+		}
+		res, err := tx.Exec(
 			`INSERT INTO local_library(path, enabled, name, created_at, updated_at)
 			 VALUES(?, ?, ?, strftime('%s','now'), strftime('%s','now'))`,
 			lib.Path, boolToInt(lib.Enabled), lib.Name,
-		); err != nil {
+		)
+		if err != nil {
+			return err
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		keepIDs = append(keepIDs, id)
+	}
+	if len(keepIDs) == 0 {
+		if _, err := tx.Exec(`DELETE FROM local_library`); err != nil {
+			return err
+		}
+	} else {
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(keepIDs)), ",")
+		args := make([]any, 0, len(keepIDs))
+		for _, id := range keepIDs {
+			args = append(args, id)
+		}
+		if _, err := tx.Exec(`DELETE FROM local_library WHERE id NOT IN (`+placeholders+`)`, args...); err != nil {
 			return err
 		}
 	}

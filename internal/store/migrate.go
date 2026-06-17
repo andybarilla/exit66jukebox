@@ -6,7 +6,9 @@ import "database/sql"
 // that stored columns can't re-derive, forcing a one-time full re-scan. v1:
 // albums re-keyed by album-artist (#32). v2: compilation flag forces "Various
 // Artists" when AlbumArtist is blank (#63). v3: comment-tag links extracted (#46).
-const currentLibraryVersion = 3
+const currentLibraryVersion = 4
+
+const DefaultRemoteSourceLibraryID = "default"
 
 // columnExists reports whether a column is present on a table.
 func columnExists(db *sql.DB, table, col string) (bool, error) {
@@ -93,13 +95,100 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	if has, err := columnExists(db, "track", "source_library_id"); err != nil {
+		return err
+	} else if !has {
+		if _, err := db.Exec(`ALTER TABLE track ADD COLUMN source_library_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if has, err := columnExists(db, "track", "library_id"); err != nil {
+		return err
+	} else if !has {
+		if _, err := db.Exec(`ALTER TABLE track ADD COLUMN library_id INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
 	if _, err := db.Exec(
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_track_remote
-		 ON track(source_peer, remote_id) WHERE source_peer <> ''`,
+		`CREATE TABLE IF NOT EXISTS remote_library (
+			id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			source_peer       TEXT NOT NULL,
+			source_library_id TEXT NOT NULL,
+			name              TEXT NOT NULL DEFAULT '',
+			created_at        INTEGER NOT NULL,
+			updated_at        INTEGER NOT NULL,
+			UNIQUE(source_peer, source_library_id)
+		)`,
+	); err != nil {
+		return err
+	}
+	if err := backfillTrackLibraries(db); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_track_remote`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_track_remote_library
+		 ON track(source_peer, source_library_id, remote_id) WHERE source_peer <> ''`,
+	); err != nil {
+		return err
+	}
+	if _, err := db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_track_local_library_path
+		 ON track(library_id, path) WHERE source_peer = ''`,
 	); err != nil {
 		return err
 	}
 	return migrateLibraryVersion(db)
+}
+
+func backfillTrackLibraries(db *sql.DB) error {
+	var localTracksNeedingLibrary int
+	if err := db.QueryRow(`SELECT count(*) FROM track WHERE source_peer = '' AND library_id = 0`).Scan(&localTracksNeedingLibrary); err != nil {
+		return err
+	}
+	if localTracksNeedingLibrary > 0 {
+		defaultLocalLibraryID, err := EnsureLocalLibrary(db, "", "Default Library")
+		if err != nil {
+			return err
+		}
+		if _, err := db.Exec(
+			`UPDATE track SET library_id = ? WHERE source_peer = '' AND library_id = 0`, defaultLocalLibraryID,
+		); err != nil {
+			return err
+		}
+	}
+	rows, err := db.Query(`SELECT DISTINCT source_peer FROM track WHERE source_peer <> ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var peers []string
+	for rows.Next() {
+		var peer string
+		if err := rows.Scan(&peer); err != nil {
+			return err
+		}
+		peers = append(peers, peer)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, peer := range peers {
+		remoteLibraryID, err := EnsureRemoteLibrary(db, peer, DefaultRemoteSourceLibraryID, "Default Library")
+		if err != nil {
+			return err
+		}
+		if _, err := db.Exec(
+			`UPDATE track SET library_id = ?, source_library_id = ?
+			 WHERE source_peer = ? AND (library_id = 0 OR source_library_id = '')`,
+			remoteLibraryID, DefaultRemoteSourceLibraryID, peer,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrateLibraryVersion forces a one-time full re-scan when the stored

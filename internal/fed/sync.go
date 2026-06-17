@@ -16,19 +16,31 @@ import (
 // fresh autoincrement id every sync cycle, 404ing ids a client already holds
 // (browse→play) and orphaning queue rows.
 func ApplyCatalog(db *sql.DB, peer string, rows []store.CatalogRow) error {
-	keep := make([]int64, 0, len(rows))
+	if len(rows) == 0 {
+		return store.DeleteRemoteTracks(db, peer)
+	}
+	keepByLibrary := map[string][]int64{}
 	for _, c := range rows {
+		sourceLibraryID := c.SourceLibraryID
+		if sourceLibraryID == "" {
+			sourceLibraryID = store.DefaultRemoteSourceLibraryID
+		}
 		if _, err := store.UpsertRemoteTrack(db, store.RemoteTrack{
-			SourcePeer: peer, RemoteID: c.RemoteID,
+			SourcePeer: peer, SourceLibraryID: sourceLibraryID, SourceLibraryName: c.SourceLibraryName, RemoteID: c.RemoteID,
 			Title: c.Title, ArtistName: c.ArtistName, AlbumArtist: c.AlbumArtist,
 			AlbumName: c.AlbumName, TrackNo: c.TrackNo, Genre: c.Genre,
 			Duration: c.Duration, Links: c.Links,
 		}); err != nil {
 			return err
 		}
-		keep = append(keep, c.RemoteID)
+		keepByLibrary[sourceLibraryID] = append(keepByLibrary[sourceLibraryID], c.RemoteID)
 	}
-	return store.DeleteRemoteTracksExcept(db, peer, keep)
+	for sourceLibraryID, keep := range keepByLibrary {
+		if err := store.DeleteRemoteLibraryTracksExcept(db, peer, sourceLibraryID, keep); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // PullAndApply (member side) fetches the merged catalog from the hub, applies
