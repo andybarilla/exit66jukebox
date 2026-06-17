@@ -13,5 +13,5 @@ covers/
 
 .env
 .claude/worktrees
-
+.worktrees/
 
