@@ -110,3 +110,45 @@ func TestAdminLibrariesReadMasksTokenAndReportsRestartRequired(t *testing.T) {
 		t.Fatalf("response should require restart: %s", body)
 	}
 }
+
+func TestAdminFederationPeersManualAddAndList(t *testing.T) {
+	s, db := newTestServer(t)
+	req := adminReq(t, db, http.MethodPost, "/api/admin/federation/peers", `{"peer_id":"peer-a","display_name":"Peer A","address":"127.0.0.1:9443"}`)
+	cookies := req.Cookies()
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("manual peer add: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/admin/federation/peers", nil)
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list peers: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"peer_id":"peer-a"`) || !strings.Contains(body, `"status":"accepted"`) {
+		t.Fatalf("manual accepted peer missing from response: %s", body)
+	}
+}
+
+func TestAdminFederationPeersApprovesAuthenticatedDiscovery(t *testing.T) {
+	s, db := newTestServer(t)
+	if err := store.SaveFederationPeer(db, store.FederationPeer{PeerID: "peer-b", Address: "192.168.1.9:9443", Status: store.PeerStatusPending, TokenAuthenticated: true}); err != nil {
+		t.Fatalf("seed peer: %v", err)
+	}
+	req := adminReq(t, db, http.MethodPost, "/api/admin/federation/peers/peer-b/approve", "")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("approve peer: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	peers, err := store.ListFederationPeers(db, store.PeerStatusAccepted)
+	if err != nil || len(peers) != 1 || peers[0].PeerID != "peer-b" {
+		t.Fatalf("accepted peers = %#v err=%v", peers, err)
+	}
+}
