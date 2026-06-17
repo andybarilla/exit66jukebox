@@ -348,8 +348,8 @@ func validateFederationSettings(settings FederationSettings) error {
 	if !settings.Enabled {
 		return nil
 	}
-	if settings.Role != "hub" && settings.Role != "member" {
-		return errors.New("federation role must be hub or member")
+	if settings.Role != "hub" && settings.Role != "member" && settings.Role != "peer" {
+		return errors.New("federation role must be hub, member, or peer")
 	}
 	if settings.Token == "" {
 		return errors.New("federation token is required")
@@ -357,8 +357,8 @@ func validateFederationSettings(settings FederationSettings) error {
 	if settings.PeerID == "" {
 		return errors.New("federation peer id is required")
 	}
-	if settings.Role == "hub" && settings.Listen == "" {
-		return errors.New("federation listen address is required for hub role")
+	if (settings.Role == "hub" || settings.Role == "peer") && settings.Listen == "" {
+		return fmt.Errorf("federation listen address is required for %s role", settings.Role)
 	}
 	if settings.Role == "member" && settings.HubAddr == "" {
 		return errors.New("federation hub address is required for member role")
