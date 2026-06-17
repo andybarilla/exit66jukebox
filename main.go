@@ -59,6 +59,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("signing secret: %v", err)
 	}
+	libraryRoots, err := startupLibraryRoots(db, cfg.Library())
+	if err != nil {
+		log.Fatalf("library settings: %v", err)
+	}
+	fedSettings, err := federationSettings(db, cfg.Federation)
+	if err != nil {
+		log.Fatalf("federation settings: %v", err)
+	}
 
 	jb := jukebox.New(db, jukebox.Config{HistoryWindow: cfg.HistoryWindow})
 
@@ -91,13 +99,13 @@ func main() {
 	// shared Progress is attached to the API server below so GET /api/scan can
 	// report live status; it stays nil when no library is configured.
 	var scanProgress *scan.Progress
-	if roots := cfg.Library(); len(roots) > 0 {
+	if len(libraryRoots) > 0 {
 		scanProgress = &scan.Progress{}
 		scanProgress.SetRunning(true)
 		go func() {
 			defer scanProgress.SetRunning(false)
-			log.Printf("scanning %v ...", roots)
-			res, err := scan.Scan(db, roots, cfg.ScanWorkers, scanProgress)
+			log.Printf("scanning %v ...", libraryRoots)
+			res, err := scan.Scan(db, libraryRoots, cfg.ScanWorkers, scanProgress)
 			if err != nil {
 				log.Printf("scan error: %v", err)
 				return
@@ -234,6 +242,7 @@ func main() {
 	srv.SetListenAddr(cfg.Addr)
 	srv.SetMuteLocalOnCast(cfg.MuteLocalOnCast)
 	srv.SetSigningSecret(signingSecret)
+	srv.SetScanWorkers(cfg.ScanWorkers)
 	mailer := email.New(email.Config{
 		Host: cfg.SMTP.Host, Port: cfg.SMTP.Port, User: cfg.SMTP.User,
 		Pass: cfg.SMTP.Pass, From: cfg.SMTP.From,
@@ -248,6 +257,7 @@ func main() {
 	}
 	srv.RegisterStream(houseID, houseHub, houseBus, houseNP)
 	srv.SetScanProgress(scanProgress)
+	srv.SetActiveFederation(fedSettings)
 
 	// MusicBrainz/Cover Art Archive enrichment, triggered via POST /api/enrich.
 	// Covers are cached next to the DB file. ≤1 req/sec, descriptive UA.
@@ -278,31 +288,31 @@ func main() {
 	// Federation: dial/listen for peers and resolve remote-track audio through the
 	// relay. MemberHandler exposes this instance's API over the session so a hub
 	// can fetch /api/tracks/{id}/audio from it.
-	if cfg.Federation.Enabled() {
+	if fedSettings.Enabled {
 		reg := fed.NewRegistry()
 		fm := &fed.Manager{
-			Role:          cfg.Federation.Role,
-			Token:         cfg.Federation.Token,
-			PeerID:        cfg.Federation.PeerID,
-			HubAddr:       cfg.Federation.HubAddr, // member: hub to dial
-			HubListen:     cfg.Federation.Listen,  // hub: local listen addr
+			Role:          fedSettings.Role,
+			Token:         fedSettings.Token,
+			PeerID:        fedSettings.PeerID,
+			HubAddr:       fedSettings.HubAddr, // member: hub to dial
+			HubListen:     fedSettings.Listen,  // hub: local listen addr
 			MemberHandler: srv.Handler(),
 			Registry:      reg,
 			DB:            db,
 		}
-		if cfg.Federation.Role == "hub" {
+		if fedSettings.Role == "hub" {
 			// One relay instance shared by the session handler and the resolver so
 			// the hub's own browse sees remote tracks (catalog ingest lands here in a
 			// later task). It holds the registry and the hub's DB.
 			relay := fed.NewRelay(reg, db)
-			relay.SetSelf(cfg.Federation.PeerID)
+			relay.SetSelf(fedSettings.PeerID)
 			fm.Relay = relay
 			fm.HubHandler = relay.Routes()
 		}
 		fm.Start()
 		srv.SetFedResolver(fed.NewResolverFor(fm))
 		srv.SetFedPeers(fm.OnlinePeers)
-		log.Printf("federation: role=%s peer=%s", cfg.Federation.Role, cfg.Federation.PeerID)
+		log.Printf("federation: role=%s peer=%s", fedSettings.Role, fedSettings.PeerID)
 	}
 
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)
@@ -343,6 +353,31 @@ func waitForClose(done <-chan struct{}, timeout time.Duration) bool {
 	case <-time.After(timeout):
 		return false
 	}
+}
+
+func startupLibraryRoots(db *sql.DB, cliRoots []string) ([]string, error) {
+	if err := store.SeedLocalLibraries(db, cliRoots); err != nil {
+		return nil, err
+	}
+	return store.EnabledLocalLibraryRoots(db)
+}
+
+func federationSettings(db *sql.DB, env config.Federation) (store.FederationSettings, error) {
+	settings, ok, err := store.LoadFederationSettings(db)
+	if err != nil {
+		return store.FederationSettings{}, err
+	}
+	if ok {
+		return settings, nil
+	}
+	return store.FederationSettings{
+		Enabled: env.Enabled(),
+		Role:    env.Role,
+		HubAddr: env.HubAddr,
+		Listen:  env.Listen,
+		Token:   env.Token,
+		PeerID:  env.PeerID,
+	}, nil
 }
 
 // nowPlayer is anything that accepts a fire-and-forget now-playing notification.

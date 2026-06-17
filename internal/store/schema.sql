@@ -42,6 +42,25 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS local_library (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    path       TEXT NOT NULL UNIQUE,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    name       TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS federation_settings (
+    id         INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled    INTEGER NOT NULL DEFAULT 0,
+    role       TEXT NOT NULL DEFAULT '',
+    hub_addr   TEXT NOT NULL DEFAULT '',
+    listen     TEXT NOT NULL DEFAULT '',
+    token      TEXT NOT NULL DEFAULT '',
+    peer_id    TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS stream (
     id   TEXT PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
