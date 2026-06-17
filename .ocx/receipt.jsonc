@@ -50,7 +50,7 @@
           "hash": "2c7a1609f214b7e1bd427ef5d14f615dbfee7b021962b7b28f4cc7c83c701578"
         }
       ],
-      "installedAt": "2026-06-17T16:51:52.999Z"
+      "installedAt": "2026-06-17T16:52:59.966Z"
     },
     "https://registry.kdco.dev::kdco/worktree@sha256:b5306aa8166234f186cde908f519f4f4667f70161fc2dbdb5055a8f79d9ecb30": {
       "registryUrl": "https://registry.kdco.dev",
@@ -389,7 +389,7 @@
           "hash": "2909871433a30ae49aad240068f9d350ebe90333dda799a45d022be6d2fd1559"
         }
       ],
-      "installedAt": "2026-06-17T16:51:37.669Z"
+      "installedAt": "2026-06-17T16:52:59.967Z"
     },
     "https://registry.kdco.dev::kdco/code-philosophy@sha256:c41fffa9bb00b6e3b7df547158a0ba29d47a783d4b3299af5f0c8ed3dfcd621c": {
       "registryUrl": "https://registry.kdco.dev",
