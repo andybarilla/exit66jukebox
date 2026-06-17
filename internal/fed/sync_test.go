@@ -183,7 +183,7 @@ func TestApplyCatalogStoresSourceLibraryID(t *testing.T) {
 	}
 }
 
-func TestApplyCatalogPrunesOnlyRequestedPeerLibrary(t *testing.T) {
+func TestApplyCatalogPrunesOnlyRequestedLibraryRows(t *testing.T) {
 	db, _ := store.Open(":memory:")
 	defer db.Close()
 	seed := []struct {
@@ -203,13 +203,17 @@ func TestApplyCatalogPrunesOnlyRequestedPeerLibrary(t *testing.T) {
 		t.Fatalf("apply replacement: %v", err)
 	}
 	tracks, _ := store.ListTracks(db, "", 0, 0)
-	if len(tracks) != 2 {
-		t.Fatalf("per-library prune should remove absent libraries and keep other peers, got %+v", tracks)
+	if len(tracks) != 3 {
+		t.Fatalf("per-library prune should keep absent libraries and other peers, got %+v", tracks)
 	}
+	foundPeerLibrary := false
 	for _, track := range tracks {
 		if track.SourcePeer == "peer-a" && track.SourceLibraryID == "library-b" {
-			t.Fatalf("absent library-b track should be pruned: %+v", tracks)
+			foundPeerLibrary = true
 		}
+	}
+	if !foundPeerLibrary {
+		t.Fatalf("absent library-b track should be kept: %+v", tracks)
 	}
 }
 
