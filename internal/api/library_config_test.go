@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/scan"
@@ -68,6 +69,25 @@ func TestAdminLibrariesSaveAndScanRejectsConcurrentScan(t *testing.T) {
 	if len(libs) != 1 || libs[0].Path != "/tmp" {
 		t.Fatalf("save should persist despite scan conflict: %#v", libs)
 	}
+}
+
+func TestScanProgressAccessIsConcurrentSafe(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	var wg sync.WaitGroup
+	for range 64 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			s.SetScanProgress(&scan.Progress{})
+		}()
+		go func() {
+			defer wg.Done()
+			rec := httptest.NewRecorder()
+			s.scanStatus(rec, httptest.NewRequest(http.MethodGet, "/api/scan", nil))
+		}()
+	}
+	wg.Wait()
 }
 
 func TestAdminLibrariesReadMasksTokenAndReportsRestartRequired(t *testing.T) {

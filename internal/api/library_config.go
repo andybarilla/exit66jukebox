@@ -108,6 +108,8 @@ func (s *Server) startLibraryScan() error {
 	if len(roots) == 0 {
 		return errNoEnabledLibraries{}
 	}
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
 	if s.scan != nil && s.scan.Snapshot().Running {
 		return errScanAlreadyRunning{}
 	}

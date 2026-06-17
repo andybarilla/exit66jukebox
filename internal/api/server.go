@@ -31,7 +31,8 @@ type Server struct {
 	nowPlaying  map[string]*NowPlaying // current-track trackers for shared streams
 	enrich      *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
 	recommend   *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
-	scan        *scan.Progress         // nil until SetScanProgress (no library); endpoint 503 while nil
+	scanMu      sync.Mutex
+	scan        *scan.Progress // nil until SetScanProgress (no library); endpoint 503 while nil
 	scanWorkers int
 	fedResolver fed.Resolver    // nil unless federation is configured
 	fedPeers    func() []string // returns online peer ids; nil when federation off
@@ -109,7 +110,11 @@ func (s *Server) SetRecommendRunner(r *recommend.Runner) { s.recommend = r }
 
 // SetScanProgress attaches the library scan progress that backs GET /api/scan.
 // Left nil when no library is configured (no scan ever runs).
-func (s *Server) SetScanProgress(p *scan.Progress) { s.scan = p }
+func (s *Server) SetScanProgress(p *scan.Progress) {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+	s.scan = p
+}
 
 func (s *Server) SetScanWorkers(n int) { s.scanWorkers = n }
 
