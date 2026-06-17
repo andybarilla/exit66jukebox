@@ -17,22 +17,25 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/recommend"
 	"github.com/andybarilla/exit66jukebox/internal/scan"
 	"github.com/andybarilla/exit66jukebox/internal/sonos"
+	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
 // Server holds dependencies and builds the HTTP handler.
 type Server struct {
-	db         *sql.DB
-	jb         *jukebox.Jukebox
-	ui         fs.FS
-	listenAddr string // server's own listen addr, for building Sonos-reachable URLs
-	hubs       map[string]*broadcast.Hub
-	buses      map[string]*events.Bus
-	nowPlaying map[string]*NowPlaying // current-track trackers for shared streams
+	db          *sql.DB
+	jb          *jukebox.Jukebox
+	ui          fs.FS
+	listenAddr  string // server's own listen addr, for building Sonos-reachable URLs
+	hubs        map[string]*broadcast.Hub
+	buses       map[string]*events.Bus
+	nowPlaying  map[string]*NowPlaying // current-track trackers for shared streams
 	enrich      *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
 	recommend   *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
 	scan        *scan.Progress         // nil until SetScanProgress (no library); endpoint 503 while nil
-	fedResolver fed.Resolver           // nil unless federation is configured
-	fedPeers    func() []string        // returns online peer ids; nil when federation off
+	scanWorkers int
+	fedResolver fed.Resolver    // nil unless federation is configured
+	fedPeers    func() []string // returns online peer ids; nil when federation off
+	activeFed   store.FederationSettings
 
 	// muteLocalOnCast is exposed via GET /api/config so the frontend can mute the
 	// local <audio> while a Sonos cast is active. Sourced from config (env for now).
@@ -72,12 +75,12 @@ type Server struct {
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 	return &Server{
 		db: db, jb: jb, ui: ui,
-		hubs:        make(map[string]*broadcast.Hub),
-		buses:       make(map[string]*events.Bus),
-		nowPlaying:  make(map[string]*NowPlaying),
+		hubs:          make(map[string]*broadcast.Hub),
+		buses:         make(map[string]*events.Bus),
+		nowPlaying:    make(map[string]*NowPlaying),
 		loginAttempts: make(map[string][]int64),
 		sonosIPs:      make(map[string]bool),
-		sonosManual: make(map[string]string),
+		sonosManual:   make(map[string]string),
 		manualVerify: func(ip string) (string, bool) {
 			return sonos.Verify(sonos.DescriptorURL(ip))
 		},
@@ -108,6 +111,8 @@ func (s *Server) SetRecommendRunner(r *recommend.Runner) { s.recommend = r }
 // Left nil when no library is configured (no scan ever runs).
 func (s *Server) SetScanProgress(p *scan.Progress) { s.scan = p }
 
+func (s *Server) SetScanWorkers(n int) { s.scanWorkers = n }
+
 // SetFedResolver attaches the federation resolver used to proxy audio for
 // tracks owned by other peers. Left nil when federation is off.
 func (s *Server) SetFedResolver(r fed.Resolver) { s.fedResolver = r }
@@ -115,6 +120,8 @@ func (s *Server) SetFedResolver(r fed.Resolver) { s.fedResolver = r }
 // SetFedPeers attaches a source of currently-online federation peer ids,
 // surfaced via GET /api/config so the UI can grey out offline peers' tracks.
 func (s *Server) SetFedPeers(fn func() []string) { s.fedPeers = fn }
+
+func (s *Server) SetActiveFederation(settings store.FederationSettings) { s.activeFed = settings }
 
 // SetMuteLocalOnCast records whether the frontend should mute local audio while
 // casting; exposed via GET /api/config.
@@ -195,6 +202,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/streams/{id}/station", s.requireAdminShared(s.stopStationHandler))
 	mux.HandleFunc("GET /api/admin/settings", s.requireAdmin(s.getAdminSettings))
 	mux.HandleFunc("POST /api/admin/settings", s.requireAdmin(s.setAdminSettings))
+	mux.HandleFunc("GET /api/admin/libraries", s.requireAdmin(s.getAdminLibraries))
+	mux.HandleFunc("POST /api/admin/libraries", s.requireAdmin(s.setAdminLibraries))
 	mux.HandleFunc("POST /api/admin/invites", s.requireAdmin(s.createInvite))
 	mux.HandleFunc("GET /api/admin/invites", s.requireAdmin(s.listInvites))
 	mux.HandleFunc("DELETE /api/admin/invites/{id}", s.requireAdmin(s.deleteInvite))

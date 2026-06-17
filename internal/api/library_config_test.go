@@ -1,0 +1,69 @@
+package api
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/andybarilla/exit66jukebox/internal/scan"
+	"github.com/andybarilla/exit66jukebox/internal/store"
+)
+
+func TestAdminLibrariesRequiresAdmin(t *testing.T) {
+	s, _ := newTestServer(t)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/admin/libraries", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET libraries without session: want 401, got %d", rec.Code)
+	}
+}
+
+func TestAdminLibrariesSaveValidatesPathsAndPreservesSettings(t *testing.T) {
+	s, db := newTestServer(t)
+	req := adminReq(t, db, http.MethodPost, "/api/admin/libraries", `{"local_libraries":[{"path":"/music"},{"path":"/music/."}],"federation":{"enabled":false}}`)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("duplicate paths: want 400, got %d (%s)", rec.Code, rec.Body)
+	}
+}
+
+func TestAdminLibrariesSaveAndScanRejectsConcurrentScan(t *testing.T) {
+	s, db := newTestServer(t)
+	p := &scan.Progress{}
+	p.SetRunning(true)
+	s.SetScanProgress(p)
+
+	req := adminReq(t, db, http.MethodPost, "/api/admin/libraries", `{"save_and_scan":true,"local_libraries":[{"path":"/tmp","enabled":true}],"federation":{"enabled":false}}`)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("concurrent scan: want 409, got %d (%s)", rec.Code, rec.Body)
+	}
+	libs, _ := store.ListLocalLibraries(db)
+	if len(libs) != 1 || libs[0].Path != "/tmp" {
+		t.Fatalf("save should persist despite scan conflict: %#v", libs)
+	}
+}
+
+func TestAdminLibrariesReadMasksTokenAndReportsRestartRequired(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetActiveFederation(store.FederationSettings{Enabled: false})
+	if err := store.SaveFederationSettings(db, store.FederationSettings{Enabled: true, Role: "hub", Listen: ":9443", Token: "secret", PeerID: "peer"}); err != nil {
+		t.Fatalf("save federation: %v", err)
+	}
+	req := adminReq(t, db, http.MethodGet, "/api/admin/libraries", "")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read libraries: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "secret") {
+		t.Fatalf("response leaked federation token: %s", body)
+	}
+	if !strings.Contains(body, `"restart_required":true`) {
+		t.Fatalf("response should require restart: %s", body)
+	}
+}

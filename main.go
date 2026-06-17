@@ -345,6 +345,24 @@ func waitForClose(done <-chan struct{}, timeout time.Duration) bool {
 	}
 }
 
+func federationSettings(db *sql.DB, env config.Federation) (store.FederationSettings, error) {
+	settings, ok, err := store.LoadFederationSettings(db)
+	if err != nil {
+		return store.FederationSettings{}, err
+	}
+	if ok {
+		return settings, nil
+	}
+	return store.FederationSettings{
+		Enabled: env.Enabled(),
+		Role:    env.Role,
+		HubAddr: env.HubAddr,
+		Listen:  env.Listen,
+		Token:   env.Token,
+		PeerID:  env.PeerID,
+	}, nil
+}
+
 // nowPlayer is anything that accepts a fire-and-forget now-playing notification.
 // Both ListenBrainz and Last.fm clients satisfy it.
 type nowPlayer interface {
