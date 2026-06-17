@@ -311,6 +311,7 @@ func main() {
 		}
 		if fedSettings.Role == "peer" {
 			fm.PeerHandler = fed.PeerRoutes(db, srv.Handler())
+			fed.StartLANDiscovery(rootCtx, db, fedSettings.PeerID, fedSettings.PeerID, fedSettings.Listen)
 		}
 		fm.Start()
 		srv.SetFedResolver(fed.NewResolverFor(fm))
