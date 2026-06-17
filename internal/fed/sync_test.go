@@ -40,24 +40,20 @@ func TestApplyCatalogReplacesPeerRows(t *testing.T) {
 	}
 }
 
-func TestApplyCatalogReplacesOnlyOneSourceLibrary(t *testing.T) {
+func TestApplyCatalogKeepsSameRemoteIDAcrossLibrariesInFullCatalog(t *testing.T) {
 	db, _ := store.Open(":memory:")
 	defer db.Close()
 
-	first := []store.CatalogRow{{SourceLibraryID: "library-a", RemoteID: 1, Title: "One", ArtistName: "A", AlbumName: "Al"}}
-	second := []store.CatalogRow{{SourceLibraryID: "library-b", RemoteID: 1, Title: "Two", ArtistName: "A", AlbumName: "Al"}}
-	if err := ApplyCatalog(db, "home", first); err != nil {
-		t.Fatal(err)
+	rows := []store.CatalogRow{
+		{SourceLibraryID: "library-a", RemoteID: 1, Title: "One", ArtistName: "A", AlbumName: "Al"},
+		{SourceLibraryID: "library-b", RemoteID: 1, Title: "Two", ArtistName: "A", AlbumName: "Al"},
 	}
-	if err := ApplyCatalog(db, "home", second); err != nil {
-		t.Fatal(err)
-	}
-	if err := ApplyCatalog(db, "home", []store.CatalogRow{{SourceLibraryID: "library-a", RemoteID: 1, Title: "One Updated", ArtistName: "A", AlbumName: "Al"}}); err != nil {
+	if err := ApplyCatalog(db, "home", rows); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := store.ListTracks(db, "", 0, 0)
 	if len(got) != 2 {
-		t.Fatalf("expected replacing one source library to keep the other, got %d tracks", len(got))
+		t.Fatalf("expected same remote id in two libraries to keep both tracks, got %d tracks", len(got))
 	}
 }
 
@@ -183,7 +179,7 @@ func TestApplyCatalogStoresSourceLibraryID(t *testing.T) {
 	}
 }
 
-func TestApplyCatalogPrunesOnlyRequestedLibraryRows(t *testing.T) {
+func TestApplyCatalogPrunesAbsentLibrariesFromFullCatalog(t *testing.T) {
 	db, _ := store.Open(":memory:")
 	defer db.Close()
 	seed := []struct {
@@ -203,17 +199,24 @@ func TestApplyCatalogPrunesOnlyRequestedLibraryRows(t *testing.T) {
 		t.Fatalf("apply replacement: %v", err)
 	}
 	tracks, _ := store.ListTracks(db, "", 0, 0)
-	if len(tracks) != 3 {
-		t.Fatalf("per-library prune should keep absent libraries and other peers, got %+v", tracks)
+	if len(tracks) != 2 {
+		t.Fatalf("full catalog prune should remove absent peer libraries and keep other peers, got %+v", tracks)
 	}
-	foundPeerLibrary := false
+	foundAbsentPeerLibrary := false
+	foundOtherPeer := false
 	for _, track := range tracks {
 		if track.SourcePeer == "peer-a" && track.SourceLibraryID == "library-b" {
-			foundPeerLibrary = true
+			foundAbsentPeerLibrary = true
+		}
+		if track.SourcePeer == "peer-b" && track.SourceLibraryID == "library-a" {
+			foundOtherPeer = true
 		}
 	}
-	if !foundPeerLibrary {
-		t.Fatalf("absent library-b track should be kept: %+v", tracks)
+	if foundAbsentPeerLibrary {
+		t.Fatalf("absent library-b track should be pruned: %+v", tracks)
+	}
+	if !foundOtherPeer {
+		t.Fatalf("other peer track should be kept: %+v", tracks)
 	}
 }
 
