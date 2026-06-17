@@ -36,6 +36,38 @@ func TestUpsertTrackIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestUpsertTrackKeysByLibraryAndPath(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	firstLibraryID, err := EnsureLocalLibrary(db, "/first", "First")
+	if err != nil {
+		t.Fatalf("first library: %v", err)
+	}
+	secondLibraryID, err := EnsureLocalLibrary(db, "/second", "Second")
+	if err != nil {
+		t.Fatalf("second library: %v", err)
+	}
+	track := model.Track{Path: "song.mp3", ModTime: 100, Size: 2048, Title: "Song"}
+	firstTrackID, err := UpsertTrackInLibrary(db, firstLibraryID, track, "Artist", "", "Album")
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	secondTrackID, err := UpsertTrackInLibrary(db, secondLibraryID, track, "Artist", "", "Album")
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if firstTrackID == secondTrackID {
+		t.Fatalf("expected matching paths in different libraries to use distinct track rows")
+	}
+	if _, _, ok := TrackStampInLibrary(db, secondLibraryID, "song.mp3"); !ok {
+		t.Fatalf("expected unchanged-file stamp scoped to second library")
+	}
+}
+
 func TestListTracksSearchAndPage(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()

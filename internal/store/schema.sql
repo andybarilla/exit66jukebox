@@ -17,7 +17,7 @@ CREATE INDEX IF NOT EXISTS idx_album_sortkey  ON album(sort_key, id);
 CREATE INDEX IF NOT EXISTS idx_artist_sortkey ON artist(sort_key, id);
 CREATE TABLE IF NOT EXISTS track (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    path       TEXT NOT NULL UNIQUE,
+    path       TEXT NOT NULL,
     mod_time   INTEGER NOT NULL,
     size       INTEGER NOT NULL,
     title      TEXT NOT NULL,
@@ -30,11 +30,15 @@ CREATE TABLE IF NOT EXISTS track (
     added_at   INTEGER NOT NULL DEFAULT 0,
     mbid        TEXT NOT NULL DEFAULT '',
     links       TEXT NOT NULL DEFAULT '',
-    source_peer TEXT NOT NULL DEFAULT '',
-    remote_id   INTEGER NOT NULL DEFAULT 0
+    source_peer       TEXT NOT NULL DEFAULT '',
+    source_library_id TEXT NOT NULL DEFAULT '',
+    remote_id         INTEGER NOT NULL DEFAULT 0,
+    library_id        INTEGER NOT NULL DEFAULT 0
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_track_remote
-  ON track(source_peer, remote_id) WHERE source_peer <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_track_remote_library
+  ON track(source_peer, source_library_id, remote_id) WHERE source_peer <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_track_local_library_path
+  ON track(library_id, path) WHERE source_peer = '';
 CREATE INDEX IF NOT EXISTS idx_track_artist ON track(artist_id);
 CREATE INDEX IF NOT EXISTS idx_track_album  ON track(album_id);
 
@@ -49,6 +53,15 @@ CREATE TABLE IF NOT EXISTS local_library (
     name       TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS remote_library (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_peer       TEXT NOT NULL,
+    source_library_id TEXT NOT NULL,
+    name              TEXT NOT NULL DEFAULT '',
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL,
+    UNIQUE(source_peer, source_library_id)
 );
 CREATE TABLE IF NOT EXISTS federation_settings (
     id         INTEGER PRIMARY KEY CHECK (id = 1),
