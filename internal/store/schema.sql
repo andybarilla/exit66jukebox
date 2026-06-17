@@ -74,6 +74,20 @@ CREATE TABLE IF NOT EXISTS federation_settings (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS federation_peer (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    peer_id             TEXT NOT NULL,
+    display_name        TEXT NOT NULL DEFAULT '',
+    address             TEXT NOT NULL,
+    status              TEXT NOT NULL,
+    manual              INTEGER NOT NULL DEFAULT 0,
+    token_authenticated INTEGER NOT NULL DEFAULT 0,
+    last_seen_at        INTEGER NOT NULL DEFAULT 0,
+    created_at          INTEGER NOT NULL,
+    updated_at          INTEGER NOT NULL,
+    UNIQUE(peer_id, address)
+);
+CREATE INDEX IF NOT EXISTS idx_federation_peer_status ON federation_peer(status, peer_id);
 CREATE TABLE IF NOT EXISTS stream (
     id   TEXT PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
