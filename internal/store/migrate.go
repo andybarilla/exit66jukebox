@@ -80,7 +80,7 @@ func migrate(db *sql.DB) error {
 	// Federation: remote rows carry their owning peer and the track's id on that
 	// peer. Local rows leave both empty/0 (#86). path is "" for remote tracks, so
 	// the path-unique index can't key them — a partial unique index on
-	// (source_peer, remote_id) covers remote rows instead (added in schema.sql).
+	// (source_peer, source_library_id, remote_id) covers remote rows instead.
 	if has, err := columnExists(db, "track", "source_peer"); err != nil {
 		return err
 	} else if !has {
