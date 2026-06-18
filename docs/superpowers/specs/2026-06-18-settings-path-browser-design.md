@@ -1,6 +1,6 @@
 # Settings Path Browser — Design
 
-Status: approved
+Status: review-ready
 Date: 2026-06-18
 
 ## Goal
@@ -39,11 +39,11 @@ Make the admin settings library editor safer and easier to use:
 
 Add a Browse button beside each local library path in `AdminPanel.svelte`. Clicking it opens an in-panel modal for selecting a server directory. The modal shows the current server path, a parent action when available, child directories, loading state, and errors. “Use this folder” copies the modal's current path into the source row and closes the modal.
 
-Add a small admin-only directory listing endpoint, `GET /api/admin/library-paths?path=<path>`. The endpoint expands `~`, cleans the path, validates that it is readable and a directory, then returns the normalized current path, parent path, and child directories.
+Add a small admin-only directory listing endpoint, `GET /api/admin/library-paths?path=<path>`. The endpoint expands supported `~` forms, cleans the path lexically, validates that it resolves to a readable directory under normal `os.Stat` semantics, then returns the cleaned current path, parent path, and child directories.
 
 Move `~` support into the store-side local library normalization boundary so all library saves share the same behavior. Saved library paths become resolved absolute paths, preserving the existing trim, clean, blank rejection, and duplicate detection behavior.
 
-Track a clean snapshot of editable settings after initial load and after successful save. Derive `hasUnsavedChanges` by comparing the current editable state to that snapshot. Any settings close path asks for confirmation before discarding dirty edits, and `beforeunload` protects browser tab closes or reloads while dirty.
+Track a clean snapshot of editable settings after settings and libraries load, and after successful saves. Derive `hasUnsavedChanges` by comparing the current editable state to that snapshot. Any in-app settings close path asks for confirmation before discarding dirty edits, and `beforeunload` protects browser tab closes, reloads, and external navigation while dirty.
 
 ## Backend/API
 
@@ -55,6 +55,7 @@ Add a helper at the local library normalization boundary in `internal/store/libr
 - Reject blank paths as today.
 - Expand bare `~` to the server process user's home directory.
 - Expand `~/...` to a path beneath that home directory.
+- If the server home cannot be resolved while saving bare `~` or `~/...`, fail loudly with a library validation error.
 - Leave other `~` forms, such as `~other/music`, unsupported and return a clear validation error.
 - Clean the expanded path with `filepath.Clean`.
 - De-dupe after expansion and cleaning.
@@ -75,7 +76,7 @@ Request:
 
 - Optional `path` query parameter.
 - If omitted, start from the first saved local library path that is a readable directory; if none qualifies, fall back to the server user's home directory; if home is unavailable, fall back to the filesystem root.
-- If provided, expand `~`, clean, stat, and list that path.
+- If provided, expand supported `~` forms, clean, stat, and list that path.
 
 Response:
 
@@ -96,6 +97,16 @@ Rules:
 - Skip children that cannot be read or statted.
 - Return no parent when the current path is the filesystem root.
 - Keep the route behind `requireAdmin`.
+- Use `os.Stat` and normal directory semantics: symlinked directories may be shown and navigated when they resolve to readable directories.
+- Return cleaned lexical paths, not canonical realpaths.
+
+Errors:
+
+- Return JSON errors as `{ "error": "..." }`.
+- Return `400` when the requested path is missing, unreadable, or not a directory.
+- Return `400` for unsupported `~user` paths.
+- Return `500` when explicit `~` or `~/...` expansion fails because the server home cannot be resolved.
+- Use existing admin auth behavior for unauthenticated and non-admin callers.
 
 ## Frontend/UI
 
@@ -115,21 +126,23 @@ In `AdminPanel.svelte`:
 For dirty state:
 
 - Build a snapshot object from the editable settings this panel owns: signup toggle, guest toggle, local libraries, and federation settings.
-- Update the snapshot after initial load and after a successful library/settings save.
+- Take the initial clean snapshot after settings and libraries load, because those are the editable settings in scope.
+- Do not block the snapshot on other async loads such as federation peers, invites, or users unless their data is included in editable settings.
+- Update the snapshot after a successful library/settings save.
 - Compare normalized JSON snapshots for `hasUnsavedChanges`. Exclude transient fields such as loading flags, messages, warnings, federation `restart_required`, and invite/user lists.
 - Wrap backdrop, close button, Escape, and parent-provided settings close through one `requestCloseSettings()` function.
 - When dirty, confirm with `Discard unsaved settings changes?`; Stay keeps the panel open, Discard calls the original close.
-- Add a `beforeunload` listener while dirty and remove it when clean or when the component unmounts.
+- Add a `beforeunload` listener while dirty and remove it when clean or when the component unmounts. Browser tab close, reload, and navigation use the native browser prompt; custom text cannot be guaranteed.
 
-The existing immediate-save behavior for access toggles can stay, but successful toggle saves must update the clean snapshot so a completed save does not leave the panel dirty.
+The existing immediate-save behavior for access toggles can stay. Toggles should update local UI optimistically only where the current component pattern already permits it. After a successful immediate toggle save, refresh or update the clean snapshot so the completed save does not leave the panel dirty. If an immediate toggle save fails, follow the current component pattern: restore the toggle or leave the failed edit dirty, show the existing save error, and keep `hasUnsavedChanges` true until the admin saves successfully or discards changes.
 
 ## Data flow
 
 1. Admin opens Settings; the panel loads settings, libraries, federation peers, invites, and users as today.
-2. After settings and libraries load, the panel stores a clean snapshot of the editable settings state.
+2. After settings and libraries load, the panel stores a clean snapshot of the editable settings state. Other async loads do not block this snapshot unless their data becomes part of editable settings.
 3. Admin clicks Browse on a library row.
 4. The modal requests `GET /api/admin/library-paths?path=<row path>` when the row has a path, otherwise requests the endpoint without `path`.
-5. Backend expands `~`, cleans the path, verifies it is a readable directory, lists child directories, and returns normalized paths.
+5. Backend expands supported `~` forms, cleans the path lexically, verifies it is a readable directory, lists child directories, and returns cleaned lexical paths.
 6. Admin navigates parent/children by requesting the same endpoint with the selected path.
 7. Admin clicks “Use this folder”; the row path changes locally and `hasUnsavedChanges` becomes true.
 8. Admin clicks Save or Save and scan; existing `setLibraries` flow persists normalized absolute paths and refreshes warnings/federation response.
@@ -139,8 +152,9 @@ The existing immediate-save behavior for access toggles can stay, but successful
 
 - Blank library paths still fail save with `library path cannot be blank`.
 - Unsupported `~` forms return a validation error instead of being saved literally.
+- Saving bare `~` or `~/...` returns a validation error when the server home cannot be resolved.
 - Directory browser errors are shown inside the modal and do not overwrite unrelated library save errors.
-- If the requested browser path is unreadable, missing, or not a directory, the endpoint returns a clear error.
+- If the requested browser path is unreadable, missing, or not a directory, the endpoint returns `400` with `{ "error": "..." }`.
 - If the row path fails to open, the frontend retries at the fallback start location and keeps the first error visible so the admin understands why the requested path was not used.
 - Failed saves leave `hasUnsavedChanges` true.
 - Failed Browse requests keep the modal open so the admin can choose Cancel or retry via parent/default navigation when available.
@@ -149,8 +163,8 @@ The existing immediate-save behavior for access toggles can stay, but successful
 
 Backend:
 
-- `internal/store/library_config_test.go`: `~/Music` resolves to the server user's home plus `Music`; bare `~` resolves to home; blank path behavior remains; duplicate detection happens after expansion and cleaning; unsupported `~user` forms are rejected.
-- `internal/api/library_config_test.go`: admin-only path browser route rejects unauthenticated/non-admin callers; default start path works; explicit `~` path is expanded; unreadable/missing/non-directory paths return clear errors; response contains sorted child directories and root has no parent.
+- `internal/store/library_config_test.go`: `~/Music` resolves to the server user's home plus `Music`; bare `~` resolves to home; home lookup failure for `~` forms returns a validation error; blank path behavior remains; duplicate detection happens after expansion and cleaning; unsupported `~user` forms are rejected.
+- `internal/api/library_config_test.go`: admin-only path browser route rejects unauthenticated/non-admin callers per existing auth behavior; default start path works; explicit `~` path is expanded; home lookup failure for explicit `~` browse requests returns `500`; unreadable/missing/non-directory paths return `400` JSON errors; symlinked readable directories can be listed and navigated; response contains sorted child directories, cleaned lexical paths, and root has no parent.
 
 Frontend:
 
@@ -162,8 +176,10 @@ Frontend:
 - Admins can browse server directories from each library path row and copy a selected directory into the row.
 - Browser starts at the row's valid current directory, otherwise at a saved/default location.
 - Browser supports parent navigation and child directory navigation.
-- Library saves accept `~` and persist resolved absolute paths.
+- Library saves accept `~` when home can be resolved and persist resolved absolute paths.
 - Existing trim, clean, blank rejection, and duplicate rejection behavior remains intact.
-- Dirty settings prompt with `Discard unsaved settings changes?` before panel close or page unload.
+- In-app dirty settings close paths prompt with exact text `Discard unsaved settings changes?`.
+- Dirty browser tab close, reload, and navigation use the native `beforeunload` prompt; custom text is not guaranteed.
 - Successful saves clear dirty state; failed saves keep dirty state.
-- Directory browser endpoint is admin-only and returns clear errors for invalid paths.
+- Immediate-save access toggles may keep existing behavior, update the clean snapshot after successful saves, and keep dirty state true after failed saves until the admin saves or discards changes.
+- Directory browser endpoint is admin-only and returns `{ "error": "..." }` with defined status codes for invalid paths.
