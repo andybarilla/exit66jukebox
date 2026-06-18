@@ -1,6 +1,104 @@
 package store
 
-import "testing"
+import (
+	"database/sql"
+	"path/filepath"
+	"testing"
+
+	_ "modernc.org/sqlite"
+)
+
+func TestOpenMigratesOldFederationSchemaBeforeCreatingIndexes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "exit66.db")
+	oldDB, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("open old db: %v", err)
+	}
+	if _, err := oldDB.Exec(`
+		CREATE TABLE artist (
+			id       INTEGER PRIMARY KEY AUTOINCREMENT,
+			name     TEXT NOT NULL UNIQUE,
+			sort_key TEXT NOT NULL DEFAULT '',
+			mbid     TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE album (
+			id        INTEGER PRIMARY KEY AUTOINCREMENT,
+			name      TEXT NOT NULL,
+			artist_id INTEGER NOT NULL REFERENCES artist(id),
+			sort_key  TEXT NOT NULL DEFAULT '',
+			cover     TEXT NOT NULL DEFAULT '',
+			mbid      TEXT NOT NULL DEFAULT '',
+			UNIQUE(name, artist_id)
+		);
+		CREATE TABLE track (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			path       TEXT NOT NULL,
+			mod_time   INTEGER NOT NULL,
+			size       INTEGER NOT NULL,
+			title      TEXT NOT NULL,
+			artist_id  INTEGER NOT NULL REFERENCES artist(id),
+			album_id   INTEGER NOT NULL REFERENCES album(id),
+			track_no   INTEGER NOT NULL DEFAULT 0,
+			genre      TEXT NOT NULL DEFAULT '',
+			duration   INTEGER NOT NULL DEFAULT 0,
+			play_count INTEGER NOT NULL DEFAULT 0,
+			added_at   INTEGER NOT NULL DEFAULT 0,
+			mbid       TEXT NOT NULL DEFAULT '',
+			links      TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+		INSERT INTO meta(key, value) VALUES('library_version', 1);
+	`); err != nil {
+		oldDB.Close()
+		t.Fatalf("create old db: %v", err)
+	}
+	if err := oldDB.Close(); err != nil {
+		t.Fatalf("close old db: %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open old db: %v", err)
+	}
+	defer db.Close()
+
+	for _, column := range []string{"source_peer", "source_library_id", "remote_id", "library_id"} {
+		hasColumn, err := columnExists(db, "track", column)
+		if err != nil {
+			t.Fatalf("check track.%s: %v", column, err)
+		}
+		if !hasColumn {
+			t.Fatalf("expected track.%s column", column)
+		}
+	}
+	for _, index := range []string{"idx_track_remote_library", "idx_track_local_library_path"} {
+		if !indexExists(t, db, index) {
+			t.Fatalf("expected index %s", index)
+		}
+	}
+	if !tableExists(t, db, "remote_library") {
+		t.Fatalf("expected remote_library table")
+	}
+}
+
+func indexExists(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	return objectExists(t, db, "index", name)
+}
+
+func tableExists(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	return objectExists(t, db, "table", name)
+}
+
+func objectExists(t *testing.T, db *sql.DB, objectType, name string) bool {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = ? AND name = ?`, objectType, name).Scan(&count); err != nil {
+		t.Fatalf("check %s %s: %v", objectType, name, err)
+	}
+	return count > 0
+}
 
 func TestMigrateAssignsExistingTracksToDefaultLibraries(t *testing.T) {
 	db, err := Open(":memory:")

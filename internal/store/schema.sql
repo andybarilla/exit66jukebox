@@ -35,10 +35,6 @@ CREATE TABLE IF NOT EXISTS track (
     remote_id         INTEGER NOT NULL DEFAULT 0,
     library_id        INTEGER NOT NULL DEFAULT 0
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_track_remote_library
-  ON track(source_peer, source_library_id, remote_id) WHERE source_peer <> '';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_track_local_library_path
-  ON track(library_id, path) WHERE source_peer = '';
 CREATE INDEX IF NOT EXISTS idx_track_artist ON track(artist_id);
 CREATE INDEX IF NOT EXISTS idx_track_album  ON track(album_id);
 
