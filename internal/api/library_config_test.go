@@ -216,6 +216,20 @@ func TestAdminLibraryPathsListsSortedDirectories(t *testing.T) {
 	}
 }
 
+func TestAdminLibraryPathsHidesHiddenDirectories(t *testing.T) {
+	s, db := newTestServer(t)
+	root := t.TempDir()
+	mkdir(t, filepath.Join(root, "Music"))
+	mkdir(t, filepath.Join(root, ".git"))
+	mkdir(t, filepath.Join(root, "@eaDir"))
+
+	body := getLibraryPaths(t, s, adminReq(t, db, http.MethodGet, libraryPathURL(root), ""), http.StatusOK)
+	want := []testLibraryPathEntry{{Name: "Music", Path: filepath.Clean(filepath.Join(root, "Music"))}}
+	if !sameLibraryPathEntries(body.Directories, want) {
+		t.Fatalf("directories: want %#v, got %#v", want, body.Directories)
+	}
+}
+
 func TestAdminLibraryPathsDefaultStartsAtSavedLibrary(t *testing.T) {
 	s, db := newTestServer(t)
 	missing := filepath.Join(t.TempDir(), "missing")

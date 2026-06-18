@@ -45,6 +45,13 @@ describe('AdminPanel Svelte wiring', () => {
     expect(source).toContain('Cancel');
   });
 
+  test('keeps path browser actions visible while folder list scrolls', () => {
+    expect(source).toMatch(/\.path-browser-modal\s*{[^}]*display:\s*flex[^}]*flex-direction:\s*column/s);
+    expect(source).toMatch(/\.path-browser-list\s*{[^}]*min-height:\s*0/s);
+    expect(source).toMatch(/\.path-browser-list\s*{[^}]*flex:\s*1 1 auto/s);
+    expect(source).toMatch(/\.path-browser-actions\s*{[^}]*flex:\s*none/s);
+  });
+
   test('contains dirty close guard and beforeunload wiring', () => {
     expect(source).toContain('requestCloseSettings');
     expect(source).toContain("Discard unsaved settings changes?");
