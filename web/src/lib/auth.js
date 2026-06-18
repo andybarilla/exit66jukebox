@@ -37,6 +37,15 @@ export const getSettings = () => fetch('/api/admin/settings').then((r) => r.json
 export const setSettings = (s) => postJSON('/api/admin/settings', s);
 export const getLibraries = () => fetch('/api/admin/libraries').then((r) => r.json());
 export const setLibraries = (s) => postJSON('/api/admin/libraries', s);
+export async function listLibraryPaths(path) {
+  const url = path ? `/api/admin/library-paths?path=${encodeURIComponent(path)}` : '/api/admin/library-paths';
+  const r = await fetch(url);
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || 'request failed');
+  }
+  return r.json();
+}
 export const getFederationPeers = () => fetch('/api/admin/federation/peers').then((r) => r.json());
 export const addFederationPeer = (peer) => postJSON('/api/admin/federation/peers', peer);
 export const approveFederationPeer = (peerID) => postJSON(`/api/admin/federation/peers/${encodeURIComponent(peerID)}/approve`, {});
