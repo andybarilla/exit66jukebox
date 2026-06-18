@@ -2,3 +2,4 @@
 go = "latest"
 node = "latest"
 npm = "latest"
+"go:github.com/air-verse/air" = "latest"
