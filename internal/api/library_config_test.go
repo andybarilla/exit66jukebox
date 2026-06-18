@@ -198,6 +198,8 @@ func TestAdminLibraryPathsListsSortedDirectories(t *testing.T) {
 	root := t.TempDir()
 	mkdir(t, filepath.Join(root, "zeta"))
 	mkdir(t, filepath.Join(root, "Alpha"))
+	unreadable := filepath.Join(root, "unreadable")
+	makeUnreadableDir(t, unreadable)
 	writeFile(t, filepath.Join(root, "track.mp3"))
 
 	body := getLibraryPaths(t, s, adminReq(t, db, http.MethodGet, libraryPathURL(root), ""), http.StatusOK)
@@ -217,8 +219,10 @@ func TestAdminLibraryPathsListsSortedDirectories(t *testing.T) {
 func TestAdminLibraryPathsDefaultStartsAtSavedLibrary(t *testing.T) {
 	s, db := newTestServer(t)
 	missing := filepath.Join(t.TempDir(), "missing")
+	unreadable := filepath.Join(t.TempDir(), "unreadable")
+	makeUnreadableDir(t, unreadable)
 	readable := t.TempDir()
-	if err := store.SaveLocalLibraries(db, []store.LocalLibrary{{Path: missing, Enabled: true}, {Path: readable, Enabled: false}}); err != nil {
+	if err := store.SaveLocalLibraries(db, []store.LocalLibrary{{Path: missing, Enabled: true}, {Path: unreadable, Enabled: true}, {Path: readable, Enabled: false}}); err != nil {
 		t.Fatalf("save libraries: %v", err)
 	}
 
@@ -238,6 +242,10 @@ func TestAdminLibraryPathsRejectsInvalidRequestedPaths(t *testing.T) {
 	writeFile(t, filePath)
 	assertLibraryPathError(t, s, adminLibraryPathReq(libraryPathURL(filePath), adminCookie), http.StatusBadRequest, "not a directory")
 
+	unreadable := filepath.Join(t.TempDir(), "unreadable")
+	makeUnreadableDir(t, unreadable)
+	assertLibraryPathError(t, s, adminLibraryPathReq(libraryPathURL(unreadable), adminCookie), http.StatusBadRequest, "not readable")
+
 	assertLibraryPathError(t, s, adminLibraryPathReq(libraryPathURL("~other/Music"), adminCookie), http.StatusBadRequest, "unsupported")
 }
 
@@ -250,6 +258,12 @@ func TestAdminLibraryPathsExpandsHomeAndReportsHomeFailure(t *testing.T) {
 	body := getLibraryPaths(t, s, adminLibraryPathReq(libraryPathURL("~"), adminCookie), http.StatusOK)
 	if body.Path != filepath.Clean(home) {
 		t.Fatalf("expanded home path: want %q, got %q", filepath.Clean(home), body.Path)
+	}
+	child := filepath.Join(home, "Music")
+	mkdir(t, child)
+	body = getLibraryPaths(t, s, adminLibraryPathReq(libraryPathURL("~/Music"), adminCookie), http.StatusOK)
+	if body.Path != filepath.Clean(child) {
+		t.Fatalf("expanded home child path: want %q, got %q", filepath.Clean(child), body.Path)
 	}
 
 	withAPIPathHomeDir(t, func() (string, error) { return "", os.ErrPermission })
@@ -283,6 +297,18 @@ func writeFile(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte("music"), 0o644); err != nil {
 		t.Fatalf("write file %s: %v", path, err)
+	}
+}
+
+func makeUnreadableDir(t *testing.T, path string) {
+	t.Helper()
+	mkdir(t, path)
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatalf("chmod unreadable %s: %v", path, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o755) })
+	if _, err := os.ReadDir(path); err == nil {
+		t.Skip("filesystem permissions allow reading chmod 000 directories")
 	}
 }
 

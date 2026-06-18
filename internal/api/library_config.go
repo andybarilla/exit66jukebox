@@ -122,8 +122,7 @@ func (s *Server) listLibraryPaths(w http.ResponseWriter, r *http.Request) {
 	directories := make([]libraryPathEntry, 0, len(entries))
 	for _, entry := range entries {
 		childPath := filepath.Clean(filepath.Join(cleanedPath, entry.Name()))
-		childInfo, err := os.Stat(childPath)
-		if err != nil || !childInfo.IsDir() {
+		if !isReadableDirectory(childPath) {
 			continue
 		}
 		directories = append(directories, libraryPathEntry{Name: entry.Name(), Path: childPath})
@@ -182,8 +181,7 @@ func (s *Server) defaultLibraryPathStart() (string, error) {
 	}
 	for _, library := range libraries {
 		cleanedPath := filepath.Clean(library.Path)
-		info, err := os.Stat(cleanedPath)
-		if err == nil && info.IsDir() {
+		if isReadableDirectory(cleanedPath) {
 			return cleanedPath, nil
 		}
 	}
@@ -193,6 +191,20 @@ func (s *Server) defaultLibraryPathStart() (string, error) {
 		return filepath.Clean(home), nil
 	}
 	return string(filepath.Separator), nil
+}
+
+func isReadableDirectory(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	if !info.IsDir() {
+		return false
+	}
+	if _, err := os.ReadDir(path); err != nil {
+		return false
+	}
+	return true
 }
 
 func (s *Server) federationSettingsForSave(in store.FederationSettings) store.FederationSettings {
