@@ -201,6 +201,19 @@ describe('loadPathBrowserLocation', () => {
     expect(listLibraryPaths).toHaveBeenCalledWith('/srv/music');
   });
 
+  test('defaults optional location fields when successful response omits them', async () => {
+    const listLibraryPaths = vi.fn(async () => ({ path: '/srv/music' }));
+
+    await expect(loadPathBrowserLocation(listLibraryPaths, '/srv/music', true)).resolves.toEqual({
+      path: '/srv/music',
+      parent: '',
+      directories: [],
+      error: '',
+      requestedError: '',
+    });
+    expect(listLibraryPaths).toHaveBeenCalledWith('/srv/music');
+  });
+
   test('retries the default start and preserves the requested error when fallback is enabled', async () => {
     const listLibraryPaths = vi
       .fn()
