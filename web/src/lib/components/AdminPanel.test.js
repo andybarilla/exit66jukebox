@@ -13,11 +13,21 @@ function functionBody(name) {
 
 describe('AdminPanel Svelte wiring', () => {
   test('imports and uses settings path browser helpers', () => {
-    expect(source).toContain('listLibraryPaths');
-    expect(source).toContain('buildEditableSettingsSnapshot');
-    expect(source).toContain('hasEditableSettingsChanges');
-    expect(source).toContain('beforeUnloadIfDirty');
-    expect(source).toContain('loadPathBrowserLocation');
+    expect(source).toMatch(/import\s*{[^}]*\blistLibraryPaths\b[^}]*}\s*from\s*'\.\.\/auth\.js'/s);
+    expect(source).toMatch(/import\s*{[^}]*\bbeforeUnloadIfDirty\b[^}]*\bbuildEditableSettingsSnapshot\b[^}]*\bhasEditableSettingsChanges\b[^}]*\bloadPathBrowserLocation\b[^}]*}\s*from\s*'\.\.\/settingsPanelState\.js'/s);
+    expect(functionBody('handleBeforeUnload')).toMatch(/\bbeforeUnloadIfDirty\s*\(/);
+    expect(functionBody('refreshCleanSettingsSnapshot')).toMatch(/\bbuildEditableSettingsSnapshot\s*\(/);
+    expect(functionBody('updateUnsavedState')).toMatch(/\bhasEditableSettingsChanges\s*\(/);
+    expect(functionBody('loadLibraryPath')).toMatch(/\bloadPathBrowserLocation\s*\(\s*listLibraryPaths\b/);
+  });
+
+  test('successful saves update only their clean settings subset', () => {
+    expect(source).toContain('updateCleanSettingsSnapshot');
+    expect(functionBody('saveLibraries')).toMatch(/updateCleanSettingsSnapshot\s*\(\s*{\s*libraries\s*,\s*federation\s*}\s*\)/);
+    expect(functionBody('onToggleSignup')).toMatch(/updateCleanSettingsSnapshot\s*\(\s*{\s*signupEnabled\s*}\s*\)/);
+    expect(functionBody('onToggleSignup')).not.toMatch(/refreshCleanSettingsSnapshot\s*\(/);
+    expect(functionBody('onToggleGuest')).toMatch(/updateCleanSettingsSnapshot\s*\(\s*{\s*guestAccess\s*}\s*\)/);
+    expect(functionBody('onToggleGuest')).not.toMatch(/refreshCleanSettingsSnapshot\s*\(/);
   });
 
   test('contains path browser state and folder selection wiring', () => {

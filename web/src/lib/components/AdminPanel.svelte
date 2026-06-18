@@ -34,6 +34,7 @@
   let peerDraft = $state({ peer_id: '', display_name: '', address: '' });
   let peerBusy = $state(false);
   let peerError = $state('');
+  let cleanEditableSettingsState = $state(null);
   let cleanSettingsSnapshot = $state('');
   let hasUnsavedChanges = $state(false);
   let removeBeforeUnload = null;
@@ -44,7 +45,19 @@
   }
 
   function refreshCleanSettingsSnapshot() {
-    cleanSettingsSnapshot = buildEditableSettingsSnapshot(currentEditableSettingsState());
+    cleanEditableSettingsState = currentEditableSettingsState();
+    cleanSettingsSnapshot = buildEditableSettingsSnapshot(cleanEditableSettingsState);
+    updateUnsavedState();
+  }
+
+  function updateCleanSettingsSnapshot(savedSettingsState) {
+    if (!cleanEditableSettingsState) {
+      refreshCleanSettingsSnapshot();
+      return;
+    }
+
+    cleanEditableSettingsState = { ...cleanEditableSettingsState, ...savedSettingsState };
+    cleanSettingsSnapshot = buildEditableSettingsSnapshot(cleanEditableSettingsState);
     updateUnsavedState();
   }
 
@@ -121,17 +134,15 @@
     updateUnsavedState();
     const r = await setSettings({ signup_enabled: v });
     signupEnabled = !!r.signup_enabled;
-    guestAccess = !!r.guest_access_enabled;
-    refreshCleanSettingsSnapshot();
+    updateCleanSettingsSnapshot({ signupEnabled });
   }
 
   async function onToggleGuest(v) {
     guestAccess = v;
     updateUnsavedState();
     const r = await setSettings({ guest_access_enabled: v });
-    signupEnabled = !!r.signup_enabled;
     guestAccess = !!r.guest_access_enabled;
-    refreshCleanSettingsSnapshot();
+    updateCleanSettingsSnapshot({ guestAccess });
   }
 
   async function handleCreateInvite(e) {
@@ -246,7 +257,7 @@
       libraryWarnings = r.warnings || [];
       federation = { ...federation, ...(r.federation || {}), token: '' };
       libraryMessage = saveAndScan ? 'Saved. Scan started.' : 'Saved.';
-      refreshCleanSettingsSnapshot();
+      updateCleanSettingsSnapshot({ libraries, federation });
     } catch (err) {
       libraryError = err.message || 'failed to save libraries';
     } finally {
