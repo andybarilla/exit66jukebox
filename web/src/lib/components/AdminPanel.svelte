@@ -559,13 +559,13 @@
   .warning { color: var(--neon-amber); font-size: 12px; font-family: var(--font-sans); margin: 0; }
   .success { color: var(--status-success); font-size: 13px; font-family: var(--font-sans); }
   .path-browser-overlay { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 18px; background: rgba(4,4,9,0.72); backdrop-filter: blur(6px); }
-  .path-browser-modal { width: min(520px, 100%); max-height: min(680px, 86vh); overflow: hidden; display: grid; gap: 12px; padding: 18px; border: 1.5px solid var(--neon-cyan); border-radius: var(--radius-lg); background: radial-gradient(circle at top left, rgba(31,224,255,0.14), transparent 46%), linear-gradient(145deg, rgba(13,16,27,0.98), rgba(8,8,14,0.98)); box-shadow: 0 24px 80px rgba(0,0,0,0.55), 0 0 30px rgba(31,224,255,0.18); }
+  .path-browser-modal { width: min(520px, 100%); max-height: min(680px, 86vh); overflow: hidden; display: flex; flex-direction: column; gap: 12px; padding: 18px; border: 1.5px solid var(--neon-cyan); border-radius: var(--radius-lg); background: radial-gradient(circle at top left, rgba(31,224,255,0.14), transparent 46%), linear-gradient(145deg, rgba(13,16,27,0.98), rgba(8,8,14,0.98)); box-shadow: 0 24px 80px rgba(0,0,0,0.55), 0 0 30px rgba(31,224,255,0.18); }
   .path-browser-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .path-browser-header h2 { margin: 0; font-family: var(--font-display); font-size: 15px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-strong); }
   .path-browser-code { display: block; padding: 10px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-inset); color: var(--neon-cyan); font-family: var(--font-mono); font-size: 12px; overflow: auto; }
-  .path-browser-list { min-height: 96px; max-height: 300px; overflow: auto; display: grid; gap: 6px; padding: 2px; }
+  .path-browser-list { min-height: 0; flex: 1 1 auto; overflow: auto; display: grid; align-content: start; gap: 6px; padding: 2px; }
   .path-browser-row { width: 100%; padding: 9px 10px; text-align: left; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: rgba(255,255,255,0.03); color: var(--text-body); font-family: var(--font-sans); font-size: 13px; cursor: pointer; }
   .path-browser-row:hover { border-color: var(--neon-cyan); background: rgba(31,224,255,0.1); color: var(--text-strong); }
   .parent-row { color: var(--neon-amber); font-family: var(--font-mono); }
-  .path-browser-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
+  .path-browser-actions { flex: none; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
 </style>
