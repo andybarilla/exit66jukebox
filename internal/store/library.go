@@ -49,6 +49,17 @@ const VariousArtists = "Various Artists"
 // artistName — so a compilation collapses to one album while each track still
 // shows its own performer. Returns the track id.
 func UpsertTrack(db *sql.DB, t model.Track, artistName, albumArtist, albumName string) (int64, error) {
+	libraryID, err := EnsureLocalLibrary(db, "", "Default Library")
+	if err != nil {
+		return 0, err
+	}
+	return UpsertTrackInLibrary(db, libraryID, t, artistName, albumArtist, albumName)
+}
+
+func UpsertTrackInLibrary(db *sql.DB, libraryID int64, t model.Track, artistName, albumArtist, albumName string) (int64, error) {
+	if libraryID <= 0 {
+		return 0, fmt.Errorf("library id must be positive")
+	}
 	if albumArtist == "" {
 		albumArtist = artistName
 	}
@@ -71,21 +82,21 @@ func UpsertTrack(db *sql.DB, t model.Track, artistName, albumArtist, albumName s
 		return 0, err
 	}
 	_, err = tx.Exec(
-		`INSERT INTO track(path, mod_time, size, title, artist_id, album_id, track_no, genre, duration, links, added_at)
-		 VALUES(?,?,?,?,?,?,?,?,?,?, strftime('%s','now'))
-		 ON CONFLICT(path) DO UPDATE SET
+		`INSERT INTO track(path, library_id, mod_time, size, title, artist_id, album_id, track_no, genre, duration, links, added_at)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?, strftime('%s','now'))
+		 ON CONFLICT(library_id, path) WHERE source_peer = '' DO UPDATE SET
 		   mod_time=excluded.mod_time, size=excluded.size, title=excluded.title,
 		   artist_id=excluded.artist_id, album_id=excluded.album_id,
 		   track_no=excluded.track_no, genre=excluded.genre, duration=excluded.duration,
 		   links=excluded.links`,
-		t.Path, t.ModTime, t.Size, t.Title, artistID, albumID, t.TrackNo, t.Genre, t.Duration,
+		t.Path, libraryID, t.ModTime, t.Size, t.Title, artistID, albumID, t.TrackNo, t.Genre, t.Duration,
 		strings.Join(t.Links, "\n"),
 	)
 	if err != nil {
 		return 0, err
 	}
 	var id int64
-	if err = tx.QueryRow(`SELECT id FROM track WHERE path = ?`, t.Path).Scan(&id); err != nil {
+	if err = tx.QueryRow(`SELECT id FROM track WHERE library_id = ? AND path = ?`, libraryID, t.Path).Scan(&id); err != nil {
 		return 0, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -115,8 +126,19 @@ func PruneOrphans(db *sql.DB) error {
 // TrackStamp returns the stored mod_time and size for a path, or ok=false if
 // the path is not indexed. Used by the scanner to skip unchanged files.
 func TrackStamp(db *sql.DB, path string) (modTime, size int64, ok bool) {
+	libraryID, err := EnsureLocalLibrary(db, "", "Default Library")
+	if err != nil {
+		return 0, 0, false
+	}
+	return TrackStampInLibrary(db, libraryID, path)
+}
+
+func TrackStampInLibrary(db *sql.DB, libraryID int64, path string) (modTime, size int64, ok bool) {
+	if libraryID <= 0 {
+		return 0, 0, false
+	}
 	err := db.QueryRow(
-		`SELECT mod_time, size FROM track WHERE path = ?`, path,
+		`SELECT mod_time, size FROM track WHERE library_id = ? AND path = ?`, libraryID, path,
 	).Scan(&modTime, &size)
 	if err != nil {
 		return 0, 0, false
@@ -127,7 +149,7 @@ func TrackStamp(db *sql.DB, path string) (modTime, size int64, ok bool) {
 // ListTracks returns tracks whose title matches the search substring (empty =
 // all), ordered by title, paged by limit/offset. A limit <= 0 means no limit.
 func ListTracks(db *sql.DB, search string, limit, offset int) ([]model.Track, error) {
-	q := `SELECT id, title, artist_id, album_id, track_no, genre, duration, play_count
+	q := `SELECT id, title, artist_id, album_id, track_no, genre, duration, play_count, library_id, source_peer, source_library_id, remote_id
 	      FROM track WHERE title LIKE ? ORDER BY title LIMIT ? OFFSET ?`
 	lim := limit
 	if lim <= 0 {
@@ -142,7 +164,7 @@ func ListTracks(db *sql.DB, search string, limit, offset int) ([]model.Track, er
 	for rows.Next() {
 		var t model.Track
 		if err := rows.Scan(&t.ID, &t.Title, &t.ArtistID, &t.AlbumID,
-			&t.TrackNo, &t.Genre, &t.Duration, &t.PlayCount); err != nil {
+			&t.TrackNo, &t.Genre, &t.Duration, &t.PlayCount, &t.LibraryID, &t.SourcePeer, &t.SourceLibraryID, &t.RemoteID); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -243,10 +265,10 @@ func scanIDs(db *sql.DB, q string, arg any) ([]int64, error) {
 // GetTrack returns a single track and its file path. ok=false if not found.
 func GetTrack(db *sql.DB, id int64) (t model.Track, path string, ok bool) {
 	err := db.QueryRow(
-		`SELECT id, path, title, artist_id, album_id, track_no, genre, duration, play_count, source_peer, remote_id
+		`SELECT id, path, title, artist_id, album_id, track_no, genre, duration, play_count, library_id, source_peer, source_library_id, remote_id
 		 FROM track WHERE id = ?`, id).Scan(
 		&t.ID, &path, &t.Title, &t.ArtistID, &t.AlbumID,
-		&t.TrackNo, &t.Genre, &t.Duration, &t.PlayCount, &t.SourcePeer, &t.RemoteID)
+		&t.TrackNo, &t.Genre, &t.Duration, &t.PlayCount, &t.LibraryID, &t.SourcePeer, &t.SourceLibraryID, &t.RemoteID)
 	if err != nil {
 		return model.Track{}, "", false
 	}
@@ -255,16 +277,18 @@ func GetTrack(db *sql.DB, id int64) (t model.Track, path string, ok bool) {
 
 // RemoteTrack is a track owned by another peer, received via catalog sync.
 type RemoteTrack struct {
-	SourcePeer  string
-	RemoteID    int64
-	Title       string
-	ArtistName  string
-	AlbumArtist string
-	AlbumName   string
-	TrackNo     int
-	Genre       string
-	Duration    int
-	Links       []string
+	SourcePeer        string
+	SourceLibraryID   string
+	SourceLibraryName string
+	RemoteID          int64
+	Title             string
+	ArtistName        string
+	AlbumArtist       string
+	AlbumName         string
+	TrackNo           int
+	Genre             string
+	Duration          int
+	Links             []string
 }
 
 // UpsertRemoteTrack inserts or updates a track owned by another peer, keyed by
@@ -273,8 +297,15 @@ type RemoteTrack struct {
 // The row carries a synthetic non-empty path; audio resolution proxies it back
 // to its owner rather than opening a file.
 func UpsertRemoteTrack(db *sql.DB, rt RemoteTrack) (int64, error) {
+	if rt.SourceLibraryID == "" {
+		rt.SourceLibraryID = DefaultRemoteSourceLibraryID
+	}
 	if rt.AlbumArtist == "" {
 		rt.AlbumArtist = rt.ArtistName
+	}
+	libraryID, err := EnsureRemoteLibrary(db, rt.SourcePeer, rt.SourceLibraryID, rt.SourceLibraryName)
+	if err != nil {
+		return 0, err
 	}
 	tx, err := db.Begin()
 	if err != nil {
@@ -296,14 +327,17 @@ func UpsertRemoteTrack(db *sql.DB, rt RemoteTrack) (int64, error) {
 	}
 	// Synthetic non-empty path keeps the track.path UNIQUE constraint satisfied
 	// (remote rows never collide with local ones and are never opened as files).
-	synthPath := fmt.Sprintf("fed://%s/%d", rt.SourcePeer, rt.RemoteID)
+	synthPath := fmt.Sprintf("fed://%s/%s/%d", rt.SourcePeer, rt.SourceLibraryID, rt.RemoteID)
+	if rt.SourceLibraryID == DefaultRemoteSourceLibraryID {
+		synthPath = fmt.Sprintf("fed://%s/%d", rt.SourcePeer, rt.RemoteID)
+	}
 	_, err = tx.Exec(
-		`INSERT INTO track(path, mod_time, size, source_peer, remote_id, title, artist_id, album_id, track_no, genre, duration, links, added_at)
-		 VALUES(?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))
-		 ON CONFLICT(source_peer, remote_id) WHERE source_peer <> '' DO UPDATE SET
+		`INSERT INTO track(path, library_id, mod_time, size, source_peer, source_library_id, remote_id, title, artist_id, album_id, track_no, genre, duration, links, added_at)
+		 VALUES(?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))
+		 ON CONFLICT(source_peer, source_library_id, remote_id) WHERE source_peer <> '' DO UPDATE SET
 		   title=excluded.title, artist_id=excluded.artist_id, album_id=excluded.album_id,
 		   track_no=excluded.track_no, genre=excluded.genre, duration=excluded.duration, links=excluded.links`,
-		synthPath, rt.SourcePeer, rt.RemoteID, rt.Title, artistID, albumID, rt.TrackNo, rt.Genre, rt.Duration,
+		synthPath, libraryID, rt.SourcePeer, rt.SourceLibraryID, rt.RemoteID, rt.Title, artistID, albumID, rt.TrackNo, rt.Genre, rt.Duration,
 		strings.Join(rt.Links, "\n"),
 	)
 	if err != nil {
@@ -311,7 +345,7 @@ func UpsertRemoteTrack(db *sql.DB, rt RemoteTrack) (int64, error) {
 	}
 	var id int64
 	if err = tx.QueryRow(
-		`SELECT id FROM track WHERE source_peer = ? AND remote_id = ?`, rt.SourcePeer, rt.RemoteID,
+		`SELECT id FROM track WHERE source_peer = ? AND source_library_id = ? AND remote_id = ?`, rt.SourcePeer, rt.SourceLibraryID, rt.RemoteID,
 	).Scan(&id); err != nil {
 		return 0, err
 	}
@@ -337,8 +371,18 @@ func DeleteRemoteTracks(db *sql.DB, peer string) error {
 // syncs. A blanket delete+reinsert would mint a new autoincrement id every sync,
 // breaking any id a client is already holding (browse→play) and any queue row.
 func DeleteRemoteTracksExcept(db *sql.DB, peer string, keep []int64) error {
+	return DeleteRemoteLibraryTracksExcept(db, peer, DefaultRemoteSourceLibraryID, keep)
+}
+
+func DeleteRemoteLibraryTracksExcept(db *sql.DB, peer, sourceLibraryID string, keep []int64) error {
+	if sourceLibraryID == "" {
+		sourceLibraryID = DefaultRemoteSourceLibraryID
+	}
 	if len(keep) == 0 {
-		return DeleteRemoteTracks(db, peer)
+		if _, err := db.Exec(`DELETE FROM track WHERE source_peer = ? AND source_library_id = ?`, peer, sourceLibraryID); err != nil {
+			return err
+		}
+		return PruneOrphans(db)
 	}
 	ph := strings.TrimRight(strings.Repeat("?,", len(keep)), ",")
 	args := make([]any, 0, len(keep)+1)
@@ -347,9 +391,54 @@ func DeleteRemoteTracksExcept(db *sql.DB, peer string, keep []int64) error {
 		args = append(args, id)
 	}
 	if _, err := db.Exec(
-		`DELETE FROM track WHERE source_peer = ? AND remote_id NOT IN (`+ph+`)`, args...,
+		`DELETE FROM track WHERE source_peer = ? AND source_library_id = ? AND remote_id NOT IN (`+ph+`)`, append([]any{peer, sourceLibraryID}, args[1:]...)...,
 	); err != nil {
 		return err
 	}
 	return PruneOrphans(db)
+}
+
+func DeleteRemoteTracksExceptForLibrary(db *sql.DB, peer, sourceLibraryID string, keep []int64) error {
+	if len(keep) == 0 {
+		if _, err := db.Exec(`DELETE FROM track WHERE source_peer = ? AND source_library_id = ?`, peer, sourceLibraryID); err != nil {
+			return err
+		}
+		return PruneOrphans(db)
+	}
+	ph := strings.TrimRight(strings.Repeat("?,", len(keep)), ",")
+	args := make([]any, 0, len(keep)+2)
+	args = append(args, peer, sourceLibraryID)
+	for _, id := range keep {
+		args = append(args, id)
+	}
+	if _, err := db.Exec(
+		`DELETE FROM track WHERE source_peer = ? AND source_library_id = ? AND remote_id NOT IN (`+ph+`)`, args...,
+	); err != nil {
+		return err
+	}
+	return PruneOrphans(db)
+}
+
+func DeleteRemoteTracksInLibrary(db *sql.DB, peer, sourceLibraryID string) error {
+	if _, err := db.Exec(`DELETE FROM track WHERE source_peer = ? AND source_library_id = ?`, peer, sourceLibraryID); err != nil {
+		return err
+	}
+	return PruneOrphans(db)
+}
+
+func RemoteSourceLibraryIDs(db *sql.DB, peer string) ([]string, error) {
+	rows, err := db.Query(`SELECT DISTINCT source_library_id FROM track WHERE source_peer = ?`, peer)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

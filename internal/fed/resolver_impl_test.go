@@ -56,3 +56,34 @@ func TestMemberResolverReachesHubRelay(t *testing.T) {
 		t.Fatalf("expected AUDIO via relay, got %q (code %d)", rec.Body.String(), rec.Code)
 	}
 }
+
+func TestPeerResolverStreamsDirectAudioWithRange(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tracks/42/audio" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("Range") != "bytes=2-5" {
+			t.Fatalf("range header was not forwarded: %q", r.Header.Get("Range"))
+		}
+		w.Header().Set("Content-Range", "bytes 2-5/8")
+		w.WriteHeader(http.StatusPartialContent)
+		io.WriteString(w, "CDEF")
+	}))
+	defer backend.Close()
+
+	reg := NewRegistry()
+	reg.put(&Peer{ID: "peer-a", Client: backend.Client(), BaseURL: backend.URL})
+	resolver := NewResolverFor(&Manager{Role: "peer", Registry: reg})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tracks/9/audio", nil)
+	req.Header.Set("Range", "bytes=2-5")
+
+	resolver.ServeRemoteAudio(rec, req, "peer-a", 42)
+
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != "CDEF" {
+		t.Fatalf("direct audio = code %d body %q", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Range") != "bytes 2-5/8" {
+		t.Fatalf("content-range not preserved: %q", rec.Header().Get("Content-Range"))
+	}
+}

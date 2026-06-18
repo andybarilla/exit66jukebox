@@ -131,11 +131,50 @@ func (hr *hubResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Request, 
 	hr.relay.ServeHTTP(w, req)
 }
 
+type directResolver struct{ reg *Registry }
+
+func (dr *directResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Request, peer string, remoteID int64) {
+	p := dr.reg.Get(peer)
+	if p == nil || p.Client == nil {
+		http.Error(w, "peer offline", http.StatusServiceUnavailable)
+		return
+	}
+	baseURL := p.BaseURL
+	if baseURL == "" {
+		baseURL = "http://" + peer
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet,
+		fmt.Sprintf("%s/api/tracks/%d/audio", baseURL, remoteID), nil)
+	if err != nil {
+		http.Error(w, "build request", http.StatusInternalServerError)
+		return
+	}
+	if rng := r.Header.Get("Range"); rng != "" {
+		req.Header.Set("Range", rng)
+	}
+	resp, err := p.Client.Do(req)
+	if err != nil {
+		http.Error(w, "peer fetch failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	for _, k := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
+		if v := resp.Header.Get(k); v != "" {
+			w.Header().Set(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
 // NewResolverFor returns the Resolver appropriate to the manager's role. The hub
 // reuses its single Relay instance (m.Relay); a member proxies over its hub session.
 func NewResolverFor(m *Manager) Resolver {
 	if m.Role == "hub" {
 		return &hubResolver{relay: m.Relay}
+	}
+	if m.Role == "peer" {
+		return &directResolver{reg: m.Registry}
 	}
 	return &memberResolver{m: m}
 }

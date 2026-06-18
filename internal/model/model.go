@@ -18,21 +18,23 @@ type Album struct {
 
 // Track is one audio file plus its indexed tags.
 type Track struct {
-	ID        int64  `json:"id"`
-	Path      string `json:"-"`
-	ModTime   int64  `json:"-"`
-	Size      int64  `json:"-"`
-	Title     string `json:"title"`
-	ArtistID  int64  `json:"artist_id"`
-	AlbumID   int64  `json:"album_id"`
-	TrackNo   int    `json:"track_no"`
-	Genre     string `json:"genre"`
-	Duration  int      `json:"duration"`
-	PlayCount  int      `json:"play_count"`
-	Links      []string `json:"links"`
-	Mbid       string   `json:"-"`
-	SourcePeer string   `json:"source_peer,omitempty"`
-	RemoteID   int64    `json:"-"`
+	ID              int64    `json:"id"`
+	Path            string   `json:"-"`
+	ModTime         int64    `json:"-"`
+	Size            int64    `json:"-"`
+	Title           string   `json:"title"`
+	ArtistID        int64    `json:"artist_id"`
+	AlbumID         int64    `json:"album_id"`
+	TrackNo         int      `json:"track_no"`
+	Genre           string   `json:"genre"`
+	Duration        int      `json:"duration"`
+	PlayCount       int      `json:"play_count"`
+	Links           []string `json:"links"`
+	Mbid            string   `json:"-"`
+	LibraryID       int64    `json:"library_id"`
+	SourcePeer      string   `json:"source_peer,omitempty"`
+	SourceLibraryID string   `json:"source_library_id,omitempty"`
+	RemoteID        int64    `json:"-"`
 }
 
 // Stream owns a queue + fairness config. Kind is "private" or "shared".

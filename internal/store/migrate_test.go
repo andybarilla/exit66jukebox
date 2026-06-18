@@ -2,6 +2,50 @@ package store
 
 import "testing"
 
+func TestMigrateAssignsExistingTracksToDefaultLibraries(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`INSERT INTO artist(name) VALUES('A')`); err != nil {
+		t.Fatalf("artist: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO album(name, artist_id) VALUES('X', 1)`); err != nil {
+		t.Fatalf("album: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO track(path, mod_time, size, title, artist_id, album_id, source_peer, remote_id)
+		VALUES('/m/a.mp3', 1, 1, 'Local', 1, 1, '', 0), ('fed://home/42', 0, 0, 'Remote', 1, 1, 'home', 42)`); err != nil {
+		t.Fatalf("tracks: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE track SET library_id = 0, source_library_id = ''`); err != nil {
+		t.Fatalf("reset library identity: %v", err)
+	}
+
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	var localLibraryID, remoteLibraryID int64
+	if err := db.QueryRow(`SELECT library_id FROM track WHERE source_peer = ''`).Scan(&localLibraryID); err != nil {
+		t.Fatalf("local library id: %v", err)
+	}
+	if localLibraryID == 0 {
+		t.Fatalf("expected local track assigned to a default local library")
+	}
+	if err := db.QueryRow(`SELECT id FROM local_library WHERE id = ?`, localLibraryID).Scan(&localLibraryID); err != nil {
+		t.Fatalf("default local library missing: %v", err)
+	}
+	var sourceLibraryID string
+	if err := db.QueryRow(`SELECT library_id, source_library_id FROM track WHERE source_peer = 'home'`).Scan(&remoteLibraryID, &sourceLibraryID); err != nil {
+		t.Fatalf("remote library identity: %v", err)
+	}
+	if remoteLibraryID == 0 || sourceLibraryID != DefaultRemoteSourceLibraryID {
+		t.Fatalf("expected remote default library identity, got id=%d source=%q", remoteLibraryID, sourceLibraryID)
+	}
+}
+
 func TestMigrateAddsAddedAtToOldDB(t *testing.T) {
 	db, err := Open(":memory:")
 	if err != nil {

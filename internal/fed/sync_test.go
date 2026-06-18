@@ -40,6 +40,23 @@ func TestApplyCatalogReplacesPeerRows(t *testing.T) {
 	}
 }
 
+func TestApplyCatalogKeepsSameRemoteIDAcrossLibrariesInFullCatalog(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+
+	rows := []store.CatalogRow{
+		{SourceLibraryID: "library-a", RemoteID: 1, Title: "One", ArtistName: "A", AlbumName: "Al"},
+		{SourceLibraryID: "library-b", RemoteID: 1, Title: "Two", ArtistName: "A", AlbumName: "Al"},
+	}
+	if err := ApplyCatalog(db, "home", rows); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.ListTracks(db, "", 0, 0)
+	if len(got) != 2 {
+		t.Fatalf("expected same remote id in two libraries to keep both tracks, got %d tracks", len(got))
+	}
+}
+
 func TestServeMergedIncludesHubOwnLibrary(t *testing.T) {
 	hubDB, _ := store.Open(":memory:")
 	defer hubDB.Close()
@@ -147,5 +164,76 @@ func TestApplyCatalogKeepsStableIDs(t *testing.T) {
 		if tr.ID != ids[tr.Title] {
 			t.Fatalf("id for %q changed across sync: was %d now %d", tr.Title, ids[tr.Title], tr.ID)
 		}
+	}
+}
+
+func TestApplyCatalogStoresSourceLibraryID(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	if err := ApplyCatalog(db, "peer-a", []store.CatalogRow{{RemoteID: 7, SourceLibraryID: "library-a", Title: "Song", ArtistName: "Artist", AlbumName: "Album"}}); err != nil {
+		t.Fatalf("apply catalog: %v", err)
+	}
+	tracks, _ := store.ListTracks(db, "", 0, 0)
+	if len(tracks) != 1 || tracks[0].SourceLibraryID != "library-a" || tracks[0].RemoteID != 7 {
+		t.Fatalf("remote track source fields = %+v", tracks)
+	}
+}
+
+func TestApplyCatalogPrunesAbsentLibrariesFromFullCatalog(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	seed := []struct {
+		peer string
+		row  store.CatalogRow
+	}{
+		{"peer-a", store.CatalogRow{RemoteID: 1, SourceLibraryID: "library-a", Title: "Keep", ArtistName: "Artist", AlbumName: "Album"}},
+		{"peer-a", store.CatalogRow{RemoteID: 2, SourceLibraryID: "library-b", Title: "Other Library", ArtistName: "Artist", AlbumName: "Album"}},
+		{"peer-b", store.CatalogRow{RemoteID: 1, SourceLibraryID: "library-a", Title: "Other Peer", ArtistName: "Artist", AlbumName: "Album"}},
+	}
+	for _, item := range seed {
+		if err := ApplyCatalog(db, item.peer, []store.CatalogRow{item.row}); err != nil {
+			t.Fatalf("seed catalog: %v", err)
+		}
+	}
+	if err := ApplyCatalog(db, "peer-a", []store.CatalogRow{{RemoteID: 1, SourceLibraryID: "library-a", Title: "Keep", ArtistName: "Artist", AlbumName: "Album"}}); err != nil {
+		t.Fatalf("apply replacement: %v", err)
+	}
+	tracks, _ := store.ListTracks(db, "", 0, 0)
+	if len(tracks) != 2 {
+		t.Fatalf("full catalog prune should remove absent peer libraries and keep other peers, got %+v", tracks)
+	}
+	foundAbsentPeerLibrary := false
+	foundOtherPeer := false
+	for _, track := range tracks {
+		if track.SourcePeer == "peer-a" && track.SourceLibraryID == "library-b" {
+			foundAbsentPeerLibrary = true
+		}
+		if track.SourcePeer == "peer-b" && track.SourceLibraryID == "library-a" {
+			foundOtherPeer = true
+		}
+	}
+	if foundAbsentPeerLibrary {
+		t.Fatalf("absent library-b track should be pruned: %+v", tracks)
+	}
+	if !foundOtherPeer {
+		t.Fatalf("other peer track should be kept: %+v", tracks)
+	}
+}
+
+func TestApplyCatalogKeepsMixedEmptyAndNamedLibraries(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+
+	rows := []store.CatalogRow{
+		{RemoteID: 1, SourceLibraryID: "library-a", Title: "Library Track", ArtistName: "Artist", AlbumName: "Album"},
+		{RemoteID: 2, SourceLibraryID: "", Title: "Unassigned Track", ArtistName: "Artist", AlbumName: "Album"},
+	}
+	if err := ApplyCatalog(db, "peer-a", rows); err != nil {
+		t.Fatalf("apply mixed catalog: %v", err)
+	}
+
+	tracks, _ := store.ListTracks(db, "", 0, 0)
+	if len(tracks) != 2 {
+		t.Fatalf("mixed empty and named libraries should both be kept, got %+v", tracks)
 	}
 }

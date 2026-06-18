@@ -22,6 +22,7 @@ type Result struct {
 var audioExt = map[string]bool{".mp3": true, ".ogg": true, ".flac": true}
 
 type job struct {
+	libraryID  int64
 	path       string
 	modTime    int64
 	size       int64
@@ -48,6 +49,13 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 	go func() {
 		defer close(jobs)
 		for _, root := range roots {
+			libraryID, err := store.EnsureLocalLibrary(db, root, filepath.Base(root))
+			if err != nil {
+				if walkErr == nil {
+					walkErr = err
+				}
+				continue
+			}
 			if err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 				if err != nil || d.IsDir() {
 					return nil
@@ -60,12 +68,12 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 					return nil
 				}
 				mt, sz := info.ModTime().Unix(), info.Size()
-				omt, osz, ok := store.TrackStamp(db, p)
+				omt, osz, ok := store.TrackStampInLibrary(db, libraryID, p)
 				if ok && omt == mt && osz == sz {
-					jobs <- job{path: p, exists: true}
+					jobs <- job{libraryID: libraryID, path: p, exists: true}
 					return nil
 				}
-				jobs <- job{path: p, modTime: mt, size: sz, wasIndexed: ok}
+				jobs <- job{libraryID: libraryID, path: p, modTime: mt, size: sz, wasIndexed: ok}
 				return nil
 			}); err != nil && walkErr == nil {
 				walkErr = err
@@ -96,7 +104,7 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 					Duration: probeDuration(j.path), Links: meta.Links,
 				}
 				mu.Lock()
-				_, err = store.UpsertTrack(db, tr, meta.Artist, meta.AlbumArtistOrFallback(), meta.Album)
+				_, err = store.UpsertTrackInLibrary(db, j.libraryID, tr, meta.Artist, meta.AlbumArtistOrFallback(), meta.Album)
 				mu.Unlock()
 				if err != nil {
 					p.failed.Add(1)

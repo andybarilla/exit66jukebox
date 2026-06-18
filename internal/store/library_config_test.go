@@ -53,6 +53,31 @@ func TestLibraryConfigDoesNotReseedAfterSavedEmptyList(t *testing.T) {
 	}
 }
 
+func TestLibraryConfigSavePreservesExistingLibraryIDs(t *testing.T) {
+	db := mustOpenMem(t)
+	if err := SaveLocalLibraries(db, []LocalLibrary{{Path: "/music", Enabled: true, Name: "Main"}}); err != nil {
+		t.Fatalf("initial save: %v", err)
+	}
+	libs, err := ListLocalLibraries(db)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(libs) != 1 {
+		t.Fatalf("expected one library, got %#v", libs)
+	}
+	wantID := libs[0].ID
+	if err := SaveLocalLibraries(db, []LocalLibrary{{ID: wantID, Path: "/music", Enabled: false, Name: "Renamed"}}); err != nil {
+		t.Fatalf("second save: %v", err)
+	}
+	libs, err = ListLocalLibraries(db)
+	if err != nil {
+		t.Fatalf("list after save: %v", err)
+	}
+	if len(libs) != 1 || libs[0].ID != wantID || libs[0].Enabled || libs[0].Name != "Renamed" {
+		t.Fatalf("library identity was not preserved: want id %d disabled Renamed, got %#v", wantID, libs)
+	}
+}
+
 func TestLibraryConfigRejectsBlankAndDuplicatePaths(t *testing.T) {
 	db := mustOpenMem(t)
 	if err := SaveLocalLibraries(db, []LocalLibrary{{Path: "  "}}); err == nil {
@@ -80,6 +105,21 @@ func TestFederationSettingsValidationAndRoundTrip(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("federation settings = %#v, want %#v", got, want)
+	}
+}
+
+func TestFederationSettingsAcceptsPeerRole(t *testing.T) {
+	db := mustOpenMem(t)
+	want := FederationSettings{Enabled: true, Role: "peer", Listen: ":9443", Token: "secret", PeerID: "peer-a"}
+	if err := SaveFederationSettings(db, want); err != nil {
+		t.Fatalf("save peer federation: %v", err)
+	}
+	got, ok, err := LoadFederationSettings(db)
+	if err != nil || !ok {
+		t.Fatalf("load federation: ok=%v err=%v", ok, err)
+	}
+	if got != want {
+		t.Fatalf("peer federation settings = %#v, want %#v", got, want)
 	}
 }
 
