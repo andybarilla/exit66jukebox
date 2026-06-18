@@ -2,11 +2,18 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/andybarilla/exit66jukebox/internal/scan"
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
+
+var apiPathHomeDir = os.UserHomeDir
 
 type librariesResponse struct {
 	LocalLibraries []store.LocalLibrary        `json:"local_libraries"`
@@ -28,6 +35,17 @@ type saveLibrariesRequest struct {
 	LocalLibraries []store.LocalLibrary     `json:"local_libraries"`
 	Federation     store.FederationSettings `json:"federation"`
 	SaveAndScan    bool                     `json:"save_and_scan"`
+}
+
+type libraryPathEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+type libraryPathsResponse struct {
+	Path        string             `json:"path"`
+	Parent      string             `json:"parent,omitempty"`
+	Directories []libraryPathEntry `json:"directories"`
 }
 
 func (s *Server) getAdminLibraries(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +80,119 @@ func (s *Server) setAdminLibraries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) listLibraryPaths(w http.ResponseWriter, r *http.Request) {
+	requestedValues, hasRequestedPath := r.URL.Query()["path"]
+	requestedPath := ""
+	if hasRequestedPath && len(requestedValues) > 0 {
+		requestedPath = requestedValues[0]
+	}
+	if !hasRequestedPath {
+		defaultPath, err := s.defaultLibraryPathStart()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		requestedPath = defaultPath
+	}
+
+	cleanedPath, status, err := cleanLibraryBrowserPath(requestedPath)
+	if err != nil {
+		writeErr(w, status, err.Error())
+		return
+	}
+
+	info, err := os.Stat(cleanedPath)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("path is not readable: %v", err))
+		return
+	}
+	if !info.IsDir() {
+		writeErr(w, http.StatusBadRequest, "path is not a directory")
+		return
+	}
+
+	entries, err := os.ReadDir(cleanedPath)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, fmt.Sprintf("path is not readable: %v", err))
+		return
+	}
+
+	directories := make([]libraryPathEntry, 0, len(entries))
+	for _, entry := range entries {
+		childPath := filepath.Clean(filepath.Join(cleanedPath, entry.Name()))
+		childInfo, err := os.Stat(childPath)
+		if err != nil || !childInfo.IsDir() {
+			continue
+		}
+		directories = append(directories, libraryPathEntry{Name: entry.Name(), Path: childPath})
+	}
+	sort.SliceStable(directories, func(i, j int) bool {
+		leftName := strings.ToLower(directories[i].Name)
+		rightName := strings.ToLower(directories[j].Name)
+		if leftName == rightName {
+			return directories[i].Name < directories[j].Name
+		}
+		return leftName < rightName
+	})
+
+	parent := filepath.Dir(cleanedPath)
+	if parent == cleanedPath {
+		parent = ""
+	}
+	writeJSON(w, http.StatusOK, libraryPathsResponse{Path: cleanedPath, Parent: parent, Directories: directories})
+}
+
+func cleanLibraryBrowserPath(path string) (string, int, error) {
+	trimmedPath := strings.TrimSpace(path)
+	if trimmedPath == "" {
+		return "", http.StatusBadRequest, fmt.Errorf("path cannot be blank")
+	}
+	if trimmedPath == "~" {
+		home, err := apiPathHomeDir()
+		if err != nil {
+			return "", http.StatusInternalServerError, err
+		}
+		if strings.TrimSpace(home) == "" {
+			return "", http.StatusInternalServerError, fmt.Errorf("home directory is blank")
+		}
+		return filepath.Clean(home), http.StatusOK, nil
+	}
+	if strings.HasPrefix(trimmedPath, "~/") || strings.HasPrefix(trimmedPath, `~\`) {
+		home, err := apiPathHomeDir()
+		if err != nil {
+			return "", http.StatusInternalServerError, err
+		}
+		if strings.TrimSpace(home) == "" {
+			return "", http.StatusInternalServerError, fmt.Errorf("home directory is blank")
+		}
+		return filepath.Clean(filepath.Join(home, trimmedPath[2:])), http.StatusOK, nil
+	}
+	if strings.HasPrefix(trimmedPath, "~") {
+		return "", http.StatusBadRequest, fmt.Errorf("unsupported home path %q", trimmedPath)
+	}
+	return filepath.Clean(trimmedPath), http.StatusOK, nil
+}
+
+func (s *Server) defaultLibraryPathStart() (string, error) {
+	libraries, err := store.ListLocalLibraries(s.db)
+	if err != nil {
+		return "", err
+	}
+	for _, library := range libraries {
+		cleanedPath := filepath.Clean(library.Path)
+		info, err := os.Stat(cleanedPath)
+		if err == nil && info.IsDir() {
+			return cleanedPath, nil
+		}
+	}
+
+	home, err := apiPathHomeDir()
+	if err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Clean(home), nil
+	}
+	return string(filepath.Separator), nil
 }
 
 func (s *Server) federationSettingsForSave(in store.FederationSettings) store.FederationSettings {
