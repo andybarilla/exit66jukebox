@@ -1,4 +1,4 @@
-.PHONY: ui build test run clean check-prereqs install uninstall
+.PHONY: ui build test run dev clean check-prereqs install uninstall
 
 BIN_DIR  := $(HOME)/.local/bin
 CONF_DIR := $(HOME)/.config/exit66jukebox
@@ -18,6 +18,13 @@ test:
 
 run: build
 	./exit66jukebox
+
+# Hot-reload the backend with air (go build on .go changes). Run `make ui`
+# once for an embedded UI, or `cd web && npm run dev` in a second terminal for
+# frontend HMR (vite proxies /api and /stream to :8066). Pass library roots
+# with: make dev ARGS="-root /path/to/music"
+dev:
+	air -- $(ARGS)
 
 clean:
 	rm -f exit66jukebox

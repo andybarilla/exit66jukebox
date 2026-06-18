@@ -8,6 +8,9 @@ exit66jukebox
 *.db
 covers/
 
+# air live-reload build dir
+/tmp/
+
 # Playwright MCP debug artifacts
 .playwright-mcp/
 
