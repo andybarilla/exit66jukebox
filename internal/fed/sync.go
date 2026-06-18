@@ -35,7 +35,12 @@ func ApplyCatalog(db *sql.DB, peer string, rows []store.CatalogRow) error {
 		}
 		keepByLibrary[sourceLibraryID] = append(keepByLibrary[sourceLibraryID], c.RemoteID)
 	}
-	for sourceLibraryID, keep := range keepByLibrary {
+	sourceLibraryIDs, err := store.RemoteSourceLibraryIDs(db, peer)
+	if err != nil {
+		return err
+	}
+	for _, sourceLibraryID := range sourceLibraryIDs {
+		keep := keepByLibrary[sourceLibraryID]
 		if err := store.DeleteRemoteLibraryTracksExcept(db, peer, sourceLibraryID, keep); err != nil {
 			return err
 		}

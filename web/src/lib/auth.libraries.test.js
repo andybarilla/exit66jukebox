@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { getLibraries, setLibraries } from './auth.js';
+import { addFederationPeer, approveFederationPeer, getFederationPeers, getLibraries, setLibraries } from './auth.js';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -14,5 +14,15 @@ describe('library admin api', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) })));
     await expect(setLibraries({ save_and_scan: true })).resolves.toEqual({ ok: true });
     expect(fetch).toHaveBeenCalledWith('/api/admin/libraries', expect.objectContaining({ method: 'POST' }));
+  });
+
+  test('manages direct federation peers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ peers: [] }) })));
+    await expect(getFederationPeers()).resolves.toEqual({ peers: [] });
+    await addFederationPeer({ peer_id: 'peer-a', address: '127.0.0.1:9443' });
+    await approveFederationPeer('peer-a');
+    expect(fetch).toHaveBeenNthCalledWith(1, '/api/admin/federation/peers');
+    expect(fetch).toHaveBeenNthCalledWith(2, '/api/admin/federation/peers', expect.objectContaining({ method: 'POST' }));
+    expect(fetch).toHaveBeenNthCalledWith(3, '/api/admin/federation/peers/peer-a/approve', expect.objectContaining({ method: 'POST' }));
   });
 });

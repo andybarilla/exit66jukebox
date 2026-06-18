@@ -18,6 +18,7 @@ type Peer struct {
 	ID      string
 	Session *yamux.Session
 	Client  *http.Client
+	BaseURL string
 }
 
 // Registry tracks live peer sessions by id. A peer present here is online.
@@ -32,14 +33,19 @@ func (r *Registry) put(p *Peer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if old := r.peers[p.ID]; old != nil {
-		old.Session.Close()
+		if old.Session != nil {
+			old.Session.Close()
+		}
 	}
 	r.peers[p.ID] = p
 }
 
-func (r *Registry) remove(id string) {
+func (r *Registry) remove(id string, peer *Peer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if peer != nil && r.peers[id] != peer {
+		return
+	}
 	delete(r.peers, id)
 }
 
@@ -105,7 +111,7 @@ func acceptAndRegister(conn net.Conn, token string, reg *Registry) (*Peer, error
 		conn.Close()
 		return nil, err
 	}
-	p := &Peer{ID: peerID, Session: sess, Client: SessionClient(sess)}
+	p := &Peer{ID: peerID, Session: sess, Client: SessionClient(sess), BaseURL: "http://" + peerID}
 	reg.put(p)
 	return p, nil
 }
@@ -117,7 +123,7 @@ func acceptPeer(conn net.Conn, token string, reg *Registry) error {
 	if err != nil {
 		return err
 	}
-	defer reg.remove(p.ID)
+	defer reg.remove(p.ID, p)
 	<-p.Session.CloseChan()
 	return nil
 }

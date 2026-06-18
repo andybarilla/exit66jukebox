@@ -108,6 +108,21 @@ func TestFederationSettingsValidationAndRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFederationSettingsAcceptsPeerRole(t *testing.T) {
+	db := mustOpenMem(t)
+	want := FederationSettings{Enabled: true, Role: "peer", Listen: ":9443", Token: "secret", PeerID: "peer-a"}
+	if err := SaveFederationSettings(db, want); err != nil {
+		t.Fatalf("save peer federation: %v", err)
+	}
+	got, ok, err := LoadFederationSettings(db)
+	if err != nil || !ok {
+		t.Fatalf("load federation: ok=%v err=%v", ok, err)
+	}
+	if got != want {
+		t.Fatalf("peer federation settings = %#v, want %#v", got, want)
+	}
+}
+
 func TestDisabledFederationComparisonIgnoresOperationalFields(t *testing.T) {
 	a := FederationSettings{Enabled: false, Token: "secret", PeerID: "peer", HubAddr: "hub", Listen: ":9443"}
 	b := FederationSettings{Enabled: false}

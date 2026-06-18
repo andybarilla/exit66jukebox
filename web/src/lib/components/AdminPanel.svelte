@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { getSettings, setSettings, getLibraries, setLibraries, createInvite, listInvites, deleteInvite, listUsers, deleteUser } from '../auth.js';
+  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, createInvite, listInvites, deleteInvite, listUsers, deleteUser } from '../auth.js';
   import Switch from './Switch.svelte';
 
   let { onClose } = $props();
@@ -29,15 +29,20 @@
   let libraryMessage = $state('');
   let libraryError = $state('');
   let federation = $state({ enabled: false, role: '', hub_addr: '', listen: '', token: '', peer_id: '', token_configured: false, restart_required: false });
+  let federationPeers = $state([]);
+  let peerDraft = $state({ peer_id: '', display_name: '', address: '' });
+  let peerBusy = $state(false);
+  let peerError = $state('');
 
   onMount(async () => {
     try {
-      const [settings, librarySettings, invList, userList] = await Promise.all([getSettings(), getLibraries(), listInvites(), listUsers()]);
+      const [settings, librarySettings, peerSettings, invList, userList] = await Promise.all([getSettings(), getLibraries(), getFederationPeers(), listInvites(), listUsers()]);
       signupEnabled = !!settings.signup_enabled;
       guestAccess = !!settings.guest_access_enabled;
       libraries = librarySettings.local_libraries || [];
       libraryWarnings = librarySettings.warnings || [];
       federation = { ...federation, ...(librarySettings.federation || {}), token: '' };
+      federationPeers = peerSettings.peers || [];
       invites = invList;
       users = userList;
     } catch (e) {
@@ -137,6 +142,33 @@
       libraryBusy = false;
     }
   }
+
+  async function saveManualPeer() {
+    peerBusy = true;
+    peerError = '';
+    try {
+      const r = await addFederationPeer(peerDraft);
+      federationPeers = r.peers || [];
+      peerDraft = { peer_id: '', display_name: '', address: '' };
+    } catch (err) {
+      peerError = err.message || 'failed to save peer';
+    } finally {
+      peerBusy = false;
+    }
+  }
+
+  async function approvePeer(peerID) {
+    peerBusy = true;
+    peerError = '';
+    try {
+      const r = await approveFederationPeer(peerID);
+      federationPeers = r.peers || [];
+    } catch (err) {
+      peerError = err.message || 'failed to approve peer';
+    } finally {
+      peerBusy = false;
+    }
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -195,12 +227,42 @@
             <option value="">Off</option>
             <option value="hub">Hub</option>
             <option value="member">Member</option>
+            <option value="peer">Peer</option>
           </select>
           <input type="text" placeholder="Hub address (members)" value={federation.hub_addr || ''} oninput={(e) => federation = { ...federation, hub_addr: e.currentTarget.value }} />
-          <input type="text" placeholder="Listen address (hub)" value={federation.listen || ''} oninput={(e) => federation = { ...federation, listen: e.currentTarget.value }} />
+          <input type="text" placeholder="Listen address (hub or peer)" value={federation.listen || ''} oninput={(e) => federation = { ...federation, listen: e.currentTarget.value }} />
           <input type="password" placeholder={federation.token_configured ? 'Token saved; leave blank to keep' : 'Token'} value={federation.token || ''} oninput={(e) => federation = { ...federation, token: e.currentTarget.value }} />
           <input type="text" placeholder="Peer ID" value={federation.peer_id || ''} oninput={(e) => federation = { ...federation, peer_id: e.currentTarget.value }} />
           {#if federation.restart_required}<p class="warning">Federation changes require a restart.</p>{/if}
+
+          {#if federation.role === 'peer'}
+            <div class="peer-box">
+              <h4>Direct peers</h4>
+              <div class="peer-draft">
+                <input type="text" placeholder="Peer ID" value={peerDraft.peer_id} oninput={(e) => peerDraft = { ...peerDraft, peer_id: e.currentTarget.value }} />
+                <input type="text" placeholder="Display name" value={peerDraft.display_name} oninput={(e) => peerDraft = { ...peerDraft, display_name: e.currentTarget.value }} />
+                <input type="text" placeholder="host:port" value={peerDraft.address} oninput={(e) => peerDraft = { ...peerDraft, address: e.currentTarget.value }} />
+                <button type="button" class="btn-copy" disabled={peerBusy} onclick={saveManualPeer}>Add manual peer</button>
+              </div>
+              {#if federationPeers.length === 0}
+                <p class="muted">No manual or discovered peers yet.</p>
+              {:else}
+                <ul class="peer-list">
+                  {#each federationPeers as peer (peer.id || `${peer.peer_id}-${peer.address}`)}
+                    <li class="peer-row">
+                      <span class="peer-name">{peer.display_name || peer.peer_id}</span>
+                      <span class="peer-address">{peer.address}</span>
+                      <span class="badge badge-{peer.status}">{peer.status}</span>
+                      {#if peer.status === 'pending' && peer.token_authenticated}
+                        <button type="button" class="btn-copy" disabled={peerBusy} onclick={() => approvePeer(peer.peer_id)}>Approve</button>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+              {#if peerError}<p class="danger">{peerError}</p>{/if}
+            </div>
+          {/if}
         </div>
 
         <div class="library-actions">
@@ -306,6 +368,7 @@
   .badge-pending { background: rgba(255,176,46,0.15); color: var(--neon-amber); border: 1px solid var(--neon-amber-deep); }
   .badge-accepted { background: rgba(61,245,155,0.1); color: var(--status-success); border: 1px solid var(--status-success-deep); }
   .badge-expired { background: rgba(255,77,94,0.1); color: var(--status-danger); border: 1px solid var(--status-danger-deep); }
+  .badge-quarantined { background: rgba(255,77,94,0.1); color: var(--status-danger); border: 1px solid var(--status-danger-deep); }
   .badge-admin { background: rgba(138,108,255,0.15); color: var(--neon-violet); border: 1px solid var(--neon-violet-deep); }
   .btn-danger { margin-left: auto; padding: 4px 10px; background: transparent; border: 1px solid var(--status-danger-deep); border-radius: var(--radius-sm); color: var(--status-danger); font-family: var(--font-mono); font-size: 10px; cursor: pointer; white-space: nowrap; }
   .btn-danger:hover { background: rgba(255,77,94,0.1); }
@@ -317,6 +380,13 @@
   .library-enabled { justify-content: flex-start; margin: 0; }
   .federation-box { display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
   .federation-box h3 { margin: 0; font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em; color: var(--neon-cyan); text-transform: uppercase; }
+  .peer-box { display: grid; gap: 10px; margin-top: 8px; padding: 12px; border: 1px solid rgba(31,224,255,0.25); border-radius: var(--radius-lg); background: radial-gradient(circle at top right, rgba(31,224,255,0.12), rgba(0,0,0,0.18) 52%); }
+  .peer-box h4 { margin: 0; font-family: var(--font-display); color: var(--neon-cyan); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .peer-draft { display: grid; gap: 8px; }
+  .peer-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .peer-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding: 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: rgba(0,0,0,0.16); }
+  .peer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-sans); color: var(--text-body); font-size: 13px; }
+  .peer-address { grid-column: 1 / -1; font-family: var(--font-mono); color: var(--text-faint); font-size: 10px; }
   .library-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
   .warning { color: var(--neon-amber); font-size: 12px; font-family: var(--font-sans); margin: 0; }
   .success { color: var(--status-success); font-size: 13px; font-family: var(--font-sans); }
