@@ -45,6 +45,8 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 	var res Result
 	jobs := make(chan job)
 	var walkErr error
+	seenPathsByLibrary := map[int64][]string{}
+	scannedLibraryIDs := []int64{}
 
 	go func() {
 		defer close(jobs)
@@ -56,15 +58,22 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 				}
 				continue
 			}
+			rootHadWalkError := false
 			if err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-				if err != nil || d.IsDir() {
+				if err != nil {
+					rootHadWalkError = true
+					return nil
+				}
+				if d.IsDir() {
 					return nil
 				}
 				if !audioExt[strings.ToLower(filepath.Ext(p))] {
 					return nil
 				}
+				seenPathsByLibrary[libraryID] = append(seenPathsByLibrary[libraryID], p)
 				info, err := d.Info()
 				if err != nil {
+					rootHadWalkError = true
 					return nil
 				}
 				mt, sz := info.ModTime().Unix(), info.Size()
@@ -75,8 +84,14 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 				}
 				jobs <- job{libraryID: libraryID, path: p, modTime: mt, size: sz, wasIndexed: ok}
 				return nil
-			}); err != nil && walkErr == nil {
-				walkErr = err
+			}); err != nil {
+				rootHadWalkError = true
+				if walkErr == nil {
+					walkErr = err
+				}
+			}
+			if !rootHadWalkError {
+				scannedLibraryIDs = append(scannedLibraryIDs, libraryID)
 			}
 		}
 	}()
@@ -124,6 +139,11 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 	// per-track-artist album (and its artist) orphaned; clear them.
 	if err := store.PruneOrphans(db); err != nil && walkErr == nil {
 		walkErr = err
+	}
+	for _, libraryID := range scannedLibraryIDs {
+		if err := store.DeleteLocalLibraryTracksExcept(db, libraryID, seenPathsByLibrary[libraryID]); err != nil && walkErr == nil {
+			walkErr = err
+		}
 	}
 
 	snap := p.Snapshot()

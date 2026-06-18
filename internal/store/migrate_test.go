@@ -3,7 +3,10 @@ package store
 import (
 	"database/sql"
 	"path/filepath"
+	"strconv"
 	"testing"
+
+	"github.com/andybarilla/exit66jukebox/internal/model"
 
 	_ "modernc.org/sqlite"
 )
@@ -141,6 +144,50 @@ func TestMigrateAssignsExistingTracksToDefaultLibraries(t *testing.T) {
 	}
 	if remoteLibraryID == 0 || sourceLibraryID != DefaultRemoteSourceLibraryID {
 		t.Fatalf("expected remote default library identity, got id=%d source=%q", remoteLibraryID, sourceLibraryID)
+	}
+}
+
+func TestMigrateBackfillsOpaqueLocalLibraryIdentity(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	libraryID, err := EnsureLocalLibrary(db, "/music", "Music")
+	if err != nil {
+		t.Fatalf("library: %v", err)
+	}
+	if _, err := UpsertTrackInLibrary(db, libraryID, model.Track{Path: "/music/a.mp3", Title: "A"}, "Artist", "Artist", "Album"); err != nil {
+		t.Fatalf("track: %v", err)
+	}
+	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_local_library_source_library_id`); err != nil {
+		t.Fatalf("drop source library index: %v", err)
+	}
+	if has, err := columnExists(db, "local_library", "source_library_id"); err != nil {
+		t.Fatalf("check source library id: %v", err)
+	} else if has {
+		if _, err := db.Exec(`ALTER TABLE local_library DROP COLUMN source_library_id`); err != nil {
+			t.Fatalf("drop source library id: %v", err)
+		}
+	}
+
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	if has, err := columnExists(db, "local_library", "source_library_id"); err != nil || !has {
+		t.Fatalf("expected local_library.source_library_id after migrate, has=%v err=%v", has, err)
+	}
+	rows, err := ExportCatalog(db)
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 exported track, got %d", len(rows))
+	}
+	if rows[0].SourceLibraryID == "" || rows[0].SourceLibraryID == strconv.FormatInt(libraryID, 10) {
+		t.Fatalf("source_library_id should be backfilled as opaque identity, got row=%+v library_id=%d", rows[0], libraryID)
 	}
 }
 

@@ -364,6 +364,30 @@ func DeleteRemoteTracks(db *sql.DB, peer string) error {
 	return PruneOrphans(db)
 }
 
+func DeleteLocalLibraryTracksExcept(db *sql.DB, libraryID int64, keepPaths []string) error {
+	if libraryID <= 0 {
+		return fmt.Errorf("library id must be positive")
+	}
+	if len(keepPaths) == 0 {
+		if _, err := db.Exec(`DELETE FROM track WHERE source_peer = '' AND library_id = ?`, libraryID); err != nil {
+			return err
+		}
+		return PruneOrphans(db)
+	}
+	ph := strings.TrimRight(strings.Repeat("?,", len(keepPaths)), ",")
+	args := make([]any, 0, len(keepPaths)+1)
+	args = append(args, libraryID)
+	for _, path := range keepPaths {
+		args = append(args, path)
+	}
+	if _, err := db.Exec(
+		`DELETE FROM track WHERE source_peer = '' AND library_id = ? AND path NOT IN (`+ph+`)`, args...,
+	); err != nil {
+		return err
+	}
+	return PruneOrphans(db)
+}
+
 // DeleteRemoteTracksExcept removes a peer's cached tracks whose remote_id is not
 // in keep, then prunes orphans. Catalog sync upserts the incoming rows (which
 // preserves their local id via ON CONFLICT) and then calls this to drop only

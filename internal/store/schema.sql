@@ -45,11 +45,13 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS local_library (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     path       TEXT NOT NULL UNIQUE,
+    source_library_id TEXT NOT NULL DEFAULT '',
     enabled    INTEGER NOT NULL DEFAULT 1,
     name       TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_local_library_source_library_id ON local_library(source_library_id);
 CREATE TABLE IF NOT EXISTS remote_library (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     source_peer       TEXT NOT NULL,

@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -14,12 +16,13 @@ const keyLibrarySettingsInitialized = "library_settings_initialized"
 var libraryPathHomeDir = os.UserHomeDir
 
 type LocalLibrary struct {
-	ID        int64  `json:"id"`
-	Path      string `json:"path"`
-	Enabled   bool   `json:"enabled"`
-	Name      string `json:"name"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
+	ID              int64  `json:"id"`
+	Path            string `json:"path"`
+	SourceLibraryID string `json:"source_library_id"`
+	Enabled         bool   `json:"enabled"`
+	Name            string `json:"name"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
 }
 
 type FederationSettings struct {
@@ -68,16 +71,20 @@ func EnsureLocalLibrary(db *sql.DB, path, name string) (int64, error) {
 	if name == "" {
 		name = path
 	}
+	sourceLibraryID, err := newLocalSourceLibraryID()
+	if err != nil {
+		return 0, err
+	}
 	if _, err := db.Exec(
-		`INSERT INTO local_library(path, enabled, name, created_at, updated_at)
-		 VALUES(?, 1, ?, strftime('%s','now'), strftime('%s','now'))
+		`INSERT INTO local_library(path, source_library_id, enabled, name, created_at, updated_at)
+		 VALUES(?, ?, 1, ?, strftime('%s','now'), strftime('%s','now'))
 		 ON CONFLICT(path) DO UPDATE SET name = COALESCE(NULLIF(excluded.name, ''), local_library.name), updated_at = strftime('%s','now')`,
-		path, name,
+		path, sourceLibraryID, name,
 	); err != nil {
 		return 0, err
 	}
 	var id int64
-	err := db.QueryRow(`SELECT id FROM local_library WHERE path = ?`, path).Scan(&id)
+	err = db.QueryRow(`SELECT id FROM local_library WHERE path = ?`, path).Scan(&id)
 	return id, err
 }
 
@@ -151,14 +158,18 @@ func saveLocalLibraries(db *sql.DB, libs []LocalLibrary, markInitialized bool) e
 func saveLocalLibrariesTx(tx *sql.Tx, libs []LocalLibrary, markInitialized bool) error {
 	keepIDs := make([]int64, 0, len(libs))
 	for _, lib := range libs {
+		sourceLibraryID, err := newLocalSourceLibraryID()
+		if err != nil {
+			return err
+		}
 		if lib.ID > 0 {
 			if _, err := tx.Exec(
-				`INSERT INTO local_library(id, path, enabled, name, created_at, updated_at)
-				 VALUES(?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+				`INSERT INTO local_library(id, path, source_library_id, enabled, name, created_at, updated_at)
+				 VALUES(?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
 				 ON CONFLICT(id) DO UPDATE SET
 				   path=excluded.path, enabled=excluded.enabled, name=excluded.name,
 				   updated_at=strftime('%s','now')`,
-				lib.ID, lib.Path, boolToInt(lib.Enabled), lib.Name,
+				lib.ID, lib.Path, sourceLibraryID, boolToInt(lib.Enabled), lib.Name,
 			); err != nil {
 				return err
 			}
@@ -179,9 +190,9 @@ func saveLocalLibrariesTx(tx *sql.Tx, libs []LocalLibrary, markInitialized bool)
 			return err
 		}
 		res, err := tx.Exec(
-			`INSERT INTO local_library(path, enabled, name, created_at, updated_at)
-			 VALUES(?, ?, ?, strftime('%s','now'), strftime('%s','now'))`,
-			lib.Path, boolToInt(lib.Enabled), lib.Name,
+			`INSERT INTO local_library(path, source_library_id, enabled, name, created_at, updated_at)
+			 VALUES(?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))`,
+			lib.Path, sourceLibraryID, boolToInt(lib.Enabled), lib.Name,
 		)
 		if err != nil {
 			return err
@@ -271,7 +282,7 @@ func libraryPathHome() (string, error) {
 
 func ListLocalLibraries(db *sql.DB) ([]LocalLibrary, error) {
 	rows, err := db.Query(
-		`SELECT id, path, enabled, name, created_at, updated_at FROM local_library ORDER BY id`,
+		`SELECT id, path, source_library_id, enabled, name, created_at, updated_at FROM local_library ORDER BY id`,
 	)
 	if err != nil {
 		return nil, err
@@ -281,13 +292,21 @@ func ListLocalLibraries(db *sql.DB) ([]LocalLibrary, error) {
 	for rows.Next() {
 		var lib LocalLibrary
 		var enabled int
-		if err := rows.Scan(&lib.ID, &lib.Path, &enabled, &lib.Name, &lib.CreatedAt, &lib.UpdatedAt); err != nil {
+		if err := rows.Scan(&lib.ID, &lib.Path, &lib.SourceLibraryID, &enabled, &lib.Name, &lib.CreatedAt, &lib.UpdatedAt); err != nil {
 			return nil, err
 		}
 		lib.Enabled = enabled != 0
 		libs = append(libs, lib)
 	}
 	return libs, rows.Err()
+}
+
+func newLocalSourceLibraryID() (string, error) {
+	randomBytes := make([]byte, 16)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", fmt.Errorf("generate local library identity: %w", err)
+	}
+	return "local-" + hex.EncodeToString(randomBytes), nil
 }
 
 func EnabledLocalLibraryRoots(db *sql.DB) ([]string, error) {
