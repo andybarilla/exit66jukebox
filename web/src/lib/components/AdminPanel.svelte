@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
-  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, createInvite, listInvites, deleteInvite, listUsers, deleteUser } from '../auth.js';
+  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths } from '../auth.js';
+  import { beforeUnloadIfDirty, buildEditableSettingsSnapshot, hasEditableSettingsChanges, loadPathBrowserLocation } from '../settingsPanelState.js';
   import Switch from './Switch.svelte';
 
   let { onClose } = $props();
@@ -33,37 +34,115 @@
   let peerDraft = $state({ peer_id: '', display_name: '', address: '' });
   let peerBusy = $state(false);
   let peerError = $state('');
+  let cleanEditableSettingsState = $state(null);
+  let cleanSettingsSnapshot = $state('');
+  let hasUnsavedChanges = $state(false);
+  let removeBeforeUnload = null;
+  let pathBrowser = $state({ open: false, row: -1, path: '', parent: '', directories: [], loading: false, error: '', requestedError: '' });
 
-  onMount(async () => {
-    try {
-      const [settings, librarySettings, peerSettings, invList, userList] = await Promise.all([getSettings(), getLibraries(), getFederationPeers(), listInvites(), listUsers()]);
-      signupEnabled = !!settings.signup_enabled;
-      guestAccess = !!settings.guest_access_enabled;
-      libraries = librarySettings.local_libraries || [];
-      libraryWarnings = librarySettings.warnings || [];
-      federation = { ...federation, ...(librarySettings.federation || {}), token: '' };
-      federationPeers = peerSettings.peers || [];
-      invites = invList;
-      users = userList;
-    } catch (e) {
-      error = e.message || 'failed to load settings';
-    } finally {
-      loading = false;
+  function currentEditableSettingsState() {
+    return { signupEnabled, guestAccess, libraries, federation };
+  }
+
+  function refreshCleanSettingsSnapshot() {
+    cleanEditableSettingsState = currentEditableSettingsState();
+    cleanSettingsSnapshot = buildEditableSettingsSnapshot(cleanEditableSettingsState);
+    updateUnsavedState();
+  }
+
+  function updateCleanSettingsSnapshot(savedSettingsState) {
+    if (!cleanEditableSettingsState) {
+      refreshCleanSettingsSnapshot();
+      return;
     }
+
+    cleanEditableSettingsState = { ...cleanEditableSettingsState, ...savedSettingsState };
+    cleanSettingsSnapshot = buildEditableSettingsSnapshot(cleanEditableSettingsState);
+    updateUnsavedState();
+  }
+
+  function handleBeforeUnload(event) {
+    beforeUnloadIfDirty(hasUnsavedChanges, event);
+  }
+
+  function setBeforeUnloadGuard(isDirty) {
+    if (!isDirty && removeBeforeUnload) {
+      removeBeforeUnload();
+      removeBeforeUnload = null;
+      return;
+    }
+
+    if (!isDirty || removeBeforeUnload) return;
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    removeBeforeUnload = () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }
+
+  function updateUnsavedState() {
+    if (!cleanSettingsSnapshot) {
+      hasUnsavedChanges = false;
+      setBeforeUnloadGuard(false);
+      return;
+    }
+
+    hasUnsavedChanges = hasEditableSettingsChanges(cleanSettingsSnapshot, currentEditableSettingsState());
+    setBeforeUnloadGuard(hasUnsavedChanges);
+  }
+
+  function requestCloseSettings() {
+    if (!hasUnsavedChanges) {
+      onClose?.();
+      return;
+    }
+
+    if (!confirm('Discard unsaved settings changes?')) return;
+
+    hasUnsavedChanges = false;
+    setBeforeUnloadGuard(false);
+    onClose?.();
+  }
+
+  onMount(() => {
+    async function loadSettings() {
+      try {
+        const [settings, librarySettings, peerSettings, invList, userList] = await Promise.all([getSettings(), getLibraries(), getFederationPeers(), listInvites(), listUsers()]);
+        signupEnabled = !!settings.signup_enabled;
+        guestAccess = !!settings.guest_access_enabled;
+        libraries = librarySettings.local_libraries || [];
+        libraryWarnings = librarySettings.warnings || [];
+        federation = { ...federation, ...(librarySettings.federation || {}), token: '' };
+        federationPeers = peerSettings.peers || [];
+        invites = invList;
+        users = userList;
+        refreshCleanSettingsSnapshot();
+      } catch (e) {
+        error = e.message || 'failed to load settings';
+      } finally {
+        loading = false;
+      }
+    }
+
+    loadSettings();
+
+    return () => {
+      if (removeBeforeUnload) removeBeforeUnload();
+    };
   });
 
   async function onToggleSignup(v) {
     signupEnabled = v;
+    updateUnsavedState();
     const r = await setSettings({ signup_enabled: v });
     signupEnabled = !!r.signup_enabled;
-    guestAccess = !!r.guest_access_enabled;
+    updateCleanSettingsSnapshot({ signupEnabled });
   }
 
   async function onToggleGuest(v) {
     guestAccess = v;
+    updateUnsavedState();
     const r = await setSettings({ guest_access_enabled: v });
-    signupEnabled = !!r.signup_enabled;
     guestAccess = !!r.guest_access_enabled;
+    updateCleanSettingsSnapshot({ guestAccess });
   }
 
   async function handleCreateInvite(e) {
@@ -112,14 +191,56 @@
 
   function addLibrary() {
     libraries = [...libraries, { name: '', path: '', enabled: true }];
+    updateUnsavedState();
   }
 
   function removeLibrary(index) {
     libraries = libraries.filter((_, i) => i !== index);
+    updateUnsavedState();
   }
 
   function setLibraryField(index, field, value) {
     libraries = libraries.map((lib, i) => i === index ? { ...lib, [field]: value } : lib);
+    updateUnsavedState();
+  }
+
+  function setFederationField(field, value) {
+    federation = { ...federation, [field]: value };
+    updateUnsavedState();
+  }
+
+  async function openPathBrowser(row) {
+    const library = libraries[row] || {};
+    pathBrowser = { ...pathBrowser, open: true, row, path: library.path || '', parent: '', directories: [], loading: true, error: '', requestedError: '' };
+    await loadLibraryPath(library.path || '', true);
+  }
+
+  async function loadLibraryPath(path = '', allowFallback = false) {
+    pathBrowser = { ...pathBrowser, path, loading: true, error: '', requestedError: '' };
+    const location = await loadPathBrowserLocation(listLibraryPaths, path, allowFallback);
+    pathBrowser = { ...pathBrowser, ...location, loading: false };
+  }
+
+  function choosePathBrowserFolder() {
+    if (pathBrowser.row < 0) return;
+
+    setLibraryField(pathBrowser.row, 'path', pathBrowser.path);
+    closePathBrowser();
+  }
+
+  function closePathBrowser() {
+    pathBrowser = { open: false, row: -1, path: '', parent: '', directories: [], loading: false, error: '', requestedError: '' };
+  }
+
+  function handleSettingsKeydown(e) {
+    if (e.key !== 'Escape') return;
+
+    if (pathBrowser.open) {
+      closePathBrowser();
+      return;
+    }
+
+    requestCloseSettings();
   }
 
   function warningFor(path) {
@@ -136,6 +257,7 @@
       libraryWarnings = r.warnings || [];
       federation = { ...federation, ...(r.federation || {}), token: '' };
       libraryMessage = saveAndScan ? 'Saved. Scan started.' : 'Saved.';
+      updateCleanSettingsSnapshot({ libraries, federation });
     } catch (err) {
       libraryError = err.message || 'failed to save libraries';
     } finally {
@@ -171,13 +293,15 @@
   }
 </script>
 
+<svelte:window onkeydown={handleSettingsKeydown} />
+
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div class="overlay" role="dialog" aria-modal="true" aria-label="Admin settings">
-  <div role="button" tabindex="-1" aria-label="Close" class="backdrop" onclick={onClose} onkeydown={(e) => { if (e.key === 'Escape') onClose(); }}></div>
+  <div role="button" tabindex="-1" aria-label="Close" class="backdrop" onclick={requestCloseSettings} onkeydown={handleSettingsKeydown}></div>
   <div class="panel">
     <div class="panel-header">
       <span class="panel-title">Settings</span>
-      <button class="close-btn" onclick={onClose} aria-label="Close">✕</button>
+      <button class="close-btn" onclick={requestCloseSettings} aria-label="Close">✕</button>
     </div>
 
     {#if loading}
@@ -209,7 +333,10 @@
                 <span>Enabled</span>
               </label>
               <input type="text" placeholder="Display name" value={lib.name || ''} oninput={(e) => setLibraryField(i, 'name', e.currentTarget.value)} />
-              <input type="text" placeholder="/path/to/music" value={lib.path || ''} oninput={(e) => setLibraryField(i, 'path', e.currentTarget.value)} />
+              <div class="path-input-row">
+                <input type="text" placeholder="/path/to/music" value={lib.path || ''} oninput={(e) => setLibraryField(i, 'path', e.currentTarget.value)} />
+                <button type="button" class="btn-copy" onclick={() => openPathBrowser(i)}>Browse</button>
+              </div>
               {#if warningFor(lib.path)}<p class="warning">{warningFor(lib.path)}</p>{/if}
               <button type="button" class="btn-danger" onclick={() => removeLibrary(i)}>Remove</button>
             </div>
@@ -220,19 +347,19 @@
         <div class="federation-box">
           <h3>Federation</h3>
           <label class="check-row">
-            <input type="checkbox" checked={!!federation.enabled} onchange={(e) => federation = { ...federation, enabled: e.currentTarget.checked }} />
+            <input type="checkbox" checked={!!federation.enabled} onchange={(e) => setFederationField('enabled', e.currentTarget.checked)} />
             <span>Enable federation after restart</span>
           </label>
-          <select value={federation.role || ''} onchange={(e) => federation = { ...federation, role: e.currentTarget.value }}>
+          <select value={federation.role || ''} onchange={(e) => setFederationField('role', e.currentTarget.value)}>
             <option value="">Off</option>
             <option value="hub">Hub</option>
             <option value="member">Member</option>
             <option value="peer">Peer</option>
           </select>
-          <input type="text" placeholder="Hub address (members)" value={federation.hub_addr || ''} oninput={(e) => federation = { ...federation, hub_addr: e.currentTarget.value }} />
-          <input type="text" placeholder="Listen address (hub or peer)" value={federation.listen || ''} oninput={(e) => federation = { ...federation, listen: e.currentTarget.value }} />
-          <input type="password" placeholder={federation.token_configured ? 'Token saved; leave blank to keep' : 'Token'} value={federation.token || ''} oninput={(e) => federation = { ...federation, token: e.currentTarget.value }} />
-          <input type="text" placeholder="Peer ID" value={federation.peer_id || ''} oninput={(e) => federation = { ...federation, peer_id: e.currentTarget.value }} />
+          <input type="text" placeholder="Hub address (members)" value={federation.hub_addr || ''} oninput={(e) => setFederationField('hub_addr', e.currentTarget.value)} />
+          <input type="text" placeholder="Listen address (hub or peer)" value={federation.listen || ''} oninput={(e) => setFederationField('listen', e.currentTarget.value)} />
+          <input type="password" placeholder={federation.token_configured ? 'Token saved; leave blank to keep' : 'Token'} value={federation.token || ''} oninput={(e) => setFederationField('token', e.currentTarget.value)} />
+          <input type="text" placeholder="Peer ID" value={federation.peer_id || ''} oninput={(e) => setFederationField('peer_id', e.currentTarget.value)} />
           {#if federation.restart_required}<p class="warning">Federation changes require a restart.</p>{/if}
 
           {#if federation.role === 'peer'}
@@ -337,6 +464,46 @@
   </div>
 </div>
 
+{#if pathBrowser.open}
+  <div class="path-browser-overlay" role="dialog" aria-modal="true" aria-label="Choose library folder">
+    <div class="path-browser-modal">
+      <div class="path-browser-header">
+        <h2>Choose folder</h2>
+        <button type="button" class="close-btn" onclick={closePathBrowser} aria-label="Cancel">✕</button>
+      </div>
+      <p class="muted">Current server path</p>
+      <code class="path-browser-code">{pathBrowser.path || '/'}</code>
+
+      {#if pathBrowser.requestedError}
+        <p class="warning">Requested path unavailable: {pathBrowser.requestedError}</p>
+      {/if}
+      {#if pathBrowser.error}
+        <p class="danger">{pathBrowser.error}</p>
+      {/if}
+      {#if pathBrowser.loading}
+        <p class="muted">Loading folders…</p>
+      {:else}
+        <div class="path-browser-list">
+          {#if pathBrowser.parent}
+            <button type="button" class="path-browser-row parent-row" onclick={() => loadLibraryPath(pathBrowser.parent)}>../</button>
+          {/if}
+          {#each pathBrowser.directories as directory (directory.path)}
+            <button type="button" class="path-browser-row" onclick={() => loadLibraryPath(directory.path)}>{directory.name || directory.path}</button>
+          {/each}
+          {#if !pathBrowser.parent && pathBrowser.directories.length === 0 && !pathBrowser.error}
+            <p class="muted">No child folders.</p>
+          {/if}
+        </div>
+      {/if}
+
+      <div class="path-browser-actions">
+        <button type="button" class="btn-primary" disabled={pathBrowser.loading || !pathBrowser.path} onclick={choosePathBrowserFolder}>Use this folder</button>
+        <button type="button" class="btn-copy" onclick={closePathBrowser}>Cancel</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .overlay { position: fixed; inset: 0; z-index: 90; display: flex; align-items: flex-start; justify-content: flex-end; }
   .backdrop { position: absolute; inset: 0; background: rgba(6,6,11,0.6); backdrop-filter: blur(4px); }
@@ -378,6 +545,7 @@
   .library-list { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
   .library-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: rgba(0,0,0,0.18); box-shadow: 0 10px 30px rgba(0,0,0,0.18); }
   .library-enabled { justify-content: flex-start; margin: 0; }
+  .path-input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
   .federation-box { display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
   .federation-box h3 { margin: 0; font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em; color: var(--neon-cyan); text-transform: uppercase; }
   .peer-box { display: grid; gap: 10px; margin-top: 8px; padding: 12px; border: 1px solid rgba(31,224,255,0.25); border-radius: var(--radius-lg); background: radial-gradient(circle at top right, rgba(31,224,255,0.12), rgba(0,0,0,0.18) 52%); }
@@ -390,4 +558,14 @@
   .library-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
   .warning { color: var(--neon-amber); font-size: 12px; font-family: var(--font-sans); margin: 0; }
   .success { color: var(--status-success); font-size: 13px; font-family: var(--font-sans); }
+  .path-browser-overlay { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 18px; background: rgba(4,4,9,0.72); backdrop-filter: blur(6px); }
+  .path-browser-modal { width: min(520px, 100%); max-height: min(680px, 86vh); overflow: hidden; display: grid; gap: 12px; padding: 18px; border: 1.5px solid var(--neon-cyan); border-radius: var(--radius-lg); background: radial-gradient(circle at top left, rgba(31,224,255,0.14), transparent 46%), linear-gradient(145deg, rgba(13,16,27,0.98), rgba(8,8,14,0.98)); box-shadow: 0 24px 80px rgba(0,0,0,0.55), 0 0 30px rgba(31,224,255,0.18); }
+  .path-browser-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .path-browser-header h2 { margin: 0; font-family: var(--font-display); font-size: 15px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-strong); }
+  .path-browser-code { display: block; padding: 10px 12px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--bg-inset); color: var(--neon-cyan); font-family: var(--font-mono); font-size: 12px; overflow: auto; }
+  .path-browser-list { min-height: 96px; max-height: 300px; overflow: auto; display: grid; gap: 6px; padding: 2px; }
+  .path-browser-row { width: 100%; padding: 9px 10px; text-align: left; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: rgba(255,255,255,0.03); color: var(--text-body); font-family: var(--font-sans); font-size: 13px; cursor: pointer; }
+  .path-browser-row:hover { border-color: var(--neon-cyan); background: rgba(31,224,255,0.1); color: var(--text-strong); }
+  .parent-row { color: var(--neon-amber); font-family: var(--font-mono); }
+  .path-browser-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
 </style>

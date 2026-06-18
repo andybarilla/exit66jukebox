@@ -209,6 +209,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/admin/settings", s.requireAdmin(s.setAdminSettings))
 	mux.HandleFunc("GET /api/admin/libraries", s.requireAdmin(s.getAdminLibraries))
 	mux.HandleFunc("POST /api/admin/libraries", s.requireAdmin(s.setAdminLibraries))
+	mux.HandleFunc("GET /api/admin/library-paths", s.requireAdmin(s.listLibraryPaths))
 	mux.HandleFunc("GET /api/admin/federation/peers", s.requireAdmin(s.listFederationPeers))
 	mux.HandleFunc("POST /api/admin/federation/peers", s.requireAdmin(s.addFederationPeer))
 	mux.HandleFunc("POST /api/admin/federation/peers/{peerID}/approve", s.requireAdmin(s.approveFederationPeer))

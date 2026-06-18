@@ -1,9 +1,20 @@
 package store
 
 import (
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func withLibraryPathHomeDir(t *testing.T, fn func() (string, error)) {
+	t.Helper()
+	original := libraryPathHomeDir
+	libraryPathHomeDir = fn
+	t.Cleanup(func() {
+		libraryPathHomeDir = original
+	})
+}
 
 func TestLibraryConfigSaveSeedsAndReturnsActiveRoots(t *testing.T) {
 	db := mustOpenMem(t)
@@ -85,6 +96,92 @@ func TestLibraryConfigRejectsBlankAndDuplicatePaths(t *testing.T) {
 	}
 	if err := SaveLocalLibraries(db, []LocalLibrary{{Path: "/music"}, {Path: "/music/./"}}); err == nil {
 		t.Fatal("duplicate normalized path should fail")
+	}
+}
+
+func TestLibraryConfigExpandsHomePaths(t *testing.T) {
+	db := mustOpenMem(t)
+	home := filepath.Join(t.TempDir(), "home")
+	withLibraryPathHomeDir(t, func() (string, error) {
+		return home, nil
+	})
+
+	if err := SaveLocalLibraries(db, []LocalLibrary{
+		{Path: "~/Music", Enabled: true, Name: " Main "},
+		{Path: "~", Enabled: true},
+	}); err != nil {
+		t.Fatalf("save home paths: %v", err)
+	}
+
+	libs, err := ListLocalLibraries(db)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(libs) != 2 {
+		t.Fatalf("expected two libraries, got %#v", libs)
+	}
+	if libs[0].Path != filepath.Join(home, "Music") || libs[0].Name != "Main" {
+		t.Fatalf("first library = %#v", libs[0])
+	}
+	if libs[1].Path != filepath.Clean(home) {
+		t.Fatalf("second library path = %q, want %q", libs[1].Path, filepath.Clean(home))
+	}
+}
+
+func TestLibraryConfigRejectsUnsupportedHomeForms(t *testing.T) {
+	db := mustOpenMem(t)
+
+	err := SaveLocalLibraries(db, []LocalLibrary{{Path: "~other/Music", Enabled: true}})
+	if err == nil || !strings.Contains(err.Error(), "unsupported library path") {
+		t.Fatalf("unsupported home form error = %v", err)
+	}
+}
+
+func TestLibraryConfigHomeLookupFailureIsValidationError(t *testing.T) {
+	db := mustOpenMem(t)
+	withLibraryPathHomeDir(t, func() (string, error) {
+		return "", errors.New("home unavailable")
+	})
+
+	err := SaveLocalLibraries(db, []LocalLibrary{{Path: "~/Music", Enabled: true}})
+	if err == nil || !strings.Contains(err.Error(), "resolve home directory") {
+		t.Fatalf("home lookup error = %v", err)
+	}
+}
+
+func TestLibraryConfigRejectsDuplicatePathsAfterHomeExpansion(t *testing.T) {
+	db := mustOpenMem(t)
+	home := filepath.Join(t.TempDir(), "home")
+	withLibraryPathHomeDir(t, func() (string, error) {
+		return home, nil
+	})
+
+	err := SaveLocalLibraries(db, []LocalLibrary{
+		{Path: "~/Music", Enabled: true},
+		{Path: filepath.Join(home, "Music", "."), Enabled: true},
+	})
+	if err == nil || !strings.Contains(err.Error(), "duplicate library path") {
+		t.Fatalf("duplicate expanded path error = %v", err)
+	}
+}
+
+func TestLibraryConfigurationExpandsHomePaths(t *testing.T) {
+	db := mustOpenMem(t)
+	home := filepath.Join(t.TempDir(), "home")
+	withLibraryPathHomeDir(t, func() (string, error) {
+		return home, nil
+	})
+
+	if err := SaveLibraryConfiguration(db, []LocalLibrary{{Path: "~/Library", Enabled: true}}, FederationSettings{}); err != nil {
+		t.Fatalf("save configuration: %v", err)
+	}
+
+	libs, err := ListLocalLibraries(db)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(libs) != 1 || libs[0].Path != filepath.Join(home, "Library") {
+		t.Fatalf("libraries = %#v", libs)
 	}
 }
 

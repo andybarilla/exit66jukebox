@@ -11,6 +11,8 @@ import (
 
 const keyLibrarySettingsInitialized = "library_settings_initialized"
 
+var libraryPathHomeDir = os.UserHomeDir
+
 type LocalLibrary struct {
 	ID        int64  `json:"id"`
 	Path      string `json:"path"`
@@ -219,11 +221,10 @@ func normalizeLocalLibraries(libs []LocalLibrary) ([]LocalLibrary, error) {
 	seen := map[string]bool{}
 	normalized := make([]LocalLibrary, 0, len(libs))
 	for _, lib := range libs {
-		path := strings.TrimSpace(lib.Path)
-		if path == "" {
-			return nil, errors.New("library path cannot be blank")
+		path, err := expandLocalLibraryPath(lib.Path)
+		if err != nil {
+			return nil, err
 		}
-		path = filepath.Clean(path)
 		if seen[path] {
 			return nil, fmt.Errorf("duplicate library path: %s", path)
 		}
@@ -233,6 +234,39 @@ func normalizeLocalLibraries(libs []LocalLibrary) ([]LocalLibrary, error) {
 		normalized = append(normalized, lib)
 	}
 	return normalized, nil
+}
+
+func expandLocalLibraryPath(path string) (string, error) {
+	trimmedPath := strings.TrimSpace(path)
+	if trimmedPath == "" {
+		return "", errors.New("library path cannot be blank")
+	}
+	if trimmedPath == "~" {
+		return libraryPathHome()
+	}
+	if strings.HasPrefix(trimmedPath, "~/") {
+		home, err := libraryPathHome()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Clean(filepath.Join(home, trimmedPath[2:])), nil
+	}
+	if strings.HasPrefix(trimmedPath, "~") {
+		return "", fmt.Errorf("unsupported library path %q: only ~ and ~/ paths are supported", trimmedPath)
+	}
+	return filepath.Clean(trimmedPath), nil
+}
+
+func libraryPathHome() (string, error) {
+	home, err := libraryPathHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory for library path: %w", err)
+	}
+	home = strings.TrimSpace(home)
+	if home == "" {
+		return "", errors.New("resolve home directory for library path: home directory is blank")
+	}
+	return filepath.Clean(home), nil
 }
 
 func ListLocalLibraries(db *sql.DB) ([]LocalLibrary, error) {
