@@ -374,15 +374,45 @@ func DeleteLocalLibraryTracksExcept(db *sql.DB, libraryID int64, keepPaths []str
 		}
 		return PruneOrphans(db)
 	}
-	ph := strings.TrimRight(strings.Repeat("?,", len(keepPaths)), ",")
-	args := make([]any, 0, len(keepPaths)+1)
-	args = append(args, libraryID)
-	for _, path := range keepPaths {
-		args = append(args, path)
+	tx, err := db.Begin()
+	if err != nil {
+		return err
 	}
-	if _, err := db.Exec(
-		`DELETE FROM track WHERE source_peer = '' AND library_id = ? AND path NOT IN (`+ph+`)`, args...,
+	defer tx.Rollback()
+	if _, err := tx.Exec(`CREATE TEMP TABLE IF NOT EXISTS keep_local_library_track_path (path TEXT PRIMARY KEY)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM keep_local_library_track_path`); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO keep_local_library_track_path(path) VALUES(?)`)
+	if err != nil {
+		return err
+	}
+	for _, path := range keepPaths {
+		if _, err := stmt.Exec(path); err != nil {
+			stmt.Close()
+			return err
+		}
+	}
+	if err := stmt.Close(); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM track
+		 WHERE source_peer = ''
+		   AND library_id = ?
+		   AND NOT EXISTS (
+		       SELECT 1 FROM keep_local_library_track_path keep
+		       WHERE keep.path = track.path
+		   )`, libraryID,
 	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE keep_local_library_track_path`); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return PruneOrphans(db)

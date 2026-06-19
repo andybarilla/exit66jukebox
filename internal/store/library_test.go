@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
@@ -91,5 +92,53 @@ func TestListTracksSearchAndPage(t *testing.T) {
 	page, _ := ListTracks(db, "", 1, 1)
 	if len(page) != 1 {
 		t.Fatalf("expected 1 track on page, got %d", len(page))
+	}
+}
+
+func TestDeleteLocalLibraryTracksExceptAllowsLargeKeepSet(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	firstLibraryID, err := EnsureLocalLibrary(db, "/first", "First")
+	if err != nil {
+		t.Fatalf("first library: %v", err)
+	}
+	secondLibraryID, err := EnsureLocalLibrary(db, "/second", "Second")
+	if err != nil {
+		t.Fatalf("second library: %v", err)
+	}
+
+	keepPath := "/first/keep.mp3"
+	stalePath := "/first/stale.mp3"
+	if _, err := UpsertTrackInLibrary(db, firstLibraryID, model.Track{Path: keepPath, Title: "Keep"}, "Kept Artist", "", "Kept Album"); err != nil {
+		t.Fatalf("upsert kept track: %v", err)
+	}
+	if _, err := UpsertTrackInLibrary(db, firstLibraryID, model.Track{Path: stalePath, Title: "Stale"}, "Stale Artist", "", "Stale Album"); err != nil {
+		t.Fatalf("upsert stale track: %v", err)
+	}
+	if _, err := UpsertTrackInLibrary(db, secondLibraryID, model.Track{Path: stalePath, Title: "Other"}, "Other Artist", "", "Other Album"); err != nil {
+		t.Fatalf("upsert other library track: %v", err)
+	}
+
+	keepPaths := make([]string, 40_000)
+	keepPaths[0] = keepPath
+	for i := 1; i < len(keepPaths); i++ {
+		keepPaths[i] = fmt.Sprintf("/unseen/%05d.mp3", i)
+	}
+
+	if err := DeleteLocalLibraryTracksExcept(db, firstLibraryID, keepPaths); err != nil {
+		t.Fatalf("delete local tracks with large keep set: %v", err)
+	}
+	if _, _, ok := TrackStampInLibrary(db, firstLibraryID, keepPath); !ok {
+		t.Fatalf("expected kept track to remain")
+	}
+	if _, _, ok := TrackStampInLibrary(db, firstLibraryID, stalePath); ok {
+		t.Fatalf("expected stale track to be pruned from scanned library")
+	}
+	if _, _, ok := TrackStampInLibrary(db, secondLibraryID, stalePath); !ok {
+		t.Fatalf("expected matching path in another library to remain")
 	}
 }
