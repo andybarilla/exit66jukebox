@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,21 +23,22 @@ import (
 
 // Server holds dependencies and builds the HTTP handler.
 type Server struct {
-	db          *sql.DB
-	jb          *jukebox.Jukebox
-	ui          fs.FS
-	listenAddr  string // server's own listen addr, for building Sonos-reachable URLs
-	hubs        map[string]*broadcast.Hub
-	buses       map[string]*events.Bus
-	nowPlaying  map[string]*NowPlaying // current-track trackers for shared streams
-	enrich      *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
-	recommend   *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
-	scanMu      sync.Mutex
-	scan        *scan.Progress // nil until SetScanProgress (no library); endpoint 503 while nil
-	scanWorkers int
-	fedResolver fed.Resolver    // nil unless federation is configured
-	fedPeers    func() []string // returns online peer ids; nil when federation off
-	activeFed   store.FederationSettings
+	db           *sql.DB
+	jb           *jukebox.Jukebox
+	ui           fs.FS
+	listenAddr   string // server's own listen addr, for building Sonos-reachable URLs
+	publicOrigin string // trusted browser-facing origin for email links
+	hubs         map[string]*broadcast.Hub
+	buses        map[string]*events.Bus
+	nowPlaying   map[string]*NowPlaying // current-track trackers for shared streams
+	enrich       *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
+	recommend    *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
+	scanMu       sync.Mutex
+	scan         *scan.Progress // nil until SetScanProgress (no library); endpoint 503 while nil
+	scanWorkers  int
+	fedResolver  fed.Resolver    // nil unless federation is configured
+	fedPeers     func() []string // returns online peer ids; nil when federation off
+	activeFed    store.FederationSettings
 
 	// muteLocalOnCast is exposed via GET /api/config so the frontend can mute the
 	// local <audio> while a Sonos cast is active. Sourced from config (env for now).
@@ -61,7 +63,8 @@ type Server struct {
 
 	// emailInvite, when non-nil (SMTP configured), sends an invite link to an
 	// address. Best-effort: called in a goroutine, errors logged not surfaced.
-	emailInvite func(to, link string)
+	emailInvite        func(to, link string)
+	emailPasswordReset func(to, link string)
 
 	// manualVerify confirms a manually-entered IP actually serves a Sonos
 	// descriptor before it's trusted (injectable for tests).
@@ -99,6 +102,8 @@ func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 // the client-controlled Host header.
 func (s *Server) SetListenAddr(addr string) { s.listenAddr = addr }
 
+func (s *Server) SetPublicOrigin(origin string) { s.publicOrigin = strings.TrimRight(origin, "/") }
+
 // SetEnrichRunner attaches the MusicBrainz/CAA enrichment runner that backs the
 // /api/enrich endpoints.
 func (s *Server) SetEnrichRunner(r *enrich.Runner) { s.enrich = r }
@@ -134,6 +139,8 @@ func (s *Server) SetMuteLocalOnCast(v bool) { s.muteLocalOnCast = v }
 
 // SetInviteEmailer attaches the optional SMTP invite sender.
 func (s *Server) SetInviteEmailer(fn func(to, link string)) { s.emailInvite = fn }
+
+func (s *Server) SetPasswordResetEmailer(fn func(to, link string)) { s.emailPasswordReset = fn }
 
 // SetSigningSecret records the HMAC secret used to sign Sonos media URLs.
 // Loaded once at startup from the store (store.MediaSigningSecret).
@@ -194,6 +201,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/auth/me", s.me)
 	mux.HandleFunc("POST /api/auth/invite/accept", s.inviteAccept)
+	mux.HandleFunc("POST /api/auth/password-reset/forgot", s.forgotPassword)
+	mux.HandleFunc("POST /api/auth/password-reset/redeem", s.resetPassword)
 	mux.HandleFunc("GET /api/discover/rediscover", s.discoverRediscover)
 	mux.HandleFunc("GET /api/discover/recent", s.discoverRecent)
 	mux.HandleFunc("GET /api/discover/genres", s.discoverGenres)
@@ -217,6 +226,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/admin/invites", s.requireAdmin(s.listInvites))
 	mux.HandleFunc("DELETE /api/admin/invites/{id}", s.requireAdmin(s.deleteInvite))
 	mux.HandleFunc("GET /api/admin/users", s.requireAdmin(s.listUsers))
+	mux.HandleFunc("POST /api/admin/users/{id}/password-reset", s.requireAdmin(s.createPasswordReset))
 	mux.HandleFunc("DELETE /api/admin/users/{id}", s.requireAdmin(s.deleteUser))
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))

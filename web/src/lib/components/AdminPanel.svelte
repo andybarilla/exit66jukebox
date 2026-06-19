@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths } from '../auth.js';
+  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths, createPasswordReset } from '../auth.js';
   import { beforeUnloadIfDirty, buildEditableSettingsSnapshot, hasEditableSettingsChanges, loadPathBrowserLocation } from '../settingsPanelState.js';
   import Switch from './Switch.svelte';
 
@@ -23,6 +23,7 @@
 
   // user delete error
   let userError = $state('');
+  let resetLink = $state('');
 
   let libraries = $state([]);
   let libraryWarnings = $state([]);
@@ -187,6 +188,16 @@
       return;
     }
     users = await listUsers();
+  }
+
+  async function handleCreatePasswordReset(id) {
+    userError = ''; resetLink = '';
+    try {
+      const r = await createPasswordReset(id);
+      resetLink = r.link;
+    } catch (err) {
+      userError = err.message || 'failed to create reset link';
+    }
   }
 
   function addLibrary() {
@@ -445,6 +456,12 @@
       <section class="section">
         <h2 class="section-title">Users</h2>
         {#if userError}<p class="danger">{userError}</p>{/if}
+        {#if resetLink}
+          <div class="link-row">
+            <input type="text" readonly value={resetLink} class="link-input" />
+            <button type="button" class="btn-copy" onclick={async () => navigator.clipboard.writeText(resetLink)}>Copy</button>
+          </div>
+        {/if}
         {#if users.length === 0}
           <p class="muted">No users.</p>
         {:else}
@@ -454,6 +471,7 @@
                 <span class="list-email">{u.display_name || u.email}</span>
                 <span class="list-meta">{u.email}</span>
                 {#if u.is_admin}<span class="badge badge-admin">admin</span>{/if}
+                <button class="btn-copy" onclick={() => handleCreatePasswordReset(u.id)}>Reset password</button>
                 <button class="btn-danger" onclick={() => handleDeleteUser(u.id)}>Delete</button>
               </li>
             {/each}

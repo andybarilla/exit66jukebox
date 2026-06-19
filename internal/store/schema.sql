@@ -149,3 +149,11 @@ CREATE TABLE IF NOT EXISTS invite (
     expires_at  INTEGER NOT NULL,
     accepted_at INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS password_reset (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash  TEXT NOT NULL UNIQUE,
+    user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    created_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL,
+    used_at     INTEGER NOT NULL DEFAULT 0
+);
