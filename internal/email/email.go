@@ -35,6 +35,14 @@ func (s *Sender) Enabled() bool { return s.cfg.Host != "" }
 
 // SendInvite emails the invite link to addr. No-op (nil) when disabled.
 func (s *Sender) SendInvite(to, link string) error {
+	return s.sendLink(to, link, inviteMessage)
+}
+
+func (s *Sender) SendPasswordReset(to, link string) error {
+	return s.sendLink(to, link, passwordResetMessage)
+}
+
+func (s *Sender) sendLink(to, link string, buildMessage func(from, to, link string) []byte) error {
 	if !s.Enabled() {
 		return nil
 	}
@@ -52,7 +60,7 @@ func (s *Sender) SendInvite(to, link string) error {
 		auth = smtp.PlainAuth("", s.cfg.User, s.cfg.Pass, s.cfg.Host)
 	}
 	addr := s.cfg.Host + ":" + s.cfg.Port
-	return s.send(addr, auth, s.cfg.From, []string{to}, inviteMessage(s.cfg.From, to, link))
+	return s.send(addr, auth, s.cfg.From, []string{to}, buildMessage(s.cfg.From, to, link))
 }
 
 // inviteMessage builds an RFC 5322 message.
@@ -60,5 +68,12 @@ func inviteMessage(from, to, link string) []byte {
 	return []byte(fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: You're invited to Exit 66 Jukebox\r\n\r\n"+
 			"You've been invited. Open this link to set up your account:\r\n\r\n%s\r\n",
+		from, to, link))
+}
+
+func passwordResetMessage(from, to, link string) []byte {
+	return []byte(fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: Reset your Exit 66 Jukebox password\r\n\r\n"+
+			"Open this link within 1 hour to set a new password:\r\n\r\n%s\r\n",
 		from, to, link))
 }

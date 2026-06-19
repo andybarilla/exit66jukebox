@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -79,7 +80,7 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	link := inviteBaseURL(r) + "/invite/" + raw
+	link := s.publicBaseURL() + "/invite/" + raw
 	// Best-effort email when SMTP is configured; failure doesn't fail the call.
 	if s.emailInvite != nil && req.Email != "" {
 		go s.emailInvite(req.Email, link)
@@ -87,13 +88,18 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"link": link, "email": req.Email})
 }
 
-// inviteBaseURL reconstructs the public origin from the request.
-func inviteBaseURL(r *http.Request) string {
-	scheme := "http"
-	if isHTTPS(r) {
-		scheme = "https"
+func (s *Server) publicBaseURL() string {
+	if s.publicOrigin != "" {
+		return s.publicOrigin
 	}
-	return scheme + "://" + r.Host
+	host := s.listenAddr
+	if host == "" || strings.HasPrefix(host, ":") {
+		return "http://127.0.0.1" + host
+	}
+	if _, _, err := net.SplitHostPort(host); err != nil && !strings.Contains(host, ":") {
+		host = net.JoinHostPort(host, "80")
+	}
+	return "http://" + host
 }
 
 // listInvites returns all invites with a derived status.
@@ -150,6 +156,33 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) createPasswordReset(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	u, ok, err := store.GetUserByID(s.db, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !ok {
+		writeErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	raw, err := auth.GenerateToken()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "token error")
+		return
+	}
+	if _, err := store.CreatePasswordReset(s.db, auth.HashToken(raw), u.ID, time.Now().Add(passwordResetTTL).Unix()); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"link": s.publicBaseURL() + "/reset-password/" + raw, "email": u.Email})
 }
 
 // deleteUser removes an account. An admin can't delete themselves (avoids

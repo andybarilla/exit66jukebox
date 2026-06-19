@@ -1,31 +1,20 @@
 <script>
-  import { login, requestPasswordReset } from '../auth.js';
-  let { onLoggedIn, canSignup = false, onSwitchToSignup } = $props();
-  let email = $state('');
+  import { resetPassword } from '../auth.js';
+  let { onComplete } = $props();
+  const token = window.location.pathname.replace(/^\/reset-password\//, '');
   let password = $state('');
   let error = $state('');
-  let info = $state('');
+  let done = $state(false);
   let busy = $state(false);
 
   async function submit(e) {
     e.preventDefault();
     busy = true; error = '';
     try {
-      onLoggedIn(await login(email, password));
+      await resetPassword(token, password);
+      done = true;
     } catch (err) {
-      error = err.message || 'login failed';
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function forgotPassword() {
-    busy = true; error = ''; info = '';
-    try {
-      await requestPasswordReset(email);
-      info = 'If that account exists, a reset email will arrive shortly.';
-    } catch (err) {
-      error = err.message || 'password reset failed';
+      error = err.message || 'failed to reset password';
     } finally {
       busy = false;
     }
@@ -33,15 +22,14 @@
 </script>
 
 <form class="auth" onsubmit={submit}>
-  <h1>Exit 66 Jukebox</h1>
-  <input type="email" placeholder="Email" bind:value={email} autocomplete="username" required />
-  <input type="password" placeholder="Password" bind:value={password} autocomplete="current-password" required />
-  {#if error}<p class="err">{error}</p>{/if}
-  {#if info}<p class="ok">{info}</p>{/if}
-  <button disabled={busy} type="submit">Log in</button>
-  <button type="button" class="link" disabled={busy || !email} onclick={forgotPassword}>Forgot password?</button>
-  {#if canSignup}
-    <button type="button" class="link" onclick={onSwitchToSignup}>Create an account</button>
+  <h1>Reset your password</h1>
+  {#if done}
+    <p class="ok">Password updated. Log in with your new password.</p>
+    <button type="button" class="link" onclick={onComplete}>Back to login</button>
+  {:else}
+    <input type="password" placeholder="New password" bind:value={password} autocomplete="new-password" required minlength="8" />
+    {#if error}<p class="err">{error}</p>{/if}
+    <button disabled={busy} type="submit">Set password</button>
   {/if}
 </form>
 
@@ -53,7 +41,6 @@
   button[type="submit"] { padding: .6rem .75rem; font-size: 1rem; background: var(--neon-magenta); color: var(--text-on-accent); border: none; border-radius: var(--radius-md); font-family: var(--font-display); font-weight: 700; letter-spacing: 0.06em; cursor: pointer; }
   button[type="submit"]:disabled { opacity: 0.5; cursor: default; }
   .err { color: var(--status-danger); margin: 0; font-size: 0.875rem; }
-  .ok { color: var(--status-success); margin: 0; font-size: 0.875rem; }
+  .ok { color: var(--status-success); margin: 0; font-size: 0.9rem; }
   .link { background: none; border: none; color: var(--neon-cyan); cursor: pointer; font-family: var(--font-sans); font-size: 0.9rem; }
-  .link:disabled { opacity: 0.5; cursor: default; }
 </style>

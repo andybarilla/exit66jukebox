@@ -17,6 +17,7 @@
   import Login from './lib/components/Login.svelte';
   import Signup from './lib/components/Signup.svelte';
   import InviteAccept from './lib/components/InviteAccept.svelte';
+  import PasswordReset from './lib/components/PasswordReset.svelte';
   import AdminPanel from './lib/components/AdminPanel.svelte';
 
   const s = createStore();
@@ -27,6 +28,7 @@
   let showAuth = $state(false);
   let adminPanelOpen = $state(false);
   const onInvitePath = window.location.pathname.startsWith('/invite/');
+  const onResetPath = window.location.pathname.startsWith('/reset-password/');
   let tickTimer, resizeHandler;
 
   // Active now-playing slice + derived progress %.
@@ -192,6 +194,8 @@
   <div style="flex:1;"></div>
 {:else if onInvitePath}
   <InviteAccept onLoggedIn={(u) => { s.setMe(u); s.start(); window.history.replaceState(null, '', '/'); }} />
+{:else if onResetPath}
+  <PasswordReset onComplete={() => window.history.replaceState(null, '', '/')} />
 {:else if (!s.me && !s.config.guestAccess) || showAuth}
   {#if showSignup}
     <Signup onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />

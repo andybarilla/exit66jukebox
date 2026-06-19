@@ -240,6 +240,7 @@ func main() {
 	}
 	srv := api.NewServer(db, jb, uiFS)
 	srv.SetListenAddr(cfg.Addr)
+	srv.SetPublicOrigin(cfg.PublicOrigin)
 	srv.SetMuteLocalOnCast(cfg.MuteLocalOnCast)
 	srv.SetSigningSecret(signingSecret)
 	srv.SetScanWorkers(cfg.ScanWorkers)
@@ -251,6 +252,11 @@ func main() {
 		srv.SetInviteEmailer(func(to, link string) {
 			if err := mailer.SendInvite(to, link); err != nil {
 				log.Printf("invite email to %s: %v", to, err)
+			}
+		})
+		srv.SetPasswordResetEmailer(func(to, link string) {
+			if err := mailer.SendPasswordReset(to, link); err != nil {
+				log.Printf("password reset email to %s: %v", to, err)
 			}
 		})
 		log.Print("SMTP invite email enabled")

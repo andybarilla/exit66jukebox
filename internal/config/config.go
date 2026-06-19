@@ -16,6 +16,7 @@ type Config struct {
 	Services      Services
 	Federation    Federation
 	SMTP          SMTP
+	PublicOrigin  string
 
 	// MuteLocalOnCast silences the browser's local <audio> while a Sonos cast is
 	// active. Sourced from EXIT66_MUTE_LOCAL_ON_CAST for now; a settings UI will
@@ -122,6 +123,7 @@ func Parse(args []string) (Config, error) {
 	c.Services = servicesFromEnv()
 	c.Federation = federationFromEnv()
 	c.SMTP = smtpFromEnv()
+	c.PublicOrigin = os.Getenv("EXIT66_PUBLIC_ORIGIN")
 	c.MuteLocalOnCast = envBool("EXIT66_MUTE_LOCAL_ON_CAST", true)
 	return c, nil
 }
