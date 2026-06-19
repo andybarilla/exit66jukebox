@@ -51,7 +51,6 @@ CREATE TABLE IF NOT EXISTS local_library (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_local_library_source_library_id ON local_library(source_library_id);
 CREATE TABLE IF NOT EXISTS remote_library (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     source_peer       TEXT NOT NULL,

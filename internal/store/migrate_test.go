@@ -84,6 +84,52 @@ func TestOpenMigratesOldFederationSchemaBeforeCreatingIndexes(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesOldLocalLibraryBeforeCreatingSourceLibraryIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "exit66.db")
+	oldDB, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("open old db: %v", err)
+	}
+	if _, err := oldDB.Exec(`
+		CREATE TABLE local_library (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			path       TEXT NOT NULL UNIQUE,
+			enabled    INTEGER NOT NULL DEFAULT 1,
+			name       TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);
+		INSERT INTO local_library(path, enabled, name, created_at, updated_at)
+		VALUES('/music', 1, 'Music', 1, 1);
+	`); err != nil {
+		oldDB.Close()
+		t.Fatalf("create old local_library: %v", err)
+	}
+	if err := oldDB.Close(); err != nil {
+		t.Fatalf("close old db: %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open old db: %v", err)
+	}
+	defer db.Close()
+
+	if has, err := columnExists(db, "local_library", "source_library_id"); err != nil || !has {
+		t.Fatalf("expected local_library.source_library_id after Open, has=%v err=%v", has, err)
+	}
+	if !indexExists(t, db, "idx_local_library_source_library_id") {
+		t.Fatalf("expected idx_local_library_source_library_id")
+	}
+	var sourceLibraryID string
+	if err := db.QueryRow(`SELECT source_library_id FROM local_library WHERE path = '/music'`).Scan(&sourceLibraryID); err != nil {
+		t.Fatalf("source library id: %v", err)
+	}
+	if sourceLibraryID == "" {
+		t.Fatalf("expected source_library_id backfilled")
+	}
+}
+
 func indexExists(t *testing.T, db *sql.DB, name string) bool {
 	t.Helper()
 	return objectExists(t, db, "index", name)
