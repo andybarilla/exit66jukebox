@@ -240,6 +240,7 @@ func main() {
 	}
 	srv := api.NewServer(db, jb, uiFS)
 	srv.SetListenAddr(cfg.Addr)
+	srv.SetPublicOrigin(cfg.PublicOrigin)
 	srv.SetMuteLocalOnCast(cfg.MuteLocalOnCast)
 	srv.SetSigningSecret(signingSecret)
 	srv.SetScanWorkers(cfg.ScanWorkers)

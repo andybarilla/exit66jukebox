@@ -264,7 +264,7 @@ func (s *Server) forgotPassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	s.emailPasswordReset(req.Email, inviteBaseURL(r)+"/reset-password/"+raw)
+	s.emailPasswordReset(req.Email, s.publicBaseURL()+"/reset-password/"+raw)
 	writeJSON(w, http.StatusOK, passwordResetAccepted())
 }
 
@@ -287,7 +287,7 @@ func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "token and an 8+ char password are required")
 		return
 	}
-	reset, ok, err := store.PendingPasswordReset(s.db, auth.HashToken(req.Token))
+	reset, ok, err := store.ConsumePasswordReset(s.db, auth.HashToken(req.Token))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "db error")
 		return
@@ -302,10 +302,6 @@ func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := store.UpdateUserPassword(s.db, reset.UserID, passwordHash); err != nil {
-		writeErr(w, http.StatusInternalServerError, "db error")
-		return
-	}
-	if err := store.MarkPasswordResetUsed(s.db, reset.ID); err != nil {
 		writeErr(w, http.StatusInternalServerError, "db error")
 		return
 	}
@@ -405,7 +401,9 @@ func (s *Server) RequireAuthMiddleware(next http.Handler) http.Handler {
 func isOpenPath(p string) bool {
 	switch p {
 	case "/api/auth/login", "/api/auth/signup", "/api/auth/logout",
-		"/api/auth/me", "/api/auth/invite/accept", "/api/config":
+		"/api/auth/me", "/api/auth/invite/accept",
+		"/api/auth/password-reset/forgot", "/api/auth/password-reset/redeem",
+		"/api/config":
 		return true
 	}
 	return false

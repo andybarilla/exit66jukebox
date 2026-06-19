@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,21 +23,22 @@ import (
 
 // Server holds dependencies and builds the HTTP handler.
 type Server struct {
-	db          *sql.DB
-	jb          *jukebox.Jukebox
-	ui          fs.FS
-	listenAddr  string // server's own listen addr, for building Sonos-reachable URLs
-	hubs        map[string]*broadcast.Hub
-	buses       map[string]*events.Bus
-	nowPlaying  map[string]*NowPlaying // current-track trackers for shared streams
-	enrich      *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
-	recommend   *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
-	scanMu      sync.Mutex
-	scan        *scan.Progress // nil until SetScanProgress (no library); endpoint 503 while nil
-	scanWorkers int
-	fedResolver fed.Resolver    // nil unless federation is configured
-	fedPeers    func() []string // returns online peer ids; nil when federation off
-	activeFed   store.FederationSettings
+	db           *sql.DB
+	jb           *jukebox.Jukebox
+	ui           fs.FS
+	listenAddr   string // server's own listen addr, for building Sonos-reachable URLs
+	publicOrigin string // trusted browser-facing origin for email links
+	hubs         map[string]*broadcast.Hub
+	buses        map[string]*events.Bus
+	nowPlaying   map[string]*NowPlaying // current-track trackers for shared streams
+	enrich       *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
+	recommend    *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
+	scanMu       sync.Mutex
+	scan         *scan.Progress // nil until SetScanProgress (no library); endpoint 503 while nil
+	scanWorkers  int
+	fedResolver  fed.Resolver    // nil unless federation is configured
+	fedPeers     func() []string // returns online peer ids; nil when federation off
+	activeFed    store.FederationSettings
 
 	// muteLocalOnCast is exposed via GET /api/config so the frontend can mute the
 	// local <audio> while a Sonos cast is active. Sourced from config (env for now).
@@ -99,6 +101,8 @@ func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 // URLs can be built from the server's detected IP + this port rather than from
 // the client-controlled Host header.
 func (s *Server) SetListenAddr(addr string) { s.listenAddr = addr }
+
+func (s *Server) SetPublicOrigin(origin string) { s.publicOrigin = strings.TrimRight(origin, "/") }
 
 // SetEnrichRunner attaches the MusicBrainz/CAA enrichment runner that backs the
 // /api/enrich endpoints.

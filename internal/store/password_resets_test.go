@@ -45,3 +45,30 @@ func TestPasswordResetTokenIsSingleUseAndExpires(t *testing.T) {
 		t.Fatalf("expired reset should not be pending: ok=%v err=%v", ok, err)
 	}
 }
+
+func TestConsumePasswordResetTokenIsConditionalSingleUse(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	userID, err := CreateUser(db, "reset@example.com", "Reset", "old-hash", false)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	_, err = CreatePasswordReset(db, "token-hash", userID, time.Now().Add(time.Hour).Unix())
+	if err != nil {
+		t.Fatalf("CreatePasswordReset: %v", err)
+	}
+
+	reset, ok, err := ConsumePasswordReset(db, "token-hash")
+	if err != nil {
+		t.Fatalf("ConsumePasswordReset first: %v", err)
+	}
+	if !ok || reset.UserID != userID {
+		t.Fatalf("first consume mismatch: ok=%v reset=%+v", ok, reset)
+	}
+	if _, ok, err := ConsumePasswordReset(db, "token-hash"); err != nil || ok {
+		t.Fatalf("second consume should fail: ok=%v err=%v", ok, err)
+	}
+}

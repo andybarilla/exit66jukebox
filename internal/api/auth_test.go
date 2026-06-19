@@ -83,18 +83,80 @@ func TestResetPasswordSetsNewPasswordWithoutLoginAndInvalidatesSessions(t *testi
 
 func TestForgotPasswordSendsEmailWhenConfigured(t *testing.T) {
 	s, db := newTestServer(t)
+	s.SetPublicOrigin("https://jukebox.example.com")
 	h, _ := auth.HashPassword("oldpassword")
 	store.CreateUser(db, "reset@example.com", "Reset", h, false)
 	var sentTo, sentLink string
 	s.SetPasswordResetEmailer(func(to, link string) { sentTo, sentLink = to, link })
 
 	rec := httptest.NewRecorder()
-	s.forgotPassword(rec, httptest.NewRequest("POST", "/api/auth/password-reset/forgot", strings.NewReader(`{"email":"reset@example.com"}`)))
+	req := httptest.NewRequest("POST", "/api/auth/password-reset/forgot", strings.NewReader(`{"email":"reset@example.com"}`))
+	req.Host = "attacker.example.net"
+	s.forgotPassword(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("forgot: want 200, got %d", rec.Code)
 	}
-	if sentTo != "reset@example.com" || !strings.Contains(sentLink, "/reset-password/") {
+	if sentTo != "reset@example.com" || !strings.HasPrefix(sentLink, "https://jukebox.example.com/reset-password/") {
 		t.Fatalf("reset email not sent: to=%q link=%q", sentTo, sentLink)
+	}
+	if strings.Contains(sentLink, "attacker.example.net") {
+		t.Fatalf("reset email link used Host header: %q", sentLink)
+	}
+}
+
+func TestPasswordResetEndpointsPassProductionMiddleware(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetPublicOrigin("https://jukebox.example.com")
+	hash, _ := auth.HashPassword("oldpassword")
+	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", hash, false)
+	tokenRaw, _ := auth.GenerateToken()
+	store.CreatePasswordReset(db, auth.HashToken(tokenRaw), userID, 4_000_000_000)
+	h := s.RequireAuthMiddleware(s.Handler())
+
+	forgot := httptest.NewRecorder()
+	forgotReq := httptest.NewRequest("POST", "/api/auth/password-reset/forgot", strings.NewReader(`{"email":"reset@example.com"}`))
+	forgotReq.RemoteAddr = "203.0.113.9:1"
+	h.ServeHTTP(forgot, forgotReq)
+	if forgot.Code == http.StatusUnauthorized {
+		t.Fatal("forgot password endpoint was blocked by production middleware")
+	}
+
+	redeem := httptest.NewRecorder()
+	redeemReq := httptest.NewRequest("POST", "/api/auth/password-reset/redeem", strings.NewReader(`{"token":"`+tokenRaw+`","password":"newpassword"}`))
+	redeemReq.RemoteAddr = "203.0.113.9:1"
+	h.ServeHTTP(redeem, redeemReq)
+	if redeem.Code == http.StatusUnauthorized {
+		t.Fatal("password reset redeem endpoint was blocked by production middleware")
+	}
+	if redeem.Code != http.StatusOK {
+		t.Fatalf("redeem: want 200, got %d (%s)", redeem.Code, redeem.Body)
+	}
+}
+
+func TestResetPasswordTokenIsSingleUseBeforePasswordChange(t *testing.T) {
+	s, db := newTestServer(t)
+	oldHash, _ := auth.HashPassword("oldpassword")
+	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", oldHash, false)
+	tokenRaw, _ := auth.GenerateToken()
+	store.CreatePasswordReset(db, auth.HashToken(tokenRaw), userID, 4_000_000_000)
+	body := `{"token":"` + tokenRaw + `","password":"firstpassword"}`
+
+	first := httptest.NewRecorder()
+	s.resetPassword(first, httptest.NewRequest("POST", "/api/auth/password-reset/redeem", strings.NewReader(body)))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first reset: want 200, got %d (%s)", first.Code, first.Body)
+	}
+
+	second := httptest.NewRecorder()
+	s.resetPassword(second, httptest.NewRequest("POST", "/api/auth/password-reset/redeem", strings.NewReader(`{"token":"`+tokenRaw+`","password":"secondpassword"}`)))
+	if second.Code == http.StatusOK {
+		t.Fatal("reset token was accepted twice")
+	}
+
+	login := httptest.NewRecorder()
+	s.login(login, httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"email":"reset@example.com","password":"secondpassword"}`)))
+	if login.Code == http.StatusOK {
+		t.Fatalf("second reset changed password after token was consumed: %s", second.Body)
 	}
 }
 

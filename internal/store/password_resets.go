@@ -41,3 +41,40 @@ func MarkPasswordResetUsed(db *sql.DB, id int64) error {
 	_, err := db.Exec(`UPDATE password_reset SET used_at = strftime('%s','now') WHERE id = ?`, id)
 	return err
 }
+
+func ConsumePasswordReset(db *sql.DB, tokenHash string) (PasswordReset, bool, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return PasswordReset{}, false, err
+	}
+	defer tx.Rollback()
+
+	var reset PasswordReset
+	err = tx.QueryRow(
+		`SELECT id, user_id, created_at, expires_at, used_at
+		 FROM password_reset
+		 WHERE token_hash = ? AND used_at = 0 AND expires_at > strftime('%s','now')`,
+		tokenHash).Scan(&reset.ID, &reset.UserID, &reset.CreatedAt, &reset.ExpiresAt, &reset.UsedAt)
+	if err == sql.ErrNoRows {
+		return PasswordReset{}, false, nil
+	}
+	if err != nil {
+		return PasswordReset{}, false, err
+	}
+
+	res, err := tx.Exec(`UPDATE password_reset SET used_at = strftime('%s','now') WHERE id = ? AND used_at = 0`, reset.ID)
+	if err != nil {
+		return PasswordReset{}, false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return PasswordReset{}, false, err
+	}
+	if rows != 1 {
+		return PasswordReset{}, false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return PasswordReset{}, false, err
+	}
+	return reset, true, nil
+}
