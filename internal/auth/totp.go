@@ -57,8 +57,7 @@ func VerifyTOTPAfterStep(secret, code string, at time.Time, skew, lastAcceptedSt
 }
 
 func TOTPURI(issuer, account, secret string) string {
-	label := strings.ReplaceAll(url.QueryEscape(issuer+":"+account), "+", "%20")
-	label = strings.ReplaceAll(label, "%3A", ":")
+	label := escapeTOTPLabelPart(issuer) + ":" + escapeTOTPLabelPart(account)
 	values := url.Values{}
 	values.Set("secret", secret)
 	values.Set("issuer", issuer)
@@ -66,6 +65,10 @@ func TOTPURI(issuer, account, secret string) string {
 	values.Set("digits", "6")
 	values.Set("period", "30")
 	return "otpauth://totp/" + label + "?" + values.Encode()
+}
+
+func escapeTOTPLabelPart(part string) string {
+	return strings.ReplaceAll(url.QueryEscape(part), "+", "%20")
 }
 
 func decodeTOTPSecret(secret string) ([]byte, error) {

@@ -16,6 +16,14 @@ async function postJSON(url, body) {
 }
 
 export const login = (email, password) => postJSON('/api/auth/login', { email, password });
+export const completeMfaLogin = (ticket, code, useRecovery = false) =>
+  postJSON('/api/auth/mfa/complete', useRecovery ? { ticket, recovery_code: code } : { ticket, code });
+export const beginMfaEnrollment = () => postJSON('/api/auth/mfa/enroll/begin', {});
+export const confirmMfaEnrollment = (code) => postJSON('/api/auth/mfa/enroll/confirm', { code });
+export const disableMfa = (password, code, useRecovery = false) =>
+  postJSON('/api/auth/mfa/disable', useRecovery ? { password, recovery_code: code } : { password, code });
+export const regenerateRecoveryCodes = (password, code, useRecovery = false) =>
+  postJSON('/api/auth/mfa/recovery/regenerate', useRecovery ? { password, recovery_code: code } : { password, code });
 export const signup = (email, display_name, password) =>
   postJSON('/api/auth/signup', { email, display_name, password });
 export const acceptInvite = (token, display_name, password) =>

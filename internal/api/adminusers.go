@@ -16,12 +16,14 @@ func (s *Server) getAdminSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"signup_enabled":       store.SignupEnabled(s.db),
 		"guest_access_enabled": store.GuestAccessEnabled(s.db),
+		"admin_mfa_required":   store.AdminMFARequired(s.db),
 	})
 }
 
 type adminSettingsReq struct {
 	SignupEnabled      *bool `json:"signup_enabled"`
 	GuestAccessEnabled *bool `json:"guest_access_enabled"`
+	AdminMFARequired   *bool `json:"admin_mfa_required"`
 }
 
 // setAdminSettings flips whichever toggles are present in the body.
@@ -43,7 +45,67 @@ func (s *Server) setAdminSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.AdminMFARequired != nil {
+		if !s.setAdminMFARequired(w, r, *req.AdminMFARequired) {
+			return
+		}
+	}
 	s.getAdminSettings(w, r)
+}
+
+func (s *Server) setAdminMFARequired(w http.ResponseWriter, r *http.Request, required bool) bool {
+	if !required {
+		if err := store.SetAdminMFARequired(s.db, false); err != nil {
+			writeErr(w, http.StatusInternalServerError, "db error")
+			return false
+		}
+		return true
+	}
+
+	users, err := store.ListUsers(s.db)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return false
+	}
+	hasAdminWithEnabledMFA := false
+	for _, user := range users {
+		if !user.IsAdmin {
+			continue
+		}
+		factor, ok, err := store.GetMFAFactor(s.db, user.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "db error")
+			return false
+		}
+		if ok && factor.EnabledAt > 0 {
+			hasAdminWithEnabledMFA = true
+			break
+		}
+	}
+	if !hasAdminWithEnabledMFA {
+		writeErr(w, http.StatusBadRequest, "at least one admin must have enabled MFA")
+		return false
+	}
+
+	currentAdmin, ok := s.currentUser(r)
+	if !ok {
+		writeErr(w, http.StatusForbidden, "mfa required for admin access")
+		return false
+	}
+	factor, ok, err := store.GetMFAFactor(s.db, currentAdmin.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return false
+	}
+	if !ok || factor.EnabledAt <= 0 {
+		writeErr(w, http.StatusForbidden, "mfa required for admin access")
+		return false
+	}
+	if err := store.SetAdminMFARequired(s.db, true); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return false
+	}
+	return true
 }
 
 type createInviteReq struct {
@@ -150,9 +212,14 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(users))
 	for _, u := range users {
+		factor, ok, err := store.GetMFAFactor(s.db, u.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "db error")
+			return
+		}
 		out = append(out, map[string]any{
 			"id": u.ID, "email": u.Email, "display_name": u.DisplayName,
-			"is_admin": u.IsAdmin, "created_at": u.CreatedAt,
+			"is_admin": u.IsAdmin, "created_at": u.CreatedAt, "mfa_enabled": ok && factor.EnabledAt > 0,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

@@ -1,6 +1,12 @@
 package config
 
-import "testing"
+import (
+	"bytes"
+	"encoding/base64"
+	"encoding/hex"
+	"strings"
+	"testing"
+)
 
 func TestServicesFromEnv(t *testing.T) {
 	t.Setenv("EXIT66_LISTENBRAINZ_TOKEN", "tok-123")
@@ -91,6 +97,49 @@ func TestSMTPFromEnv(t *testing.T) {
 	}
 	if c.SMTP.Port != "587" {
 		t.Fatalf("default port: want 587, got %q", c.SMTP.Port)
+	}
+}
+
+func TestMFAKeyFromEnvAcceptsBase64(t *testing.T) {
+	want := []byte("0123456789abcdef0123456789abcdef")
+	t.Setenv("EXIT66_MFA_KEY", base64.StdEncoding.EncodeToString(want))
+	c, err := Parse(nil)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !bytes.Equal(c.MFAKey, want) {
+		t.Fatalf("MFAKey = %x, want %x", c.MFAKey, want)
+	}
+}
+
+func TestLoadMFAKeyAcceptsHex(t *testing.T) {
+	want := []byte("0123456789abcdef0123456789abcdef")
+	got, err := LoadMFAKey(hex.EncodeToString(want))
+	if err != nil {
+		t.Fatalf("LoadMFAKey: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("LoadMFAKey = %x, want %x", got, want)
+	}
+}
+
+func TestLoadMFAKeyMissingReturnsNil(t *testing.T) {
+	got, err := LoadMFAKey("")
+	if err != nil {
+		t.Fatalf("LoadMFAKey: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("LoadMFAKey = %x, want nil", got)
+	}
+}
+
+func TestLoadMFAKeyInvalidLengthReturnsError(t *testing.T) {
+	_, err := LoadMFAKey(base64.StdEncoding.EncodeToString([]byte("too-short")))
+	if err == nil {
+		t.Fatal("LoadMFAKey returned nil error, want invalid length error")
+	}
+	if !strings.Contains(err.Error(), "EXIT66_MFA_KEY must be 32 bytes") {
+		t.Fatalf("LoadMFAKey error = %q, want EXIT66_MFA_KEY must be 32 bytes", err)
 	}
 }
 

@@ -239,6 +239,7 @@ func main() {
 		log.Fatalf("ui fs: %v", err)
 	}
 	srv := api.NewServer(db, jb, uiFS)
+	srv.SetMFAKey(cfg.MFAKey)
 	srv.SetListenAddr(cfg.Addr)
 	srv.SetPublicOrigin(cfg.PublicOrigin)
 	srv.SetMuteLocalOnCast(cfg.MuteLocalOnCast)

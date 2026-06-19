@@ -46,6 +46,19 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 			writeErr(w, http.StatusForbidden, "admin required")
 			return
 		}
+		if !store.AdminMFARequired(s.db) {
+			next(w, r)
+			return
+		}
+		factor, ok, err := store.GetMFAFactor(s.db, u.ID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "db error")
+			return
+		}
+		if !ok || factor.EnabledAt <= 0 {
+			writeErr(w, http.StatusForbidden, "mfa required for admin access")
+			return
+		}
 		next(w, r)
 	}
 }

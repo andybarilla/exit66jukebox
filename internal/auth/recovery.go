@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base32"
 	"encoding/hex"
 	"strings"
@@ -30,7 +31,15 @@ func HashRecoveryCode(code string) string {
 }
 
 func VerifyRecoveryCode(code, hash string) bool {
-	return HashRecoveryCode(code) == hash
+	decodedHash, err := hex.DecodeString(hash)
+	if err != nil {
+		return false
+	}
+	expectedHash := sha256.Sum256([]byte(normalizeRecoveryCode(code)))
+	if len(decodedHash) != len(expectedHash) {
+		return false
+	}
+	return subtle.ConstantTimeCompare(expectedHash[:], decodedHash) == 1
 }
 
 func normalizeRecoveryCode(code string) string {

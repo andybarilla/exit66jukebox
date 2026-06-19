@@ -17,6 +17,8 @@ const sessionTTL = 30 * 24 * time.Hour
 
 const passwordResetTTL = time.Hour
 
+const mfaTicketTTL = 5 * time.Minute
+
 // requireAuth gates non-admin routes. A valid session passes. With no session it
 // passes only when guest access is enabled; otherwise 401.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -172,6 +174,22 @@ type loginReq struct {
 	Password string `json:"password"`
 }
 
+type mfaCompleteReq struct {
+	Ticket       string `json:"ticket"`
+	Code         string `json:"code"`
+	RecoveryCode string `json:"recovery_code"`
+}
+
+type mfaCodeReq struct {
+	Code string `json:"code"`
+}
+
+type mfaPasswordChallengeReq struct {
+	Password     string `json:"password"`
+	Code         string `json:"code"`
+	RecoveryCode string `json:"recovery_code"`
+}
+
 // login validates credentials and issues a session cookie. Throttled on both
 // the client IP and the target email so a single account can't be brute-forced
 // even if the attacker rotates X-Forwarded-For across many apparent IPs.
@@ -195,11 +213,325 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "incorrect email or password")
 		return
 	}
+	factor, hasFactor, err := store.GetMFAFactor(s.db, u.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if hasFactor && factor.EnabledAt > 0 {
+		s.createMFATicket(w, u.ID)
+		return
+	}
 	if err := s.setSessionCookie(w, r, u.ID); err != nil {
 		writeErr(w, http.StatusInternalServerError, "session error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": u.ID, "email": u.Email, "is_admin": u.IsAdmin})
+}
+
+func (s *Server) createMFATicket(w http.ResponseWriter, userID int64) {
+	ticket, err := auth.GenerateToken()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "mfa ticket error")
+		return
+	}
+	expiresAt := time.Now().Add(mfaTicketTTL).Unix()
+	if err := store.CreateMFATicket(s.db, auth.HashToken(ticket), userID, expiresAt); err != nil {
+		writeErr(w, http.StatusInternalServerError, "mfa ticket error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mfa_required": true, "ticket": ticket})
+}
+
+func (s *Server) mfaComplete(w http.ResponseWriter, r *http.Request) {
+	var req mfaCompleteReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req.Ticket = strings.TrimSpace(req.Ticket)
+	req.Code = strings.TrimSpace(req.Code)
+	req.RecoveryCode = strings.TrimSpace(req.RecoveryCode)
+	if req.Ticket == "" || (req.Code == "" && req.RecoveryCode == "") {
+		writeErr(w, http.StatusBadRequest, "ticket and code are required")
+		return
+	}
+	ticketHash := auth.HashToken(req.Ticket)
+	if !s.allowAttempt("mfa-ip:"+clientIP(r)) || !s.allowAttempt("mfa-ticket:"+ticketHash) {
+		writeErr(w, http.StatusTooManyRequests, "too many attempts; wait a minute")
+		return
+	}
+	userID, ok, err := store.ConsumeMFATicket(s.db, ticketHash)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "invalid mfa ticket")
+		return
+	}
+	factor, hasFactor, err := store.GetMFAFactor(s.db, userID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !hasFactor || factor.EnabledAt <= 0 {
+		writeErr(w, http.StatusUnauthorized, "mfa required")
+		return
+	}
+	if !s.acceptMFAChallenge(w, req, factor) {
+		return
+	}
+	u, ok, err := store.GetUserByID(s.db, userID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "invalid mfa ticket")
+		return
+	}
+	if err := s.setSessionCookie(w, r, userID); err != nil {
+		writeErr(w, http.StatusInternalServerError, "session error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": u.ID, "email": u.Email, "is_admin": u.IsAdmin})
+}
+
+func (s *Server) acceptMFAChallenge(w http.ResponseWriter, req mfaCompleteReq, factor store.MFAFactor) bool {
+	recoveryCode := req.RecoveryCode
+	if recoveryCode == "" && !isSixDigitCode(req.Code) {
+		recoveryCode = req.Code
+	}
+	if recoveryCode != "" {
+		accepted, err := store.MarkRecoveryCodeUsed(s.db, factor.UserID, auth.HashRecoveryCode(recoveryCode))
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "db error")
+			return false
+		}
+		if !accepted {
+			writeErr(w, http.StatusUnauthorized, "invalid mfa code")
+			return false
+		}
+		return true
+	}
+	secret, err := auth.DecryptTOTPSecret(s.mfaKey, auth.EncryptedSecret{
+		Ciphertext: factor.SecretCiphertext,
+		Nonce:      factor.SecretNonce,
+		KeyVersion: factor.KeyVersion,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "mfa unavailable")
+		return false
+	}
+	acceptedStep, ok := auth.VerifyTOTPAfterStep(secret, req.Code, time.Now(), 1, factor.LastAcceptedStep)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "invalid mfa code")
+		return false
+	}
+	accepted, err := store.UpdateMFALastAcceptedStep(s.db, factor.UserID, acceptedStep)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return false
+	}
+	if !accepted {
+		writeErr(w, http.StatusUnauthorized, "invalid mfa code")
+		return false
+	}
+	return true
+}
+
+func (s *Server) mfaEnrollBegin(w http.ResponseWriter, r *http.Request) {
+	currentUser, ok := s.currentUser(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "login required")
+		return
+	}
+	existingFactor, hasExistingFactor, err := store.GetMFAFactor(s.db, currentUser.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if hasExistingFactor && existingFactor.EnabledAt > 0 {
+		writeErr(w, http.StatusConflict, "mfa is already enabled")
+		return
+	}
+	secret, err := auth.GenerateTOTPSecret()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "mfa unavailable")
+		return
+	}
+	encryptedSecret, err := auth.EncryptTOTPSecret(s.mfaKey, secret, 1)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "mfa unavailable")
+		return
+	}
+	if err := store.UpsertMFAFactor(s.db, store.MFAFactor{
+		UserID:           currentUser.ID,
+		SecretCiphertext: encryptedSecret.Ciphertext,
+		SecretNonce:      encryptedSecret.Nonce,
+		KeyVersion:       encryptedSecret.KeyVersion,
+		EnabledAt:        0,
+		LastAcceptedStep: -1,
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"secret":      secret,
+		"otpauth_uri": auth.TOTPURI("Exit66", currentUser.Email, secret),
+	})
+}
+
+func (s *Server) mfaEnrollConfirm(w http.ResponseWriter, r *http.Request) {
+	currentUser, ok := s.currentUser(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "login required")
+		return
+	}
+	var req mfaCodeReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req.Code = strings.TrimSpace(req.Code)
+	if req.Code == "" {
+		writeErr(w, http.StatusBadRequest, "code is required")
+		return
+	}
+	factor, hasFactor, err := store.GetMFAFactor(s.db, currentUser.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !hasFactor {
+		writeErr(w, http.StatusBadRequest, "mfa enrollment required")
+		return
+	}
+	if factor.EnabledAt > 0 {
+		writeErr(w, http.StatusConflict, "mfa is already enabled")
+		return
+	}
+	secret, err := auth.DecryptTOTPSecret(s.mfaKey, auth.EncryptedSecret{
+		Ciphertext: factor.SecretCiphertext,
+		Nonce:      factor.SecretNonce,
+		KeyVersion: factor.KeyVersion,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "mfa unavailable")
+		return
+	}
+	acceptedStep, accepted := auth.VerifyTOTPAfterStep(secret, req.Code, time.Now(), 1, factor.LastAcceptedStep)
+	if !accepted {
+		writeErr(w, http.StatusUnauthorized, "invalid mfa code")
+		return
+	}
+	recoveryCodes, err := auth.GenerateRecoveryCodes(10)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "mfa unavailable")
+		return
+	}
+	if err := store.ReplaceRecoveryCodes(s.db, currentUser.ID, hashRecoveryCodes(recoveryCodes)); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	factor.EnabledAt = time.Now().Unix()
+	factor.LastAcceptedStep = acceptedStep
+	if err := store.UpsertMFAFactor(s.db, factor); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": recoveryCodes})
+}
+
+func (s *Server) mfaDisable(w http.ResponseWriter, r *http.Request) {
+	currentUser, ok := s.verifyPasswordAndMFA(w, r)
+	if !ok {
+		return
+	}
+	if err := store.DisableMFAFactor(s.db, currentUser.ID); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if err := store.ReplaceRecoveryCodes(s.db, currentUser.ID, nil); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) mfaRecoveryRegenerate(w http.ResponseWriter, r *http.Request) {
+	currentUser, ok := s.verifyPasswordAndMFA(w, r)
+	if !ok {
+		return
+	}
+	recoveryCodes, err := auth.GenerateRecoveryCodes(10)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "mfa unavailable")
+		return
+	}
+	if err := store.ReplaceRecoveryCodes(s.db, currentUser.ID, hashRecoveryCodes(recoveryCodes)); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": recoveryCodes})
+}
+
+func (s *Server) verifyPasswordAndMFA(w http.ResponseWriter, r *http.Request) (store.User, bool) {
+	currentUser, ok := s.currentUser(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "login required")
+		return store.User{}, false
+	}
+	var req mfaPasswordChallengeReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return store.User{}, false
+	}
+	req.Password = strings.TrimSpace(req.Password)
+	req.Code = strings.TrimSpace(req.Code)
+	req.RecoveryCode = strings.TrimSpace(req.RecoveryCode)
+	if req.Password == "" || (req.Code == "" && req.RecoveryCode == "") {
+		writeErr(w, http.StatusBadRequest, "password and mfa code are required")
+		return store.User{}, false
+	}
+	if !auth.VerifyPassword(req.Password, currentUser.PasswordHash) {
+		writeErr(w, http.StatusUnauthorized, "invalid password or mfa code")
+		return store.User{}, false
+	}
+	factor, hasFactor, err := store.GetMFAFactor(s.db, currentUser.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return store.User{}, false
+	}
+	if !hasFactor || factor.EnabledAt <= 0 {
+		writeErr(w, http.StatusUnauthorized, "mfa required")
+		return store.User{}, false
+	}
+	if !s.acceptMFAChallenge(w, mfaCompleteReq{Code: req.Code, RecoveryCode: req.RecoveryCode}, factor) {
+		return store.User{}, false
+	}
+	return currentUser, true
+}
+
+func hashRecoveryCodes(codes []string) []string {
+	hashes := make([]string, 0, len(codes))
+	for _, code := range codes {
+		hashes = append(hashes, auth.HashRecoveryCode(code))
+	}
+	return hashes
+}
+
+func isSixDigitCode(code string) bool {
+	if len(code) != 6 {
+		return false
+	}
+	for _, digit := range code {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // logout clears the session.
@@ -401,6 +733,7 @@ func (s *Server) RequireAuthMiddleware(next http.Handler) http.Handler {
 func isOpenPath(p string) bool {
 	switch p {
 	case "/api/auth/login", "/api/auth/signup", "/api/auth/logout",
+		"/api/auth/mfa/complete",
 		"/api/auth/me", "/api/auth/invite/accept",
 		"/api/auth/password-reset/forgot", "/api/auth/password-reset/redeem",
 		"/api/config":

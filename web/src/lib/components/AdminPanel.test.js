@@ -30,6 +30,37 @@ describe('AdminPanel Svelte wiring', () => {
     expect(functionBody('onToggleGuest')).not.toMatch(/refreshCleanSettingsSnapshot\s*\(/);
   });
 
+  test('imports MFA helpers and wires admin MFA settings', () => {
+    expect(source).toMatch(/import\s*{[^}]*\bbeginMfaEnrollment\b[^}]*\bconfirmMfaEnrollment\b[^}]*\bdisableMfa\b[^}]*\bregenerateRecoveryCodes\b[^}]*}\s*from\s*'\.\.\/auth\.js'/s);
+    expect(source).toContain('adminMfaRequired = $state(false)');
+    expect(source).toMatch(/adminMfaRequired\s*=\s*!!settings\.admin_mfa_required/);
+    expect(functionBody('currentEditableSettingsState')).toMatch(/adminMfaRequired/);
+    expect(functionBody('onToggleAdminMFA')).toMatch(/setSettings\s*\(\s*{\s*admin_mfa_required:\s*v\s*}\s*\)/);
+    expect(functionBody('onToggleAdminMFA')).toMatch(/updateCleanSettingsSnapshot\s*\(\s*{\s*adminMfaRequired\s*}\s*\)/);
+    expect(source).toContain('Require MFA for admin access');
+  });
+
+  test('shows MFA status for enrolled users', () => {
+    expect(source).toMatch(/{#if\s+u\.mfa_enabled}\s*<span class="badge badge-mfa">MFA<\/span>\s*{\/if}/);
+    expect(source).toContain('.badge-mfa');
+  });
+
+  test('contains current account MFA enrollment controls', () => {
+    expect(source).toContain('Account security');
+    expect(functionBody('handleBeginMfaEnrollment')).toMatch(/beginMfaEnrollment\s*\(/);
+    expect(functionBody('handleConfirmMfaEnrollment')).toMatch(/confirmMfaEnrollment\s*\(\s*mfaConfirmCode\s*\)/);
+    expect(source).toContain('mfaEnrollment.secret');
+    expect(source).toContain('mfaEnrollment.otpauth_uri');
+    expect(source).toContain('Save these recovery codes now. They will not be shown again.');
+  });
+
+  test('contains current account MFA disable and recovery regeneration controls', () => {
+    expect(functionBody('handleDisableMfa')).toMatch(/disableMfa\s*\(\s*mfaDisablePassword\s*,\s*mfaDisableCode\s*,\s*mfaDisableUseRecovery\s*\)/);
+    expect(functionBody('handleRegenerateRecoveryCodes')).toMatch(/regenerateRecoveryCodes\s*\(\s*mfaRegeneratePassword\s*,\s*mfaRegenerateCode\s*,\s*mfaRegenerateUseRecovery\s*\)/);
+    expect(source).toContain('Regenerate recovery codes');
+    expect(source).toContain('Disable MFA');
+  });
+
   test('contains path browser state and folder selection wiring', () => {
     expect(source).toContain('openPathBrowser');
     expect(source).toContain('loadLibraryPath');

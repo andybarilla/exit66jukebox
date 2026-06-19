@@ -1,6 +1,9 @@
 package auth
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestGenerateRecoveryCodesReturnsDistinctDisplayCodes(t *testing.T) {
 	codes, err := GenerateRecoveryCodes(10)
@@ -26,5 +29,20 @@ func TestRecoveryCodeHashNormalizesInput(t *testing.T) {
 	}
 	if VerifyRecoveryCode("abcd efgh ijkl mnoq", hash) {
 		t.Fatal("different code should not verify")
+	}
+}
+
+func TestVerifyRecoveryCodeRejectsMalformedHashes(t *testing.T) {
+	for _, hash := range []string{"", "not-hex", HashRecoveryCode("ABCD-EFGH-IJKL-MNOP")[:62]} {
+		if VerifyRecoveryCode("ABCD-EFGH-IJKL-MNOP", hash) {
+			t.Fatalf("malformed hash %q should not verify", hash)
+		}
+	}
+}
+
+func TestVerifyRecoveryCodeComparesDecodedHashes(t *testing.T) {
+	hash := HashRecoveryCode("ABCD-EFGH-IJKL-MNOP")
+	if !VerifyRecoveryCode("ABCD-EFGH-IJKL-MNOP", strings.ToUpper(hash)) {
+		t.Fatal("uppercase encoded hash should verify after decoding")
 	}
 }

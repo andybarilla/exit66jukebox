@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths, createPasswordReset } from '../auth.js';
+  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths, createPasswordReset, beginMfaEnrollment, confirmMfaEnrollment, disableMfa, regenerateRecoveryCodes } from '../auth.js';
   import { beforeUnloadIfDirty, buildEditableSettingsSnapshot, hasEditableSettingsChanges, loadPathBrowserLocation } from '../settingsPanelState.js';
   import Switch from './Switch.svelte';
 
@@ -8,10 +8,12 @@
 
   let signupEnabled = $state(false);
   let guestAccess = $state(false);
+  let adminMfaRequired = $state(false);
   let invites = $state([]);
   let users = $state([]);
   let loading = $state(true);
   let error = $state('');
+  let accessError = $state('');
 
   // invite creator
   let inviteEmail = $state('');
@@ -24,6 +26,19 @@
   // user delete error
   let userError = $state('');
   let resetLink = $state('');
+
+  let mfaEnrollment = $state(null);
+  let mfaConfirmCode = $state('');
+  let mfaRecoveryCodes = $state([]);
+  let mfaSecurityError = $state('');
+  let mfaSecurityMessage = $state('');
+  let mfaSecurityBusy = $state(false);
+  let mfaDisablePassword = $state('');
+  let mfaDisableCode = $state('');
+  let mfaDisableUseRecovery = $state(false);
+  let mfaRegeneratePassword = $state('');
+  let mfaRegenerateCode = $state('');
+  let mfaRegenerateUseRecovery = $state(false);
 
   let libraries = $state([]);
   let libraryWarnings = $state([]);
@@ -42,7 +57,7 @@
   let pathBrowser = $state({ open: false, row: -1, path: '', parent: '', directories: [], loading: false, error: '', requestedError: '' });
 
   function currentEditableSettingsState() {
-    return { signupEnabled, guestAccess, libraries, federation };
+    return { signupEnabled, guestAccess, adminMfaRequired, libraries, federation };
   }
 
   function refreshCleanSettingsSnapshot() {
@@ -109,6 +124,7 @@
         const [settings, librarySettings, peerSettings, invList, userList] = await Promise.all([getSettings(), getLibraries(), getFederationPeers(), listInvites(), listUsers()]);
         signupEnabled = !!settings.signup_enabled;
         guestAccess = !!settings.guest_access_enabled;
+        adminMfaRequired = !!settings.admin_mfa_required;
         libraries = librarySettings.local_libraries || [];
         libraryWarnings = librarySettings.warnings || [];
         federation = { ...federation, ...(librarySettings.federation || {}), token: '' };
@@ -131,6 +147,7 @@
   });
 
   async function onToggleSignup(v) {
+    accessError = '';
     signupEnabled = v;
     updateUnsavedState();
     const r = await setSettings({ signup_enabled: v });
@@ -139,11 +156,105 @@
   }
 
   async function onToggleGuest(v) {
+    accessError = '';
     guestAccess = v;
     updateUnsavedState();
     const r = await setSettings({ guest_access_enabled: v });
     guestAccess = !!r.guest_access_enabled;
     updateCleanSettingsSnapshot({ guestAccess });
+  }
+
+  async function onToggleAdminMFA(v) {
+    accessError = '';
+    adminMfaRequired = v;
+    updateUnsavedState();
+    try {
+      const r = await setSettings({ admin_mfa_required: v });
+      adminMfaRequired = !!r.admin_mfa_required;
+      updateCleanSettingsSnapshot({ adminMfaRequired });
+    } catch (err) {
+      accessError = err.message || 'failed to update admin MFA setting';
+      updateUnsavedState();
+    }
+  }
+
+  function resetMfaSecretState() {
+    mfaEnrollment = null;
+    mfaConfirmCode = '';
+    mfaRecoveryCodes = [];
+  }
+
+  async function handleBeginMfaEnrollment() {
+    mfaSecurityBusy = true;
+    mfaSecurityError = '';
+    mfaSecurityMessage = '';
+    resetMfaSecretState();
+    try {
+      mfaEnrollment = await beginMfaEnrollment();
+    } catch (err) {
+      mfaSecurityError = err.message || 'failed to begin MFA enrollment';
+    } finally {
+      mfaSecurityBusy = false;
+    }
+  }
+
+  async function handleConfirmMfaEnrollment(e) {
+    e.preventDefault();
+    mfaSecurityBusy = true;
+    mfaSecurityError = '';
+    mfaRecoveryCodes = [];
+    try {
+      const r = await confirmMfaEnrollment(mfaConfirmCode);
+      mfaRecoveryCodes = r.recovery_codes || [];
+      mfaEnrollment = null;
+      mfaConfirmCode = '';
+      mfaSecurityMessage = 'MFA enabled.';
+      users = await listUsers();
+    } catch (err) {
+      mfaSecurityError = err.message || 'failed to confirm MFA enrollment';
+    } finally {
+      mfaSecurityBusy = false;
+    }
+  }
+
+  async function handleDisableMfa(e) {
+    e.preventDefault();
+    mfaSecurityBusy = true;
+    mfaSecurityError = '';
+    mfaSecurityMessage = '';
+    mfaRecoveryCodes = [];
+    try {
+      await disableMfa(mfaDisablePassword, mfaDisableCode, mfaDisableUseRecovery);
+      mfaDisablePassword = '';
+      mfaDisableCode = '';
+      mfaDisableUseRecovery = false;
+      mfaSecurityMessage = 'MFA disabled.';
+      users = await listUsers();
+    } catch (err) {
+      mfaSecurityError = err.message || 'failed to disable MFA';
+    } finally {
+      mfaSecurityBusy = false;
+    }
+  }
+
+  async function handleRegenerateRecoveryCodes(e) {
+    e.preventDefault();
+    mfaSecurityBusy = true;
+    mfaSecurityError = '';
+    mfaSecurityMessage = '';
+    mfaRecoveryCodes = [];
+    try {
+      const r = await regenerateRecoveryCodes(mfaRegeneratePassword, mfaRegenerateCode, mfaRegenerateUseRecovery);
+      mfaRecoveryCodes = r.recovery_codes || [];
+      mfaRegeneratePassword = '';
+      mfaRegenerateCode = '';
+      mfaRegenerateUseRecovery = false;
+      mfaSecurityMessage = 'Recovery codes regenerated.';
+    } catch (err) {
+      mfaSecurityError = err.message || 'failed to regenerate recovery codes';
+    } finally {
+      mfaSecurityBusy = false;
+    }
   }
 
   async function handleCreateInvite(e) {
@@ -331,6 +442,11 @@
           <span class="toggle-label">Guest access</span>
           <Switch checked={guestAccess} onChange={onToggleGuest} tone="cyan" />
         </label>
+        <label class="toggle-row">
+          <span class="toggle-label">Require MFA for admin access</span>
+          <Switch checked={adminMfaRequired} onChange={onToggleAdminMFA} tone="cyan" />
+        </label>
+        {#if accessError}<p class="danger">{accessError}</p>{/if}
       </section>
 
       <section class="section library-section">
@@ -452,6 +568,60 @@
         {/if}
       </section>
 
+      <section class="section security-section">
+        <h2 class="section-title">Account security</h2>
+        <p class="muted">Manage MFA for the current authenticated account.</p>
+        <button type="button" class="btn-copy" disabled={mfaSecurityBusy} onclick={handleBeginMfaEnrollment}>Begin MFA enrollment</button>
+
+        {#if mfaEnrollment}
+          <div class="secret-box">
+            <p class="muted">Add this secret to your authenticator app, or use the otpauth URI.</p>
+            <code>{mfaEnrollment.secret}</code>
+            <code>{mfaEnrollment.otpauth_uri}</code>
+            <form class="mfa-form" onsubmit={handleConfirmMfaEnrollment}>
+              <input type="text" inputmode="numeric" maxlength="6" placeholder="Confirmation code" bind:value={mfaConfirmCode} autocomplete="one-time-code" required />
+              <button type="submit" class="btn-primary" disabled={mfaSecurityBusy}>Confirm enrollment</button>
+            </form>
+          </div>
+        {/if}
+
+        {#if mfaRecoveryCodes.length > 0}
+          <div class="recovery-box">
+            <p class="warning">Save these recovery codes now. They will not be shown again.</p>
+            <ul class="recovery-list">
+              {#each mfaRecoveryCodes as code}
+                <li><code>{code}</code></li>
+              {/each}
+            </ul>
+          </div>
+        {/if}
+
+        <form class="mfa-form" onsubmit={handleDisableMfa}>
+          <h3>Disable MFA</h3>
+          <input type="password" placeholder="Password" bind:value={mfaDisablePassword} autocomplete="current-password" required />
+          <input type="text" placeholder={mfaDisableUseRecovery ? 'Recovery code' : 'Authenticator code'} bind:value={mfaDisableCode} autocomplete="one-time-code" required />
+          <label class="check-row">
+            <input type="checkbox" bind:checked={mfaDisableUseRecovery} />
+            <span>Use recovery code</span>
+          </label>
+          <button type="submit" class="btn-danger" disabled={mfaSecurityBusy}>Disable MFA</button>
+        </form>
+
+        <form class="mfa-form" onsubmit={handleRegenerateRecoveryCodes}>
+          <h3>Regenerate recovery codes</h3>
+          <input type="password" placeholder="Password" bind:value={mfaRegeneratePassword} autocomplete="current-password" required />
+          <input type="text" placeholder={mfaRegenerateUseRecovery ? 'Recovery code' : 'Authenticator code'} bind:value={mfaRegenerateCode} autocomplete="one-time-code" required />
+          <label class="check-row">
+            <input type="checkbox" bind:checked={mfaRegenerateUseRecovery} />
+            <span>Use recovery code</span>
+          </label>
+          <button type="submit" class="btn-primary" disabled={mfaSecurityBusy}>Regenerate recovery codes</button>
+        </form>
+
+        {#if mfaSecurityError}<p class="danger">{mfaSecurityError}</p>{/if}
+        {#if mfaSecurityMessage}<p class="success">{mfaSecurityMessage}</p>{/if}
+      </section>
+
       <!-- Users list -->
       <section class="section">
         <h2 class="section-title">Users</h2>
@@ -471,6 +641,7 @@
                 <span class="list-email">{u.display_name || u.email}</span>
                 <span class="list-meta">{u.email}</span>
                 {#if u.is_admin}<span class="badge badge-admin">admin</span>{/if}
+                {#if u.mfa_enabled}<span class="badge badge-mfa">MFA</span>{/if}
                 <button class="btn-copy" onclick={() => handleCreatePasswordReset(u.id)}>Reset password</button>
                 <button class="btn-danger" onclick={() => handleDeleteUser(u.id)}>Delete</button>
               </li>
@@ -555,11 +726,17 @@
   .badge-expired { background: rgba(255,77,94,0.1); color: var(--status-danger); border: 1px solid var(--status-danger-deep); }
   .badge-quarantined { background: rgba(255,77,94,0.1); color: var(--status-danger); border: 1px solid var(--status-danger-deep); }
   .badge-admin { background: rgba(138,108,255,0.15); color: var(--neon-violet); border: 1px solid var(--neon-violet-deep); }
+  .badge-mfa { background: rgba(31,224,255,0.12); color: var(--neon-cyan); border: 1px solid var(--neon-cyan); }
   .btn-danger { margin-left: auto; padding: 4px 10px; background: transparent; border: 1px solid var(--status-danger-deep); border-radius: var(--radius-sm); color: var(--status-danger); font-family: var(--font-mono); font-size: 10px; cursor: pointer; white-space: nowrap; }
   .btn-danger:hover { background: rgba(255,77,94,0.1); }
   .muted { color: var(--text-faint); font-size: 13px; font-family: var(--font-sans); }
   .danger { color: var(--status-danger); font-size: 13px; font-family: var(--font-sans); }
   .library-section { background: linear-gradient(135deg, rgba(31,224,255,0.05), rgba(255,42,166,0.06)); }
+  .security-section { display: grid; gap: 12px; background: radial-gradient(circle at top right, rgba(138,108,255,0.12), transparent 50%); }
+  .secret-box, .recovery-box, .mfa-form { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: rgba(0,0,0,0.18); }
+  .secret-box code, .recovery-list code { display: block; padding: 7px 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--bg-inset); color: var(--neon-cyan); font-family: var(--font-mono); font-size: 11px; overflow-wrap: anywhere; }
+  .mfa-form h3 { margin: 0; font-family: var(--font-display); font-size: 12px; letter-spacing: 0.08em; color: var(--text-strong); text-transform: uppercase; }
+  .recovery-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
   .library-list { display: flex; flex-direction: column; gap: 10px; margin: 10px 0; }
   .library-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: rgba(0,0,0,0.18); box-shadow: 0 10px 30px rgba(0,0,0,0.18); }
   .library-enabled { justify-content: flex-start; margin: 0; }

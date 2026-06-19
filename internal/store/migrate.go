@@ -159,7 +159,42 @@ func migrate(db *sql.DB) error {
 	); err != nil {
 		return err
 	}
+	if err := migrateMFASchema(db); err != nil {
+		return err
+	}
 	return migrateLibraryVersion(db)
+}
+
+func migrateMFASchema(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS mfa_factor (
+			user_id            INTEGER PRIMARY KEY REFERENCES user(id) ON DELETE CASCADE,
+			secret_ciphertext  BLOB NOT NULL,
+			secret_nonce       BLOB NOT NULL,
+			key_version        INTEGER NOT NULL,
+			enabled_at         INTEGER NOT NULL DEFAULT 0,
+			last_accepted_step INTEGER NOT NULL DEFAULT -1
+		);
+		CREATE TABLE IF NOT EXISTS mfa_ticket (
+			ticket_hash TEXT PRIMARY KEY,
+			user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			created_at  INTEGER NOT NULL,
+			expires_at  INTEGER NOT NULL,
+			used_at     INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE INDEX IF NOT EXISTS idx_mfa_ticket_user ON mfa_ticket(user_id);
+		CREATE INDEX IF NOT EXISTS idx_mfa_ticket_expires ON mfa_ticket(expires_at);
+		CREATE TABLE IF NOT EXISTS mfa_recovery_code (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id    INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			code_hash  TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			used_at    INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_mfa_recovery_code_user_hash ON mfa_recovery_code(user_id, code_hash);
+		CREATE INDEX IF NOT EXISTS idx_mfa_recovery_code_user ON mfa_recovery_code(user_id);
+	`)
+	return err
 }
 
 func backfillTrackLibraries(db *sql.DB) error {

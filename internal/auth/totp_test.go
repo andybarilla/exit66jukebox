@@ -61,3 +61,10 @@ func TestTOTPURIContainsIssuerAccountAndSecret(t *testing.T) {
 		}
 	}
 }
+
+func TestTOTPURILabelEscapesIssuerAndAccountIndependently(t *testing.T) {
+	uri := TOTPURI("Exit66:Hub", "admin+test@example.com", "JBSWY3DPEHPK3PXP")
+	if !strings.HasPrefix(uri, "otpauth://totp/Exit66%3AHub:admin%2Btest%40example.com?") {
+		t.Fatalf("unexpected uri prefix: %s", uri)
+	}
+}
