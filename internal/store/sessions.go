@@ -34,6 +34,11 @@ func DeleteSession(db *sql.DB, tokenHash string) error {
 	return err
 }
 
+func DeleteSessionsForUser(db *sql.DB, userID int64) error {
+	_, err := db.Exec(`DELETE FROM session WHERE user_id = ?`, userID)
+	return err
+}
+
 // PurgeExpiredSessions deletes timed-out rows. Called opportunistically at
 // startup so the table doesn't grow unbounded.
 func PurgeExpiredSessions(db *sql.DB) error {
