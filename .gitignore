@@ -18,3 +18,4 @@ covers/
 .claude/worktrees
 .worktrees/
 
+internal/web/dist
