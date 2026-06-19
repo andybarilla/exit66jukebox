@@ -253,6 +253,11 @@ func main() {
 				log.Printf("invite email to %s: %v", to, err)
 			}
 		})
+		srv.SetPasswordResetEmailer(func(to, link string) {
+			if err := mailer.SendPasswordReset(to, link); err != nil {
+				log.Printf("password reset email to %s: %v", to, err)
+			}
+		})
 		log.Print("SMTP invite email enabled")
 	}
 	srv.RegisterStream(houseID, houseHub, houseBus, houseNP)

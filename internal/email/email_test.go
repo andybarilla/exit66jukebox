@@ -34,6 +34,24 @@ func TestSendInviteDisabledIsNoop(t *testing.T) {
 	}
 }
 
+func TestSendPasswordResetMessage(t *testing.T) {
+	s := New(Config{Host: "smtp.example.com", Port: "587", From: "jukebox@host"})
+	var sent string
+	s.send = func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+		sent = string(msg)
+		return nil
+	}
+	if err := s.SendPasswordReset("to@host", "https://hub/reset-password/abc"); err != nil {
+		t.Fatalf("SendPasswordReset: %v", err)
+	}
+	if !strings.Contains(sent, "Subject: Reset your Exit 66 Jukebox password") {
+		t.Fatalf("reset subject missing: %s", sent)
+	}
+	if !strings.Contains(sent, "https://hub/reset-password/abc") {
+		t.Fatalf("reset link missing: %s", sent)
+	}
+}
+
 func TestSendInviteRejectsHeaderInjection(t *testing.T) {
 	s := New(Config{Host: "smtp.example.com", Port: "587", From: "jukebox@host"})
 	called := false
