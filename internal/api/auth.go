@@ -15,6 +15,8 @@ const sessionCookie = "exit66_session"
 
 const sessionTTL = 30 * 24 * time.Hour
 
+const passwordResetTTL = time.Hour
+
 // requireAuth gates non-admin routes. A valid session passes. With no session it
 // passes only when guest access is enabled; otherwise 401.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -222,6 +224,96 @@ type inviteAcceptReq struct {
 	Token       string `json:"token"`
 	DisplayName string `json:"display_name"`
 	Password    string `json:"password"`
+}
+
+type forgotPasswordReq struct {
+	Email string `json:"email"`
+}
+
+func (s *Server) forgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req forgotPasswordReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	if !s.allowAttempt("password-reset-ip:"+clientIP(r)) || !s.allowAttempt("password-reset-email:"+req.Email) {
+		writeErr(w, http.StatusTooManyRequests, "too many attempts; wait a minute")
+		return
+	}
+	if req.Email == "" {
+		writeJSON(w, http.StatusOK, passwordResetAccepted())
+		return
+	}
+	u, ok, err := store.GetUserByEmail(s.db, req.Email)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !ok || s.emailPasswordReset == nil {
+		writeJSON(w, http.StatusOK, passwordResetAccepted())
+		return
+	}
+	raw, err := auth.GenerateToken()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "token error")
+		return
+	}
+	expiresAt := time.Now().Add(passwordResetTTL).Unix()
+	if _, err := store.CreatePasswordReset(s.db, auth.HashToken(raw), u.ID, expiresAt); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	s.emailPasswordReset(req.Email, inviteBaseURL(r)+"/reset-password/"+raw)
+	writeJSON(w, http.StatusOK, passwordResetAccepted())
+}
+
+func passwordResetAccepted() map[string]any {
+	return map[string]any{"ok": true}
+}
+
+type resetPasswordReq struct {
+	Token    string `json:"token"`
+	Password string `json:"password"`
+}
+
+func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request) {
+	var req resetPasswordReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if req.Token == "" || len(req.Password) < minPasswordLen {
+		writeErr(w, http.StatusBadRequest, "token and an 8+ char password are required")
+		return
+	}
+	reset, ok, err := store.PendingPasswordReset(s.db, auth.HashToken(req.Token))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "invalid or expired reset token")
+		return
+	}
+	passwordHash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "hash error")
+		return
+	}
+	if err := store.UpdateUserPassword(s.db, reset.UserID, passwordHash); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if err := store.MarkPasswordResetUsed(s.db, reset.ID); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if err := store.DeleteSessionsForUser(s.db, reset.UserID); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // inviteAccept redeems an invite: validates the token, creates the account

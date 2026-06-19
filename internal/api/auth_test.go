@@ -21,6 +21,96 @@ func TestMiddlewareBlocksAnonymous(t *testing.T) {
 	}
 }
 
+func TestForgotPasswordDoesNotRevealAccountsOrReturnLink(t *testing.T) {
+	s, db := newTestServer(t)
+	h, _ := auth.HashPassword("oldpassword")
+	store.CreateUser(db, "reset@example.com", "Reset", h, false)
+
+	existing := httptest.NewRecorder()
+	s.forgotPassword(existing, httptest.NewRequest("POST", "/api/auth/password-reset/forgot", strings.NewReader(`{"email":"reset@example.com"}`)))
+	missing := httptest.NewRecorder()
+	s.forgotPassword(missing, httptest.NewRequest("POST", "/api/auth/password-reset/forgot", strings.NewReader(`{"email":"missing@example.com"}`)))
+
+	if existing.Code != http.StatusOK || missing.Code != http.StatusOK {
+		t.Fatalf("forgot responses: existing=%d missing=%d", existing.Code, missing.Code)
+	}
+	if existing.Body.String() != missing.Body.String() {
+		t.Fatalf("forgot password leaked account existence: existing=%s missing=%s", existing.Body, missing.Body)
+	}
+	if strings.Contains(existing.Body.String(), "link") {
+		t.Fatalf("public forgot password returned a link without SMTP: %s", existing.Body)
+	}
+}
+
+func TestResetPasswordSetsNewPasswordWithoutLoginAndInvalidatesSessions(t *testing.T) {
+	s, db := newTestServer(t)
+	oldHash, _ := auth.HashPassword("oldpassword")
+	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", oldHash, false)
+	sessionRaw, _ := auth.GenerateToken()
+	store.CreateSession(db, auth.HashToken(sessionRaw), userID, 4_000_000_000)
+	tokenRaw, _ := auth.GenerateToken()
+	store.CreatePasswordReset(db, auth.HashToken(tokenRaw), userID, 4_000_000_000)
+
+	rec := httptest.NewRecorder()
+	body := `{"token":"` + tokenRaw + `","password":"newpassword"}`
+	s.resetPassword(rec, httptest.NewRequest("POST", "/api/auth/password-reset/redeem", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reset: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	if len(rec.Result().Cookies()) != 0 {
+		t.Fatalf("reset should not log in, got cookies: %+v", rec.Result().Cookies())
+	}
+
+	oldLogin := httptest.NewRecorder()
+	s.login(oldLogin, httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"email":"reset@example.com","password":"oldpassword"}`)))
+	if oldLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("old password should fail after reset, got %d", oldLogin.Code)
+	}
+	newLogin := httptest.NewRecorder()
+	s.login(newLogin, httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"email":"reset@example.com","password":"newpassword"}`)))
+	if newLogin.Code != http.StatusOK {
+		t.Fatalf("new password should work after reset, got %d (%s)", newLogin.Code, newLogin.Body)
+	}
+	if _, ok, _ := store.UserBySession(db, auth.HashToken(sessionRaw)); ok {
+		t.Fatal("reset did not invalidate existing sessions")
+	}
+	reuse := httptest.NewRecorder()
+	s.resetPassword(reuse, httptest.NewRequest("POST", "/api/auth/password-reset/redeem", strings.NewReader(body)))
+	if reuse.Code == http.StatusOK {
+		t.Fatal("reset token was reusable")
+	}
+}
+
+func TestForgotPasswordSendsEmailWhenConfigured(t *testing.T) {
+	s, db := newTestServer(t)
+	h, _ := auth.HashPassword("oldpassword")
+	store.CreateUser(db, "reset@example.com", "Reset", h, false)
+	var sentTo, sentLink string
+	s.SetPasswordResetEmailer(func(to, link string) { sentTo, sentLink = to, link })
+
+	rec := httptest.NewRecorder()
+	s.forgotPassword(rec, httptest.NewRequest("POST", "/api/auth/password-reset/forgot", strings.NewReader(`{"email":"reset@example.com"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("forgot: want 200, got %d", rec.Code)
+	}
+	if sentTo != "reset@example.com" || !strings.Contains(sentLink, "/reset-password/") {
+		t.Fatalf("reset email not sent: to=%q link=%q", sentTo, sentLink)
+	}
+}
+
+func TestForgotPasswordThrottle(t *testing.T) {
+	s, _ := newTestServer(t)
+	var last int
+	for i := 0; i < 12; i++ {
+		rec := httptest.NewRecorder()
+		s.forgotPassword(rec, httptest.NewRequest("POST", "/api/auth/password-reset/forgot", strings.NewReader(`{"email":"reset@example.com"}`)))
+		last = rec.Code
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("forgot password throttle should trip: got %d", last)
+	}
+}
+
 func TestMiddlewareAllowsSession(t *testing.T) {
 	s, db := newTestServer(t)
 	uid, _ := store.CreateUser(db, "a@b.com", "A", "h", false)

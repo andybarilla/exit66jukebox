@@ -2,8 +2,10 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,6 +22,24 @@ func adminReq(t *testing.T, db *sql.DB, method, path, body string) *http.Request
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: raw})
 	return req
+}
+
+func TestAdminCreatePasswordResetReturnsLink(t *testing.T) {
+	s, db := newTestServer(t)
+	h, _ := auth.HashPassword("oldpassword")
+	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", h, false)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, adminReq(t, db, "POST", "/api/admin/users/"+strconv.FormatInt(userID, 10)+"/password-reset", ""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("password reset link: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["email"] != "reset@example.com" || !strings.Contains(body["link"], "/reset-password/") {
+		t.Fatalf("reset link response mismatch: %#v", body)
+	}
 }
 
 func TestAdminSettingsToggle(t *testing.T) {

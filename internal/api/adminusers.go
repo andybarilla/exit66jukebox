@@ -152,6 +152,33 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) createPasswordReset(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	u, ok, err := store.GetUserByID(s.db, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !ok {
+		writeErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	raw, err := auth.GenerateToken()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "token error")
+		return
+	}
+	if _, err := store.CreatePasswordReset(s.db, auth.HashToken(raw), u.ID, time.Now().Add(passwordResetTTL).Unix()); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"link": inviteBaseURL(r) + "/reset-password/" + raw, "email": u.Email})
+}
+
 // deleteUser removes an account. An admin can't delete themselves (avoids
 // locking out the last admin by accident).
 func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {

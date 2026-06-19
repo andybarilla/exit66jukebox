@@ -61,7 +61,8 @@ type Server struct {
 
 	// emailInvite, when non-nil (SMTP configured), sends an invite link to an
 	// address. Best-effort: called in a goroutine, errors logged not surfaced.
-	emailInvite func(to, link string)
+	emailInvite        func(to, link string)
+	emailPasswordReset func(to, link string)
 
 	// manualVerify confirms a manually-entered IP actually serves a Sonos
 	// descriptor before it's trusted (injectable for tests).
@@ -135,6 +136,8 @@ func (s *Server) SetMuteLocalOnCast(v bool) { s.muteLocalOnCast = v }
 // SetInviteEmailer attaches the optional SMTP invite sender.
 func (s *Server) SetInviteEmailer(fn func(to, link string)) { s.emailInvite = fn }
 
+func (s *Server) SetPasswordResetEmailer(fn func(to, link string)) { s.emailPasswordReset = fn }
+
 // SetSigningSecret records the HMAC secret used to sign Sonos media URLs.
 // Loaded once at startup from the store (store.MediaSigningSecret).
 func (s *Server) SetSigningSecret(secret []byte) { s.signingSecret = secret }
@@ -194,6 +197,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/auth/me", s.me)
 	mux.HandleFunc("POST /api/auth/invite/accept", s.inviteAccept)
+	mux.HandleFunc("POST /api/auth/password-reset/forgot", s.forgotPassword)
+	mux.HandleFunc("POST /api/auth/password-reset/redeem", s.resetPassword)
 	mux.HandleFunc("GET /api/discover/rediscover", s.discoverRediscover)
 	mux.HandleFunc("GET /api/discover/recent", s.discoverRecent)
 	mux.HandleFunc("GET /api/discover/genres", s.discoverGenres)
@@ -217,6 +222,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/admin/invites", s.requireAdmin(s.listInvites))
 	mux.HandleFunc("DELETE /api/admin/invites/{id}", s.requireAdmin(s.deleteInvite))
 	mux.HandleFunc("GET /api/admin/users", s.requireAdmin(s.listUsers))
+	mux.HandleFunc("POST /api/admin/users/{id}/password-reset", s.requireAdmin(s.createPasswordReset))
 	mux.HandleFunc("DELETE /api/admin/users/{id}", s.requireAdmin(s.deleteUser))
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
