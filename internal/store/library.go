@@ -364,6 +364,60 @@ func DeleteRemoteTracks(db *sql.DB, peer string) error {
 	return PruneOrphans(db)
 }
 
+func DeleteLocalLibraryTracksExcept(db *sql.DB, libraryID int64, keepPaths []string) error {
+	if libraryID <= 0 {
+		return fmt.Errorf("library id must be positive")
+	}
+	if len(keepPaths) == 0 {
+		if _, err := db.Exec(`DELETE FROM track WHERE source_peer = '' AND library_id = ?`, libraryID); err != nil {
+			return err
+		}
+		return PruneOrphans(db)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`CREATE TEMP TABLE IF NOT EXISTS keep_local_library_track_path (path TEXT PRIMARY KEY)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM keep_local_library_track_path`); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO keep_local_library_track_path(path) VALUES(?)`)
+	if err != nil {
+		return err
+	}
+	for _, path := range keepPaths {
+		if _, err := stmt.Exec(path); err != nil {
+			stmt.Close()
+			return err
+		}
+	}
+	if err := stmt.Close(); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM track
+		 WHERE source_peer = ''
+		   AND library_id = ?
+		   AND NOT EXISTS (
+		       SELECT 1 FROM keep_local_library_track_path keep
+		       WHERE keep.path = track.path
+		   )`, libraryID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE keep_local_library_track_path`); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return PruneOrphans(db)
+}
+
 // DeleteRemoteTracksExcept removes a peer's cached tracks whose remote_id is not
 // in keep, then prunes orphans. Catalog sync upserts the incoming rows (which
 // preserves their local id via ON CONFLICT) and then calls this to drop only

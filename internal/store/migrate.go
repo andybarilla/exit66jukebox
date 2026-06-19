@@ -109,6 +109,25 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	if has, err := columnExists(db, "local_library", "source_library_id"); err != nil {
+		return err
+	} else if !has {
+		if _, err := db.Exec(`ALTER TABLE local_library ADD COLUMN source_library_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(
+		`UPDATE local_library
+		 SET source_library_id = 'local-' || lower(hex(randomblob(16)))
+		 WHERE source_library_id = ''`,
+	); err != nil {
+		return err
+	}
+	if _, err := db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_local_library_source_library_id ON local_library(source_library_id)`,
+	); err != nil {
+		return err
+	}
 	if _, err := db.Exec(
 		`CREATE TABLE IF NOT EXISTS remote_library (
 			id                INTEGER PRIMARY KEY AUTOINCREMENT,

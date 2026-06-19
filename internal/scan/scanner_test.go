@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -110,4 +111,62 @@ func TestScanReindexesChangedFile(t *testing.T) {
 		t.Fatalf("expected 1 updated, got %d (added=%d skipped=%d)",
 			res.Updated, res.Added, res.Skipped)
 	}
+}
+
+func TestScanPrunesMissingFilesOnlyFromScannedLibrary(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+
+	firstDir := t.TempDir()
+	secondDir := t.TempDir()
+	src, _ := os.ReadFile("testdata/sample.mp3")
+	firstPath := filepath.Join(firstDir, "same.mp3")
+	secondPath := filepath.Join(secondDir, "same.mp3")
+	os.WriteFile(firstPath, src, 0o644)
+	os.WriteFile(secondPath, src, 0o644)
+
+	if _, err := Scan(db, []string{firstDir, secondDir}, 2, nil); err != nil {
+		t.Fatalf("initial scan: %v", err)
+	}
+	if err := os.Remove(firstPath); err != nil {
+		t.Fatalf("remove first library file: %v", err)
+	}
+	if _, err := Scan(db, []string{firstDir}, 2, nil); err != nil {
+		t.Fatalf("rescan first library: %v", err)
+	}
+
+	assertTracksInLibrary(t, db, firstDir, 0)
+	assertTracksInLibrary(t, db, secondDir, 1)
+	if _, _, ok := store.TrackStampInLibrary(db, mustLocalLibraryID(t, db, secondDir), secondPath); !ok {
+		t.Fatalf("second library track should remain indexed")
+	}
+}
+
+func assertTracksInLibrary(t *testing.T, db *sql.DB, libraryPath string, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(
+		`SELECT count(*)
+		 FROM track t
+		 JOIN local_library ll ON ll.id = t.library_id
+		 WHERE ll.path = ? AND t.source_peer = ''`,
+		libraryPath,
+	).Scan(&got); err != nil {
+		t.Fatalf("count tracks in %s: %v", libraryPath, err)
+	}
+	if got != want {
+		t.Fatalf("expected %d tracks in %s, got %d", want, libraryPath, got)
+	}
+}
+
+func mustLocalLibraryID(t *testing.T, db *sql.DB, libraryPath string) int64 {
+	t.Helper()
+	var id int64
+	if err := db.QueryRow(`SELECT id FROM local_library WHERE path = ?`, libraryPath).Scan(&id); err != nil {
+		t.Fatalf("local library id for %s: %v", libraryPath, err)
+	}
+	return id
 }

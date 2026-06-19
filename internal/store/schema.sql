@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS local_library (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     path       TEXT NOT NULL UNIQUE,
+    source_library_id TEXT NOT NULL DEFAULT '',
     enabled    INTEGER NOT NULL DEFAULT 1,
     name       TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,

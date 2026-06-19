@@ -26,7 +26,7 @@ type CatalogRow struct {
 // catalog sync. Remote rows are excluded — a peer only shares its own files.
 func ExportCatalog(db *sql.DB) ([]CatalogRow, error) {
 	rows, err := db.Query(
-		`SELECT CAST(t.library_id AS TEXT), COALESCE(NULLIF(ll.name, ''), ll.path), t.id, t.title, ta.name, aa.name, al.name, t.track_no, t.genre, t.duration, t.links
+		`SELECT ll.source_library_id, COALESCE(NULLIF(ll.name, ''), ll.path), t.id, t.title, ta.name, aa.name, al.name, t.track_no, t.genre, t.duration, t.links
 		 FROM track t
 		 JOIN artist ta ON ta.id = t.artist_id
 		 JOIN album  al ON al.id = t.album_id
