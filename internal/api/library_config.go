@@ -121,6 +121,9 @@ func (s *Server) listLibraryPaths(w http.ResponseWriter, r *http.Request) {
 
 	directories := make([]libraryPathEntry, 0, len(entries))
 	for _, entry := range entries {
+		if isHiddenLibraryPathEntry(entry.Name()) {
+			continue
+		}
 		childPath := filepath.Clean(filepath.Join(cleanedPath, entry.Name()))
 		if !isReadableDirectory(childPath) {
 			continue
@@ -141,6 +144,10 @@ func (s *Server) listLibraryPaths(w http.ResponseWriter, r *http.Request) {
 		parent = ""
 	}
 	writeJSON(w, http.StatusOK, libraryPathsResponse{Path: cleanedPath, Parent: parent, Directories: directories})
+}
+
+func isHiddenLibraryPathEntry(name string) bool {
+	return strings.HasPrefix(name, ".") || name == "@eaDir"
 }
 
 func cleanLibraryBrowserPath(path string) (string, int, error) {
