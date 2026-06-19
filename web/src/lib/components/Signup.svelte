@@ -5,13 +5,19 @@
   let displayName = $state('');
   let password = $state('');
   let error = $state('');
+  let message = $state('');
   let busy = $state(false);
 
   async function submit(e) {
     e.preventDefault();
-    busy = true; error = '';
+    busy = true; error = ''; message = '';
     try {
-      onLoggedIn(await signup(email, displayName, password));
+      const user = await signup(email, displayName, password);
+      if (user.email_verified === false) {
+        message = 'Check your email for a verification link before logging in.';
+        return;
+      }
+      onLoggedIn(user);
     } catch (err) {
       error = err.message || 'signup failed';
     } finally {
@@ -26,6 +32,7 @@
   <input type="text" placeholder="Display name" bind:value={displayName} autocomplete="name" required />
   <input type="password" placeholder="Password" bind:value={password} autocomplete="new-password" required />
   {#if error}<p class="err">{error}</p>{/if}
+  {#if message}<p class="ok">{message}</p>{/if}
   <button disabled={busy} type="submit">Create account</button>
   <button type="button" class="link" onclick={onSwitchToLogin}>Back to log in</button>
 </form>
@@ -38,5 +45,6 @@
   button[type="submit"] { padding: .6rem .75rem; font-size: 1rem; background: var(--neon-magenta); color: var(--text-on-accent); border: none; border-radius: var(--radius-md); font-family: var(--font-display); font-weight: 700; letter-spacing: 0.06em; cursor: pointer; }
   button[type="submit"]:disabled { opacity: 0.5; cursor: default; }
   .err { color: var(--status-danger); margin: 0; font-size: 0.875rem; }
+  .ok { color: var(--status-success); margin: 0; font-size: 0.875rem; }
   .link { background: none; border: none; color: var(--neon-cyan); cursor: pointer; font-family: var(--font-sans); font-size: 0.9rem; }
 </style>

@@ -45,6 +45,16 @@ describe('AdminPanel Svelte wiring', () => {
     expect(source).toContain('.badge-mfa');
   });
 
+  test('shows email verification state and manual verification action', () => {
+    expect(source).toMatch(/import\s*{[^}]*\bcreateEmailVerification\b[^}]*}\s*from\s*'\.\.\/auth\.js'/s);
+    expect(source).toMatch(/{#if\s+u\.email_verified}\s*<span class="badge badge-verified">Verified<\/span>/);
+    expect(source).toMatch(/{:else}\s*<span class="badge badge-unverified">Unverified<\/span>/);
+    expect(source).toContain('Generate verification link');
+    expect(functionBody('generateVerificationLink')).toMatch(/createEmailVerification\s*\(\s*u\.id\s*\)/);
+    expect(source).toContain('.badge-verified');
+    expect(source).toContain('.badge-unverified');
+  });
+
   test('contains current account MFA enrollment controls', () => {
     expect(source).toContain('Account security');
     expect(functionBody('handleBeginMfaEnrollment')).toMatch(/beginMfaEnrollment\s*\(/);

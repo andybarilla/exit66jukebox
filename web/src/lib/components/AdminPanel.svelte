@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths, createPasswordReset, beginMfaEnrollment, confirmMfaEnrollment, disableMfa, regenerateRecoveryCodes } from '../auth.js';
+  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths, createPasswordReset, createEmailVerification, beginMfaEnrollment, confirmMfaEnrollment, disableMfa, regenerateRecoveryCodes } from '../auth.js';
   import { beforeUnloadIfDirty, buildEditableSettingsSnapshot, hasEditableSettingsChanges, loadPathBrowserLocation } from '../settingsPanelState.js';
   import Switch from './Switch.svelte';
 
@@ -26,6 +26,7 @@
   // user delete error
   let userError = $state('');
   let resetLink = $state('');
+  let verificationLink = $state('');
 
   let mfaEnrollment = $state(null);
   let mfaConfirmCode = $state('');
@@ -302,12 +303,23 @@
   }
 
   async function handleCreatePasswordReset(id) {
-    userError = ''; resetLink = '';
+    userError = ''; resetLink = ''; verificationLink = '';
     try {
       const r = await createPasswordReset(id);
       resetLink = r.link;
     } catch (err) {
       userError = err.message || 'failed to create reset link';
+    }
+  }
+
+  async function generateVerificationLink(u) {
+    userError = ''; resetLink = ''; verificationLink = '';
+    try {
+      const r = await createEmailVerification(u.id);
+      verificationLink = r.link;
+      users = await listUsers();
+    } catch (err) {
+      userError = err.message || 'failed to create verification link';
     }
   }
 
@@ -632,6 +644,12 @@
             <button type="button" class="btn-copy" onclick={async () => navigator.clipboard.writeText(resetLink)}>Copy</button>
           </div>
         {/if}
+        {#if verificationLink}
+          <div class="link-row">
+            <input type="text" readonly value={verificationLink} class="link-input" />
+            <button type="button" class="btn-copy" onclick={async () => navigator.clipboard.writeText(verificationLink)}>Copy</button>
+          </div>
+        {/if}
         {#if users.length === 0}
           <p class="muted">No users.</p>
         {:else}
@@ -642,6 +660,8 @@
                 <span class="list-meta">{u.email}</span>
                 {#if u.is_admin}<span class="badge badge-admin">admin</span>{/if}
                 {#if u.mfa_enabled}<span class="badge badge-mfa">MFA</span>{/if}
+                {#if u.email_verified}<span class="badge badge-verified">Verified</span>{:else}<span class="badge badge-unverified">Unverified</span>{/if}
+                {#if !u.email_verified}<button class="btn-copy" onclick={() => generateVerificationLink(u)}>Generate verification link</button>{/if}
                 <button class="btn-copy" onclick={() => handleCreatePasswordReset(u.id)}>Reset password</button>
                 <button class="btn-danger" onclick={() => handleDeleteUser(u.id)}>Delete</button>
               </li>
@@ -727,6 +747,8 @@
   .badge-quarantined { background: rgba(255,77,94,0.1); color: var(--status-danger); border: 1px solid var(--status-danger-deep); }
   .badge-admin { background: rgba(138,108,255,0.15); color: var(--neon-violet); border: 1px solid var(--neon-violet-deep); }
   .badge-mfa { background: rgba(31,224,255,0.12); color: var(--neon-cyan); border: 1px solid var(--neon-cyan); }
+  .badge-verified { background: rgba(61,245,155,0.12); color: var(--status-success); border: 1px solid var(--status-success-deep); }
+  .badge-unverified { background: rgba(255,176,46,0.15); color: var(--neon-amber); border: 1px solid var(--neon-amber-deep); }
   .btn-danger { margin-left: auto; padding: 4px 10px; background: transparent; border: 1px solid var(--status-danger-deep); border-radius: var(--radius-sm); color: var(--status-danger); font-family: var(--font-mono); font-size: 10px; cursor: pointer; white-space: nowrap; }
   .btn-danger:hover { background: rgba(255,77,94,0.1); }
   .muted { color: var(--text-faint); font-size: 13px; font-family: var(--font-sans); }

@@ -52,6 +52,24 @@ func TestSendPasswordResetMessage(t *testing.T) {
 	}
 }
 
+func TestSendVerificationMessage(t *testing.T) {
+	s := New(Config{Host: "smtp.example.com", Port: "587", From: "jukebox@host"})
+	var sent string
+	s.send = func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+		sent = string(msg)
+		return nil
+	}
+	if err := s.SendVerification("to@host", "https://hub/verify/abc"); err != nil {
+		t.Fatalf("SendVerification: %v", err)
+	}
+	if !strings.Contains(sent, "Subject: Verify your Exit 66 Jukebox email") {
+		t.Fatalf("verification subject missing: %s", sent)
+	}
+	if !strings.Contains(sent, "https://hub/verify/abc") {
+		t.Fatalf("verification link missing: %s", sent)
+	}
+}
+
 func TestSendInviteRejectsHeaderInjection(t *testing.T) {
 	s := New(Config{Host: "smtp.example.com", Port: "587", From: "jukebox@host"})
 	called := false

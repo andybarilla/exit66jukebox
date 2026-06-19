@@ -220,9 +220,37 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": u.ID, "email": u.Email, "display_name": u.DisplayName,
 			"is_admin": u.IsAdmin, "created_at": u.CreatedAt, "mfa_enabled": ok && factor.EnabledAt > 0,
+			"email_verified": u.EmailVerifiedAt != 0, "email_verified_at": u.EmailVerifiedAt,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) createEmailVerification(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	u, ok, err := store.GetUserByID(s.db, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !ok {
+		writeErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if u.EmailVerifiedAt != 0 {
+		writeErr(w, http.StatusBadRequest, "user is already verified")
+		return
+	}
+	raw, err := store.RegenerateEmailVerification(s.db, u.ID, time.Now().Add(emailVerificationTTL).Unix())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "token error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"link": s.publicBaseURL() + "/verify/" + raw, "email": u.Email})
 }
 
 func (s *Server) createPasswordReset(w http.ResponseWriter, r *http.Request) {

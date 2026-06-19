@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/model"
@@ -41,6 +42,40 @@ func TestArtistsEndpointReturnsJSON(t *testing.T) {
 	}
 	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
 		t.Fatalf("want empty JSON array, got %q", body)
+	}
+}
+
+func TestClientRoutesServeUIIndex(t *testing.T) {
+	ui := fstest.MapFS{
+		"index.html":     &fstest.MapFile{Data: []byte("<main>app shell</main>")},
+		"assets/app.js":  &fstest.MapFile{Data: []byte("const loaded = true;\n")},
+		"assets/app.css": &fstest.MapFile{Data: []byte("body { color: white; }\n")},
+	}
+	srv := NewServer(nil, nil, ui)
+	handler := srv.Handler()
+
+	for _, path := range []string{"/", "/verify/email-token", "/invite/invite-token", "/reset-password/reset-token"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status: want 200, got %d", rec.Code)
+			}
+			if body := rec.Body.String(); body != "<main>app shell</main>" {
+				t.Fatalf("body: want UI index, got %q", body)
+			}
+		})
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("asset status: want 200, got %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "const loaded = true;\n" {
+		t.Fatalf("asset body: want JS asset, got %q", body)
 	}
 }
 

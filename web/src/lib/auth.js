@@ -30,6 +30,7 @@ export const acceptInvite = (token, display_name, password) =>
   postJSON('/api/auth/invite/accept', { token, display_name, password });
 export const requestPasswordReset = (email) => postJSON('/api/auth/password-reset/forgot', { email });
 export const resetPassword = (token, password) => postJSON('/api/auth/password-reset/redeem', { token, password });
+export const verifyEmail = (token) => postJSON('/api/auth/verify-email', { token });
 
 export async function logout() {
   await fetch('/api/auth/logout', { method: 'POST' });
@@ -64,4 +65,5 @@ export const listInvites = () => fetch('/api/admin/invites').then((r) => r.json(
 export const deleteInvite = (id) => fetch(`/api/admin/invites/${id}`, { method: 'DELETE' });
 export const listUsers = () => fetch('/api/admin/users').then((r) => r.json());
 export const createPasswordReset = (id) => postJSON(`/api/admin/users/${id}/password-reset`, {});
+export const createEmailVerification = (id) => postJSON(`/api/admin/users/${id}/email-verification`, {});
 export const deleteUser = (id) => fetch(`/api/admin/users/${id}`, { method: 'DELETE' });

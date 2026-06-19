@@ -130,7 +130,8 @@ CREATE TABLE IF NOT EXISTS user (
     display_name  TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL,
     is_admin      INTEGER NOT NULL DEFAULT 0,
-    created_at    INTEGER NOT NULL
+    created_at    INTEGER NOT NULL,
+    email_verified_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS mfa_factor (
     user_id            INTEGER PRIMARY KEY REFERENCES user(id) ON DELETE CASCADE,
@@ -183,3 +184,13 @@ CREATE TABLE IF NOT EXISTS password_reset (
     expires_at  INTEGER NOT NULL,
     used_at     INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS email_verification (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash  TEXT NOT NULL UNIQUE,
+    user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    created_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL,
+    used_at     INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_email_verification_user ON email_verification(user_id);
+CREATE INDEX IF NOT EXISTS idx_email_verification_expires ON email_verification(expires_at);

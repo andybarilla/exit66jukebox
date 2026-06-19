@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"strings"
@@ -17,7 +18,11 @@ const sessionTTL = 30 * 24 * time.Hour
 
 const passwordResetTTL = time.Hour
 
+const emailVerificationTTL = 24 * time.Hour
+
 const mfaTicketTTL = 5 * time.Minute
+
+var errVerificationEmailerUnavailable = errors.New("verification emailer unavailable")
 
 // requireAuth gates non-admin routes. A valid session passes. With no session it
 // passes only when guest access is enabled; otherwise 401.
@@ -146,7 +151,62 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "signup is disabled")
 		return
 	}
-	s.createAccountAndLogin(w, r, req.Email, req.DisplayName, req.Password, bootstrap)
+	s.createSignupAccount(w, r, req.Email, req.DisplayName, req.Password, bootstrap)
+}
+
+func (s *Server) createSignupAccount(w http.ResponseWriter, r *http.Request, email, name, pw string, bootstrap bool) {
+	hash, err := auth.HashPassword(pw)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "hash error")
+		return
+	}
+	if !bootstrap {
+		uid, err := s.createAndSendVerification(email, name, hash)
+		if err != nil {
+			if existing, _, dbErr := store.GetUserByEmail(s.db, email); dbErr != nil {
+				writeErr(w, http.StatusInternalServerError, "db error")
+				return
+			} else if existing.ID != 0 {
+				writeErr(w, http.StatusConflict, "email already registered")
+				return
+			}
+			if errors.Is(err, errVerificationEmailerUnavailable) {
+				writeErr(w, http.StatusServiceUnavailable, "verification email is not configured")
+				return
+			}
+			writeErr(w, http.StatusServiceUnavailable, "verification email could not be sent")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": uid, "email": email, "is_admin": false, "email_verified": false})
+		return
+	}
+	uid, err := store.CreateUser(s.db, email, name, hash, true, true)
+	if err != nil {
+		writeErr(w, http.StatusConflict, "email already registered")
+		return
+	}
+	if err := s.setSessionCookie(w, r, uid); err != nil {
+		writeErr(w, http.StatusInternalServerError, "session error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": uid, "email": email, "is_admin": true, "email_verified": true})
+}
+
+func (s *Server) createAndSendVerification(email, name, hash string) (int64, error) {
+	if s.emailVerification == nil {
+		return 0, errVerificationEmailerUnavailable
+	}
+	uid, raw, err := store.CreateUnverifiedUserWithEmailVerification(s.db, email, name, hash, time.Now().Add(emailVerificationTTL).Unix())
+	if err != nil {
+		return 0, err
+	}
+	if err := s.emailVerification(email, s.publicBaseURL()+"/verify/"+raw); err != nil {
+		if deleteErr := store.DeleteUser(s.db, uid); deleteErr != nil {
+			return 0, deleteErr
+		}
+		return 0, err
+	}
+	return uid, nil
 }
 
 // createAccountAndLogin hashes the password, inserts the user, and logs them in
@@ -213,6 +273,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "incorrect email or password")
 		return
 	}
+	if u.EmailVerifiedAt == 0 {
+		writeErr(w, http.StatusForbidden, "verify your email before logging in")
+		return
+	}
 	factor, hasFactor, err := store.GetMFAFactor(s.db, u.ID)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "db error")
@@ -226,7 +290,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "session error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": u.ID, "email": u.Email, "is_admin": u.IsAdmin})
+	writeJSON(w, http.StatusOK, map[string]any{"id": u.ID, "email": u.Email, "is_admin": u.IsAdmin, "email_verified": u.EmailVerifiedAt != 0})
 }
 
 func (s *Server) createMFATicket(w http.ResponseWriter, userID int64) {
@@ -548,8 +612,30 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "is_admin": u.IsAdmin,
+		"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "is_admin": u.IsAdmin, "email_verified": u.EmailVerifiedAt != 0,
 	})
+}
+
+type verifyEmailReq struct {
+	Token string `json:"token"`
+}
+
+func (s *Server) verifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req verifyEmailReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req.Token = strings.TrimSpace(req.Token)
+	if req.Token == "" {
+		writeErr(w, http.StatusBadRequest, "verification token is required")
+		return
+	}
+	if err := store.ConsumeEmailVerification(s.db, req.Token); err != nil {
+		writeErr(w, http.StatusBadRequest, "verification link is invalid or expired")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 type inviteAcceptReq struct {
@@ -675,7 +761,7 @@ func (s *Server) inviteAccept(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "hash error")
 		return
 	}
-	uid, err := store.CreateUser(s.db, inv.Email, req.DisplayName, hash, inv.IsAdmin)
+	uid, err := store.CreateUser(s.db, inv.Email, req.DisplayName, hash, inv.IsAdmin, true)
 	if err != nil {
 		writeErr(w, http.StatusConflict, "email already registered")
 		return
@@ -688,7 +774,7 @@ func (s *Server) inviteAccept(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "session error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": uid, "email": inv.Email, "is_admin": inv.IsAdmin})
+	writeJSON(w, http.StatusOK, map[string]any{"id": uid, "email": inv.Email, "is_admin": inv.IsAdmin, "email_verified": true})
 }
 
 // mediaAllowed reports whether the request carries a valid session or guest
@@ -735,6 +821,7 @@ func isOpenPath(p string) bool {
 	case "/api/auth/login", "/api/auth/signup", "/api/auth/logout",
 		"/api/auth/mfa/complete",
 		"/api/auth/me", "/api/auth/invite/accept",
+		"/api/auth/verify-email",
 		"/api/auth/password-reset/forgot", "/api/auth/password-reset/redeem",
 		"/api/config":
 		return true
