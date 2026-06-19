@@ -1,10 +1,15 @@
 package config
 
 import (
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"flag"
 	"os"
 	"strconv"
 )
+
+const mfaKeySize = 32
 
 // Config holds runtime options sourced from flags.
 type Config struct {
@@ -17,6 +22,7 @@ type Config struct {
 	Federation    Federation
 	SMTP          SMTP
 	PublicOrigin  string
+	MFAKey        []byte
 
 	// MuteLocalOnCast silences the browser's local <audio> while a Sonos cast is
 	// active. Sourced from EXIT66_MUTE_LOCAL_ON_CAST for now; a settings UI will
@@ -97,6 +103,33 @@ func servicesFromEnv() Services {
 	}
 }
 
+// LoadMFAKey parses EXIT66_MFA_KEY as a 32-byte base64 or hex-encoded key.
+func LoadMFAKey(value string) ([]byte, error) {
+	if value == "" {
+		return nil, nil
+	}
+
+	if key, err := base64.StdEncoding.DecodeString(value); err == nil {
+		if len(key) == mfaKeySize {
+			return key, nil
+		}
+	}
+
+	if key, err := base64.RawStdEncoding.DecodeString(value); err == nil {
+		if len(key) == mfaKeySize {
+			return key, nil
+		}
+	}
+
+	if key, err := hex.DecodeString(value); err == nil {
+		if len(key) == mfaKeySize {
+			return key, nil
+		}
+	}
+
+	return nil, errors.New("EXIT66_MFA_KEY must be 32 bytes encoded as base64 or hex")
+}
+
 type multiFlag []string
 
 func (m *multiFlag) String() string { return "" }
@@ -124,6 +157,11 @@ func Parse(args []string) (Config, error) {
 	c.Federation = federationFromEnv()
 	c.SMTP = smtpFromEnv()
 	c.PublicOrigin = os.Getenv("EXIT66_PUBLIC_ORIGIN")
+	mfaKey, err := LoadMFAKey(os.Getenv("EXIT66_MFA_KEY"))
+	if err != nil {
+		return Config{}, err
+	}
+	c.MFAKey = mfaKey
 	c.MuteLocalOnCast = envBool("EXIT66_MUTE_LOCAL_ON_CAST", true)
 	return c, nil
 }

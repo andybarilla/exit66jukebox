@@ -1,5 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { login, fetchMe, requestPasswordReset, resetPassword, createPasswordReset } from './auth.js';
+import {
+  login,
+  fetchMe,
+  requestPasswordReset,
+  resetPassword,
+  createPasswordReset,
+  completeMfaLogin,
+  beginMfaEnrollment,
+  confirmMfaEnrollment,
+  disableMfa,
+  regenerateRecoveryCodes,
+  setSettings,
+  listUsers,
+} from './auth.js';
 
 beforeEach(() => { global.fetch = vi.fn(); });
 
@@ -16,6 +29,90 @@ describe('auth api', () => {
     expect(url).toBe('/api/auth/login');
     expect(opts.method).toBe('POST');
     expect(JSON.parse(opts.body)).toEqual({ email: 'a@b.com', password: 'pw' });
+  });
+
+  it('login can return an MFA challenge', async () => {
+    fetch.mockReturnValue(jsonResp({ mfa_required: true, ticket: 'ticket123' }));
+    const challenge = await login('a@b.com', 'pw');
+    expect(challenge).toEqual({ mfa_required: true, ticket: 'ticket123' });
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/login');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ email: 'a@b.com', password: 'pw' });
+  });
+
+  it('completeMfaLogin posts a TOTP challenge and returns user', async () => {
+    fetch.mockReturnValue(jsonResp({ id: 1, email: 'a@b.com' }));
+    const user = await completeMfaLogin('ticket123', '123456');
+    expect(user.email).toBe('a@b.com');
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/mfa/complete');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ ticket: 'ticket123', code: '123456' });
+  });
+
+  it('completeMfaLogin posts a recovery-code challenge', async () => {
+    fetch.mockReturnValue(jsonResp({ id: 1, email: 'a@b.com' }));
+    await completeMfaLogin('ticket123', 'ABCD-EFGH', true);
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/mfa/complete');
+    expect(JSON.parse(opts.body)).toEqual({ ticket: 'ticket123', recovery_code: 'ABCD-EFGH' });
+  });
+
+  it('beginMfaEnrollment posts an empty body and returns the secret', async () => {
+    fetch.mockReturnValue(jsonResp({ secret: 'SECRET', otpauth_uri: 'otpauth://totp/app' }));
+    const enrollment = await beginMfaEnrollment();
+    expect(enrollment.secret).toBe('SECRET');
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/mfa/enroll/begin');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({});
+  });
+
+  it('confirmMfaEnrollment posts a TOTP code and returns recovery codes', async () => {
+    fetch.mockReturnValue(jsonResp({ recovery_codes: ['ABCD-EFGH'] }));
+    const result = await confirmMfaEnrollment('123456');
+    expect(result.recovery_codes).toEqual(['ABCD-EFGH']);
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/mfa/enroll/confirm');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ code: '123456' });
+  });
+
+  it('disableMfa posts password and TOTP code', async () => {
+    fetch.mockReturnValue(jsonResp({ ok: true }));
+    const result = await disableMfa('pw', '123456');
+    expect(result).toEqual({ ok: true });
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/mfa/disable');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ password: 'pw', code: '123456' });
+  });
+
+  it('disableMfa supports recovery-code mode', async () => {
+    fetch.mockReturnValue(jsonResp({ ok: true }));
+    await disableMfa('pw', 'ABCD-EFGH', true);
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/mfa/disable');
+    expect(JSON.parse(opts.body)).toEqual({ password: 'pw', recovery_code: 'ABCD-EFGH' });
+  });
+
+  it('regenerateRecoveryCodes posts password and TOTP code', async () => {
+    fetch.mockReturnValue(jsonResp({ recovery_codes: ['WXYZ-1234'] }));
+    const result = await regenerateRecoveryCodes('pw', '123456');
+    expect(result.recovery_codes).toEqual(['WXYZ-1234']);
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/mfa/recovery/regenerate');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ password: 'pw', code: '123456' });
+  });
+
+  it('regenerateRecoveryCodes supports recovery-code mode', async () => {
+    fetch.mockReturnValue(jsonResp({ recovery_codes: ['WXYZ-1234'] }));
+    await regenerateRecoveryCodes('pw', 'ABCD-EFGH', true);
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/mfa/recovery/regenerate');
+    expect(JSON.parse(opts.body)).toEqual({ password: 'pw', recovery_code: 'ABCD-EFGH' });
   });
 
   it('login throws on bad credentials', async () => {
@@ -51,5 +148,23 @@ describe('auth api', () => {
     const [url, opts] = fetch.mock.calls[0];
     expect(url).toBe('/api/admin/users/42/password-reset');
     expect(opts.method).toBe('POST');
+  });
+
+  it('setSettings supports admin MFA requirement', async () => {
+    fetch.mockReturnValue(jsonResp({ admin_mfa_required: true }));
+    const settings = await setSettings({ admin_mfa_required: true });
+    expect(settings).toEqual({ admin_mfa_required: true });
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/admin/settings');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ admin_mfa_required: true });
+  });
+
+  it('listUsers preserves MFA enabled state', async () => {
+    fetch.mockReturnValue(jsonResp([{ id: 1, email: 'a@b.com', mfa_enabled: true }]));
+    const users = await listUsers();
+    expect(users).toEqual([{ id: 1, email: 'a@b.com', mfa_enabled: true }]);
+    const [url] = fetch.mock.calls[0];
+    expect(url).toBe('/api/admin/users');
   });
 });

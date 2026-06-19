@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +109,23 @@ func TestFederationSettingsPreferDBOverEnv(t *testing.T) {
 	}
 	if got != dbSettings {
 		t.Fatalf("federation settings = %#v, want %#v", got, dbSettings)
+	}
+}
+
+func TestMainWiresConfiguredMFAKeyIntoAPIServer(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+
+	serverIndex := strings.Index(string(source), "srv := api.NewServer(db, jb, uiFS)")
+	if serverIndex < 0 {
+		t.Fatal("main.go should construct the API server")
+	}
+
+	mfaKeyIndex := strings.Index(string(source)[serverIndex:], "srv.SetMFAKey(cfg.MFAKey)")
+	if mfaKeyIndex < 0 {
+		t.Fatal("main.go should pass cfg.MFAKey to the API server after construction")
 	}
 }
 

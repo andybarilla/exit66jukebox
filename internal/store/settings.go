@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	keySignupEnabled = "signup_enabled"
-	keyGuestAccess   = "guest_access_enabled"
+	keySignupEnabled    = "signup_enabled"
+	keyGuestAccess      = "guest_access_enabled"
+	keyAdminMFARequired = "admin_mfa_required"
 )
 
 // metaFlag reads a boolean meta flag, defaulting to false when the row is
@@ -38,6 +39,12 @@ func GuestAccessEnabled(db *sql.DB) bool { return metaFlag(db, keyGuestAccess) }
 
 // SetGuestAccessEnabled flips the guest-access toggle.
 func SetGuestAccessEnabled(db *sql.DB, on bool) error { return setMetaFlag(db, keyGuestAccess, on) }
+
+// AdminMFARequired reports whether admin users must complete MFA (default off).
+func AdminMFARequired(db *sql.DB) bool { return metaFlag(db, keyAdminMFARequired) }
+
+// SetAdminMFARequired flips the admin MFA requirement toggle.
+func SetAdminMFARequired(db *sql.DB, on bool) error { return setMetaFlag(db, keyAdminMFARequired, on) }
 
 // MediaSigningSecret returns the persistent HMAC secret for signed media URLs,
 // generating and storing a random one on first use so casts survive restarts.

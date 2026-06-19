@@ -47,6 +47,7 @@ type Server struct {
 	// signingSecret is the HMAC secret used to sign Sonos media URLs; loaded once
 	// at startup from the store (store.MediaSigningSecret).
 	signingSecret []byte
+	mfaKey        []byte
 	// loginAttempts throttles the password form per client IP (soft brute-force
 	// guard); guarded by loginMu.
 	loginMu       sync.Mutex
@@ -146,6 +147,8 @@ func (s *Server) SetPasswordResetEmailer(fn func(to, link string)) { s.emailPass
 // Loaded once at startup from the store (store.MediaSigningSecret).
 func (s *Server) SetSigningSecret(secret []byte) { s.signingSecret = secret }
 
+func (s *Server) SetMFAKey(key []byte) { s.mfaKey = append([]byte(nil), key...) }
+
 // RegisterStream attaches a broadcast hub, event bus, and now-playing tracker
 // for a shared stream id. np may be nil for streams that don't track current
 // track (GET /api/streams/{id} then reports now_playing: null).
@@ -198,6 +201,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/sonos/manual", s.sonosManualAdd)
 	mux.HandleFunc("POST /api/auth/signup", s.signup)
 	mux.HandleFunc("POST /api/auth/login", s.login)
+	mux.HandleFunc("POST /api/auth/mfa/complete", s.mfaComplete)
+	mux.HandleFunc("POST /api/auth/mfa/enroll/begin", s.mfaEnrollBegin)
+	mux.HandleFunc("POST /api/auth/mfa/enroll/confirm", s.mfaEnrollConfirm)
+	mux.HandleFunc("POST /api/auth/mfa/disable", s.mfaDisable)
+	mux.HandleFunc("POST /api/auth/mfa/recovery/regenerate", s.mfaRecoveryRegenerate)
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/auth/me", s.me)
 	mux.HandleFunc("POST /api/auth/invite/accept", s.inviteAccept)
