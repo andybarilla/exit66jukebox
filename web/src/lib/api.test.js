@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import {
   listTracks, listAlbums, listArtists, discoverRecommended,
-  getSonosVolume, setSonosVolume, addManualSonos, nextHouse, getConfig,
+  getSonosVolume, setSonosVolume, addManualSonos, nextHouse, nextTrack, getConfig,
   removeRequest, setShuffle, castSonos,
 } from './api.js';
 
@@ -87,10 +87,16 @@ describe('sonos volume + manual ip', () => {
     await expect(addManualSonos('8.8.8.8')).rejects.toThrow();
   });
 
-  it('nextHouse advances the house stream', async () => {
+  it('nextHouse POSTs to advance the house stream', async () => {
     global.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
     await nextHouse();
-    expect(global.fetch.mock.calls[0][0]).toBe('/api/streams/house/next');
+    expect(global.fetch.mock.calls[0]).toEqual(['/api/streams/house/next', { method: 'POST' }]);
+  });
+
+  it('nextTrack POSTs to advance the private stream', async () => {
+    global.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
+    await nextTrack();
+    expect(global.fetch.mock.calls[0]).toEqual(['/api/streams/me/next', { method: 'POST' }]);
   });
 });
 
@@ -102,4 +108,3 @@ describe('getConfig', () => {
     expect(r).toEqual({ mute_local_on_cast: true });
   });
 });
-
