@@ -1,11 +1,14 @@
 package fed
 
 import (
+	"database/sql"
 	"io"
 	"net"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
 func TestManagerMemberServesHubRequests(t *testing.T) {
@@ -54,4 +57,46 @@ func TestManagerMemberServesHubRequests(t *testing.T) {
 	if string(body) != "from-member" {
 		t.Fatalf("expected from-member, got %q", body)
 	}
+}
+
+func TestPeerDialerUsesAcceptedPeerStorageAddress(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	db := openPeerDialerTestDB(t)
+	if err := store.SaveFederationPeer(db, store.FederationPeer{PeerID: "peer-a", Address: listener.Addr().String(), Status: store.PeerStatusAccepted}); err != nil {
+		t.Fatal(err)
+	}
+
+	connected := make(chan struct{})
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		conn.Close()
+		close(connected)
+	}()
+
+	manager := &Manager{DB: db, Registry: NewRegistry()}
+	manager.runPeerDialerOnce()
+
+	select {
+	case <-connected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("peer dialer did not dial accepted peer address")
+	}
+}
+
+func openPeerDialerTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
 }
