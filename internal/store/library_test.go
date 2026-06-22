@@ -95,6 +95,53 @@ func TestListTracksSearchAndPage(t *testing.T) {
 	}
 }
 
+func TestBulkTrackIDHelpersHideDisabledLocalLibrary(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+
+	enabledLibraryID, err := EnsureLocalLibrary(db, "/enabled", "Enabled")
+	if err != nil {
+		t.Fatalf("enabled library: %v", err)
+	}
+	disabledLibraryID, err := EnsureLocalLibrary(db, "/disabled", "Disabled")
+	if err != nil {
+		t.Fatalf("disabled library: %v", err)
+	}
+	visibleID, err := UpsertTrackInLibrary(db, enabledLibraryID, model.Track{Path: "/enabled/a.mp3", Title: "Visible"}, "Visible Artist", "", "Shared Album")
+	if err != nil {
+		t.Fatalf("visible track: %v", err)
+	}
+	hiddenID, err := UpsertTrackInLibrary(db, disabledLibraryID, model.Track{Path: "/disabled/a.mp3", Title: "Hidden"}, "Hidden Artist", "", "Hidden Album")
+	if err != nil {
+		t.Fatalf("hidden track: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE local_library SET enabled = 0 WHERE id = ?`, disabledLibraryID); err != nil {
+		t.Fatalf("disable library: %v", err)
+	}
+
+	var hiddenAlbumID, hiddenArtistID int64
+	if err := db.QueryRow(`SELECT album_id, artist_id FROM track WHERE id = ?`, hiddenID).Scan(&hiddenAlbumID, &hiddenArtistID); err != nil {
+		t.Fatalf("hidden ids: %v", err)
+	}
+	if ids, err := TrackIDsByAlbum(db, hiddenAlbumID); err != nil || len(ids) != 0 {
+		t.Fatalf("TrackIDsByAlbum disabled = %v, %v; want none", ids, err)
+	}
+	if ids, err := TrackIDsByArtist(db, hiddenArtistID); err != nil || len(ids) != 0 {
+		t.Fatalf("TrackIDsByArtist disabled = %v, %v; want none", ids, err)
+	}
+
+	var visibleAlbumID, visibleArtistID int64
+	if err := db.QueryRow(`SELECT album_id, artist_id FROM track WHERE id = ?`, visibleID).Scan(&visibleAlbumID, &visibleArtistID); err != nil {
+		t.Fatalf("visible ids: %v", err)
+	}
+	if ids, err := TrackIDsByAlbum(db, visibleAlbumID); err != nil || len(ids) != 1 || ids[0] != visibleID {
+		t.Fatalf("TrackIDsByAlbum enabled = %v, %v; want visible", ids, err)
+	}
+	if ids, err := TrackIDsByArtist(db, visibleArtistID); err != nil || len(ids) != 1 || ids[0] != visibleID {
+		t.Fatalf("TrackIDsByArtist enabled = %v, %v; want visible", ids, err)
+	}
+}
+
 func TestDeleteLocalLibraryTracksExceptAllowsLargeKeepSet(t *testing.T) {
 	db, err := Open(":memory:")
 	if err != nil {

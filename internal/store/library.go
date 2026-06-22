@@ -150,7 +150,7 @@ func TrackStampInLibrary(db *sql.DB, libraryID int64, path string) (modTime, siz
 // all), ordered by title, paged by limit/offset. A limit <= 0 means no limit.
 func ListTracks(db *sql.DB, search string, limit, offset int) ([]model.Track, error) {
 	q := `SELECT id, title, artist_id, album_id, track_no, genre, duration, play_count, library_id, source_peer, source_library_id, remote_id
-	      FROM track WHERE title LIKE ? ORDER BY title LIMIT ? OFFSET ?`
+	      FROM track t WHERE ` + visibleTrackPredicate + ` AND title LIKE ? ORDER BY title LIMIT ? OFFSET ?`
 	lim := limit
 	if lim <= 0 {
 		lim = -1 // SQLite: no limit
@@ -223,13 +223,13 @@ func ListAlbums(db *sql.DB, search string, limit, offset int) ([]model.Album, er
 // TrackIDsByAlbum returns track ids for an album in track-number order.
 func TrackIDsByAlbum(db *sql.DB, albumID int64) ([]int64, error) {
 	return scanIDs(db,
-		`SELECT id FROM track WHERE album_id=? ORDER BY track_no, title`, albumID)
+		`SELECT id FROM track t WHERE album_id=? AND `+visibleTrackPredicate+` ORDER BY track_no, title`, albumID)
 }
 
 // TrackIDsByArtist returns track ids for an artist in title order.
 func TrackIDsByArtist(db *sql.DB, artistID int64) ([]int64, error) {
 	return scanIDs(db,
-		`SELECT id FROM track WHERE artist_id=? ORDER BY title`, artistID)
+		`SELECT id FROM track t WHERE artist_id=? AND `+visibleTrackPredicate+` ORDER BY title`, artistID)
 }
 
 // FirstTrackIDOfAlbum returns the lowest-numbered track id for an album, or
@@ -237,7 +237,7 @@ func TrackIDsByArtist(db *sql.DB, artistID int64) ([]int64, error) {
 func FirstTrackIDOfAlbum(db *sql.DB, albumID int64) (int64, bool) {
 	var id int64
 	err := db.QueryRow(
-		`SELECT id FROM track WHERE album_id=? ORDER BY track_no, title LIMIT 1`,
+		`SELECT id FROM track t WHERE album_id=? AND `+visibleTrackPredicate+` ORDER BY track_no, title LIMIT 1`,
 		albumID).Scan(&id)
 	if err != nil {
 		return 0, false

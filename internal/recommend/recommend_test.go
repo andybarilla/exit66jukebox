@@ -40,6 +40,9 @@ func (f *fakeLF) SimilarArtists(ctx context.Context, name, mbid string, limit in
 // seed inserts an artist/album/track, returns track id. mbid optional.
 func seed(t *testing.T, db *sql.DB, artist, title, path, trackMBID string, plays int) (trackID int64) {
 	t.Helper()
+	if _, err := store.EnsureLocalLibrary(db, "", "Default Library"); err != nil {
+		t.Fatalf("local library: %v", err)
+	}
 	var artistID int64
 	db.QueryRow(`SELECT id FROM artist WHERE name = ?`, artist).Scan(&artistID)
 	if artistID == 0 {
@@ -52,8 +55,8 @@ func seed(t *testing.T, db *sql.DB, artist, title, path, trackMBID string, plays
 	}
 	albumID, _ := res.LastInsertId()
 	res, err = db.Exec(
-		`INSERT INTO track(path, mod_time, size, title, artist_id, album_id, play_count, mbid)
-		 VALUES(?,1,1,?,?,?,?,?)`, path, title, artistID, albumID, plays, trackMBID)
+		`INSERT INTO track(path, library_id, mod_time, size, title, artist_id, album_id, play_count, mbid)
+		 VALUES(?, (SELECT id FROM local_library WHERE path = ''), 1, 1, ?, ?, ?, ?, ?)`, path, title, artistID, albumID, plays, trackMBID)
 	if err != nil {
 		t.Fatalf("track: %v", err)
 	}

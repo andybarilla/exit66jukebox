@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"testing"
+
+	"github.com/andybarilla/exit66jukebox/internal/model"
 )
 
 // setTrackMBID and bumpPlays are small helpers for the recommendation-mapping tests.
@@ -48,6 +50,64 @@ func TestTracksByRecordingMBIDsMatchesAndOrders(t *testing.T) {
 	}
 	if got[0].ID != t2 || got[1].ID != t1 {
 		t.Errorf("order = %d,%d want %d,%d (input order preserved)", got[0].ID, got[1].ID, t2, t1)
+	}
+}
+
+func TestRecommendationsHideDisabledLocalLibrary(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+
+	enabledLibraryID, err := EnsureLocalLibrary(db, "/enabled", "Enabled")
+	if err != nil {
+		t.Fatalf("enabled library: %v", err)
+	}
+	disabledLibraryID, err := EnsureLocalLibrary(db, "/disabled", "Disabled")
+	if err != nil {
+		t.Fatalf("disabled library: %v", err)
+	}
+	visibleID, err := UpsertTrackInLibrary(db, enabledLibraryID, model.Track{Path: "/enabled/a.mp3", Title: "Visible"}, "Visible Artist", "", "Visible Album")
+	if err != nil {
+		t.Fatalf("visible track: %v", err)
+	}
+	hiddenID, err := UpsertTrackInLibrary(db, disabledLibraryID, model.Track{Path: "/disabled/a.mp3", Title: "Hidden"}, "Hidden Artist", "", "Hidden Album")
+	if err != nil {
+		t.Fatalf("hidden track: %v", err)
+	}
+	setTrackMBID(t, db, visibleID, "visible-rec")
+	setTrackMBID(t, db, hiddenID, "hidden-rec")
+	setPlays(t, db, visibleID, 1)
+	setPlays(t, db, hiddenID, 50)
+	var hiddenArtistID int64
+	if err := db.QueryRow(`SELECT artist_id FROM track WHERE id = ?`, hiddenID).Scan(&hiddenArtistID); err != nil {
+		t.Fatalf("hidden artist id: %v", err)
+	}
+	setArtistMBID(t, db, hiddenArtistID, "hidden-artist")
+	if _, err := db.Exec(`UPDATE local_library SET enabled = 0 WHERE id = ?`, disabledLibraryID); err != nil {
+		t.Fatalf("disable library: %v", err)
+	}
+
+	byRecording, err := TracksByRecordingMBIDs(db, []string{"hidden-rec", "visible-rec"})
+	if err != nil {
+		t.Fatalf("TracksByRecordingMBIDs: %v", err)
+	}
+	if len(byRecording) != 1 || byRecording[0].ID != visibleID {
+		t.Fatalf("recording recommendations = %+v, want only visible", byRecording)
+	}
+
+	topArtists, err := TopArtists(db, 10)
+	if err != nil {
+		t.Fatalf("TopArtists: %v", err)
+	}
+	if len(topArtists) != 1 || topArtists[0].Name != "Visible Artist" {
+		t.Fatalf("top artists = %+v, want only Visible Artist", topArtists)
+	}
+
+	similar, err := TracksBySimilarArtists(db, []string{"hidden artist", "visible artist"}, []string{"hidden-artist"}, 5)
+	if err != nil {
+		t.Fatalf("TracksBySimilarArtists: %v", err)
+	}
+	if len(similar) != 1 || similar[0].ID != visibleID {
+		t.Fatalf("similar-artist tracks = %+v, want only visible", similar)
 	}
 }
 
@@ -97,8 +157,8 @@ func TestTracksBySimilarArtistsMatchesByMBIDAndName(t *testing.T) {
 	aBOC, _, _ := seedEnrichTrack(t, db, "Boards of Canada", "Geogaddi", "Music Is Math", "/m/boc1.mp3")
 	setArtistMBID(t, db, aBOC, "mbid-boc")
 	// Second track for same artist to exercise the per-artist cap.
-	db.Exec(`INSERT INTO track(path, mod_time, size, title, artist_id, album_id)
-		VALUES('/m/boc2.mp3', 1, 1, 'Sunshine Recorder', ?, (SELECT album_id FROM track WHERE artist_id = ? LIMIT 1))`, aBOC, aBOC)
+	db.Exec(`INSERT INTO track(path, library_id, mod_time, size, title, artist_id, album_id)
+		VALUES('/m/boc2.mp3', (SELECT id FROM local_library WHERE path = ''), 1, 1, 'Sunshine Recorder', ?, (SELECT album_id FROM track WHERE artist_id = ? LIMIT 1))`, aBOC, aBOC)
 	// Match by normalized name (no MBID).
 	seedEnrichTrack(t, db, "Aphex Twin", "SAW", "Xtal", "/m/aphex.mp3")
 	// A local artist nobody recommended.

@@ -8,6 +8,9 @@ import (
 // seedEnrichTrack inserts an artist/album/track and returns their ids.
 func seedEnrichTrack(t *testing.T, db *sql.DB, artist, album, title, path string) (artistID, albumID, trackID int64) {
 	t.Helper()
+	if _, err := EnsureLocalLibrary(db, "", "Default Library"); err != nil {
+		t.Fatalf("local library: %v", err)
+	}
 	res, err := db.Exec(`INSERT INTO artist(name) VALUES(?)`, artist)
 	if err != nil {
 		t.Fatalf("artist: %v", err)
@@ -19,7 +22,7 @@ func seedEnrichTrack(t *testing.T, db *sql.DB, artist, album, title, path string
 	}
 	albumID, _ = res.LastInsertId()
 	res, err = db.Exec(
-		`INSERT INTO track(path, mod_time, size, title, artist_id, album_id) VALUES(?, 1, 1, ?, ?, ?)`,
+		`INSERT INTO track(path, library_id, mod_time, size, title, artist_id, album_id) VALUES(?, (SELECT id FROM local_library WHERE path = ''), 1, 1, ?, ?, ?)`,
 		path, title, artistID, albumID)
 	if err != nil {
 		t.Fatalf("track: %v", err)

@@ -105,6 +105,46 @@ func TestGenreCounts(t *testing.T) {
 	}
 }
 
+func TestDiscoverAndGenreCountsHideDisabledLocalLibrary(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+
+	enabledLibraryID, err := EnsureLocalLibrary(db, "/enabled", "Enabled")
+	if err != nil {
+		t.Fatalf("enabled library: %v", err)
+	}
+	disabledLibraryID, err := EnsureLocalLibrary(db, "/disabled", "Disabled")
+	if err != nil {
+		t.Fatalf("disabled library: %v", err)
+	}
+	visibleID, err := UpsertTrackInLibrary(db, enabledLibraryID, model.Track{Path: "/enabled/a.mp3", Title: "Visible", Genre: "Jazz"}, "Band", "", "Album")
+	if err != nil {
+		t.Fatalf("visible track: %v", err)
+	}
+	if _, err := UpsertTrackInLibrary(db, disabledLibraryID, model.Track{Path: "/disabled/a.mp3", Title: "Hidden", Genre: "Rock"}, "Band", "", "Album"); err != nil {
+		t.Fatalf("hidden track: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE local_library SET enabled = 0 WHERE id = ?`, disabledLibraryID); err != nil {
+		t.Fatalf("disable library: %v", err)
+	}
+
+	got, err := DiscoverTracks(db, DiscoverOpts{OrderBy: "recent", Limit: 10})
+	if err != nil {
+		t.Fatalf("DiscoverTracks: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != visibleID {
+		t.Fatalf("discover = %+v, want only enabled-library track", got)
+	}
+
+	genres, err := GenreCounts(db)
+	if err != nil {
+		t.Fatalf("GenreCounts: %v", err)
+	}
+	if len(genres) != 1 || genres[0].Genre != "Jazz" || genres[0].Count != 1 {
+		t.Fatalf("genres = %+v, want only Jazz=1", genres)
+	}
+}
+
 func TestUpsertStampsAddedAt(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()
