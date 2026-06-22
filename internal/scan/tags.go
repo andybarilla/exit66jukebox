@@ -22,6 +22,16 @@ type Meta struct {
 	Compilation bool
 }
 
+type scannedTrack struct {
+	path string
+	meta Meta
+}
+
+type albumFolderKey struct {
+	dir   string
+	album string
+}
+
 // urlRe matches http(s) URLs in free text. It stops at whitespace and at
 // trailing punctuation that commonly wraps a link in prose (closing brackets,
 // quotes, sentence enders), so "(https://x.com/a)." yields the bare URL.
@@ -61,6 +71,40 @@ func (m Meta) AlbumArtistOrFallback() string {
 		return store.VariousArtists
 	}
 	return m.Artist
+}
+
+func resolveScanAlbumArtists(records []scannedTrack, assumeSameTitleFolderCompilations bool) []string {
+	albumArtists := make([]string, len(records))
+	if !assumeSameTitleFolderCompilations {
+		for i, record := range records {
+			albumArtists[i] = record.meta.AlbumArtistOrFallback()
+		}
+		return albumArtists
+	}
+
+	artistsByGroup := make(map[albumFolderKey]map[string]bool)
+	for _, record := range records {
+		if record.meta.AlbumArtist != "" || record.meta.Compilation {
+			continue
+		}
+		key := albumFolderKey{dir: filepath.Dir(record.path), album: record.meta.Album}
+		if artistsByGroup[key] == nil {
+			artistsByGroup[key] = map[string]bool{}
+		}
+		artistsByGroup[key][record.meta.Artist] = true
+	}
+
+	for i, record := range records {
+		albumArtists[i] = record.meta.AlbumArtistOrFallback()
+		if record.meta.AlbumArtist != "" || record.meta.Compilation {
+			continue
+		}
+		key := albumFolderKey{dir: filepath.Dir(record.path), album: record.meta.Album}
+		if len(artistsByGroup[key]) > 1 {
+			albumArtists[i] = store.VariousArtists
+		}
+	}
+	return albumArtists
 }
 
 // compilationFlag reports whether raw tag data carries a set iTunes compilation

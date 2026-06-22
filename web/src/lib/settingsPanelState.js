@@ -44,12 +44,19 @@ function buildEditableFederation(federation = {}) {
   };
 }
 
-export function buildEditableSettingsSnapshot({ signupEnabled, guestAccess, libraries = [], federation = {} }) {
+function buildEditableScanSettings(scan = {}) {
+  return {
+    assume_same_title_folder_compilations: !!scan.assume_same_title_folder_compilations,
+  };
+}
+
+export function buildEditableSettingsSnapshot({ signupEnabled, guestAccess, libraries = [], federation = {}, scan = {} }) {
   return JSON.stringify({
     signupEnabled: !!signupEnabled,
     guestAccess: !!guestAccess,
     libraries: libraries.map(buildEditableLibrary),
     federation: buildEditableFederation(federation),
+    scan: buildEditableScanSettings(scan),
   });
 }
 

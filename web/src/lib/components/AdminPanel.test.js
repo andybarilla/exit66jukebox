@@ -23,11 +23,20 @@ describe('AdminPanel Svelte wiring', () => {
 
   test('successful saves update only their clean settings subset', () => {
     expect(source).toContain('updateCleanSettingsSnapshot');
-    expect(functionBody('saveLibraries')).toMatch(/updateCleanSettingsSnapshot\s*\(\s*{\s*libraries\s*,\s*federation\s*}\s*\)/);
+    expect(functionBody('saveLibraries')).toMatch(/updateCleanSettingsSnapshot\s*\(\s*{\s*libraries\s*,\s*federation\s*,\s*scan\s*}\s*\)/);
     expect(functionBody('onToggleSignup')).toMatch(/updateCleanSettingsSnapshot\s*\(\s*{\s*signupEnabled\s*}\s*\)/);
     expect(functionBody('onToggleSignup')).not.toMatch(/refreshCleanSettingsSnapshot\s*\(/);
     expect(functionBody('onToggleGuest')).toMatch(/updateCleanSettingsSnapshot\s*\(\s*{\s*guestAccess\s*}\s*\)/);
     expect(functionBody('onToggleGuest')).not.toMatch(/refreshCleanSettingsSnapshot\s*\(/);
+  });
+
+  test('wires same-title folder compilation scan setting', () => {
+    expect(source).toContain('Assume same-title albums in one folder are compilations');
+    expect(source).toContain('scan = $state({ assume_same_title_folder_compilations: false })');
+    expect(source).toMatch(/scan\s*=\s*{\s*\.\.\.scan,\s*\.\.\.\(librarySettings\.scan \|\| {}\)\s*}/);
+    expect(functionBody('currentEditableSettingsState')).toMatch(/scan/);
+    expect(functionBody('setScanField')).toMatch(/scan\s*=\s*{\s*\.\.\.scan,\s*\[field\]:\s*value\s*}/);
+    expect(functionBody('saveLibraries')).toMatch(/scan/);
   });
 
   test('imports MFA helpers and wires admin MFA settings', () => {

@@ -11,7 +11,10 @@ import (
 	"strings"
 )
 
-const keyLibrarySettingsInitialized = "library_settings_initialized"
+const (
+	keyLibrarySettingsInitialized        = "library_settings_initialized"
+	keyAssumeSameTitleFolderCompilations = "assume_same_title_folder_compilations"
+)
 
 var libraryPathHomeDir = os.UserHomeDir
 
@@ -34,6 +37,10 @@ type FederationSettings struct {
 	PeerID  string `json:"peer_id"`
 }
 
+type LibraryScanSettings struct {
+	AssumeSameTitleFolderCompilations bool `json:"assume_same_title_folder_compilations"`
+}
+
 type LocalLibraryWarning struct {
 	Path    string `json:"path"`
 	Message string `json:"message"`
@@ -45,6 +52,34 @@ func LibrarySettingsInitialized(db *sql.DB) bool {
 
 func SetLibrarySettingsInitialized(db *sql.DB) error {
 	return setMetaFlag(db, keyLibrarySettingsInitialized, true)
+}
+
+func LoadLibraryScanSettings(db *sql.DB) (LibraryScanSettings, error) {
+	return LibraryScanSettings{
+		AssumeSameTitleFolderCompilations: metaFlag(db, keyAssumeSameTitleFolderCompilations),
+	}, nil
+}
+
+func SaveLibraryScanSettings(db *sql.DB, settings LibraryScanSettings) error {
+	previous := metaFlag(db, keyAssumeSameTitleFolderCompilations)
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
+		`INSERT INTO meta(key, value) VALUES(?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		keyAssumeSameTitleFolderCompilations, boolToInt(settings.AssumeSameTitleFolderCompilations),
+	); err != nil {
+		return err
+	}
+	if previous != settings.AssumeSameTitleFolderCompilations {
+		if _, err := tx.Exec(`UPDATE track SET mod_time = 0, size = 0 WHERE source_peer = ''`); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func SeedLocalLibraries(db *sql.DB, roots []string) error {

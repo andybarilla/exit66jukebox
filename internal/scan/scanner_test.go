@@ -68,6 +68,49 @@ func TestScanKeysAlbumByAlbumArtist(t *testing.T) {
 	}
 }
 
+func TestScanUsesSameFolderCompilationSetting(t *testing.T) {
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	if err := store.SaveLibraryScanSettings(db, store.LibraryScanSettings{AssumeSameTitleFolderCompilations: true}); err != nil {
+		t.Fatalf("save scan settings: %v", err)
+	}
+	dir := t.TempDir()
+	firstPath := filepath.Join(dir, "artist-a.mp3")
+	secondPath := filepath.Join(dir, "artist-b.mp3")
+	if err := os.WriteFile(firstPath, []byte("a"), 0o644); err != nil {
+		t.Fatalf("write first track: %v", err)
+	}
+	if err := os.WriteFile(secondPath, []byte("b"), 0o644); err != nil {
+		t.Fatalf("write second track: %v", err)
+	}
+	oldReadTags := readTags
+	readTags = func(path string) (Meta, error) {
+		artist := "Artist A"
+		if path == secondPath {
+			artist = "Artist B"
+		}
+		return Meta{Title: filepath.Base(path), Artist: artist, Album: "Shared Album"}, nil
+	}
+	t.Cleanup(func() { readTags = oldReadTags })
+
+	if _, err := Scan(db, []string{dir}, 2, nil); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	var albumArtist string
+	if err := db.QueryRow(
+		`SELECT ar.name FROM album a JOIN artist ar ON ar.id = a.artist_id WHERE a.name = 'Shared Album'`,
+	).Scan(&albumArtist); err != nil {
+		t.Fatalf("query album artist: %v", err)
+	}
+	if albumArtist != store.VariousArtists {
+		t.Fatalf("expected album keyed by %q, got %q", store.VariousArtists, albumArtist)
+	}
+}
+
 func TestScanStoresDuration(t *testing.T) {
 	db, err := store.Open(":memory:")
 	if err != nil {

@@ -19,6 +19,7 @@ type librariesResponse struct {
 	LocalLibraries []store.LocalLibrary        `json:"local_libraries"`
 	Warnings       []store.LocalLibraryWarning `json:"warnings"`
 	Federation     federationResponse          `json:"federation"`
+	Scan           store.LibraryScanSettings   `json:"scan"`
 }
 
 type federationResponse struct {
@@ -32,9 +33,10 @@ type federationResponse struct {
 }
 
 type saveLibrariesRequest struct {
-	LocalLibraries []store.LocalLibrary     `json:"local_libraries"`
-	Federation     store.FederationSettings `json:"federation"`
-	SaveAndScan    bool                     `json:"save_and_scan"`
+	LocalLibraries []store.LocalLibrary      `json:"local_libraries"`
+	Federation     store.FederationSettings  `json:"federation"`
+	Scan           store.LibraryScanSettings `json:"scan"`
+	SaveAndScan    bool                      `json:"save_and_scan"`
 }
 
 type libraryPathEntry struct {
@@ -66,6 +68,10 @@ func (s *Server) setAdminLibraries(w http.ResponseWriter, r *http.Request) {
 	settings := s.federationSettingsForSave(req.Federation)
 	if err := store.SaveLibraryConfiguration(s.db, req.LocalLibraries, settings); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := store.SaveLibraryScanSettings(s.db, req.Scan); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if req.SaveAndScan {
@@ -235,9 +241,14 @@ func (s *Server) librarySettingsResponse() (librariesResponse, error) {
 	if err != nil {
 		return librariesResponse{}, err
 	}
+	scanSettings, err := store.LoadLibraryScanSettings(s.db)
+	if err != nil {
+		return librariesResponse{}, err
+	}
 	return librariesResponse{
 		LocalLibraries: libs,
 		Warnings:       store.LocalLibraryWarnings(libs),
+		Scan:           scanSettings,
 		Federation: federationResponse{
 			Enabled:         fedSettings.Enabled,
 			Role:            fedSettings.Role,

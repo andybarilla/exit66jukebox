@@ -52,6 +52,35 @@ func TestAdminLibrariesSaveValidatesPathsAndPreservesSettings(t *testing.T) {
 	}
 }
 
+func TestAdminLibrariesSavesAndReturnsScanSettings(t *testing.T) {
+	s, db := newTestServer(t)
+	body := `{"local_libraries":[{"path":"/music","enabled":true}],"federation":{"enabled":false},"scan":{"assume_same_title_folder_compilations":true}}`
+	req := adminReq(t, db, http.MethodPost, "/api/admin/libraries", body)
+	rec := httptest.NewRecorder()
+
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save scan settings: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	settings, err := store.LoadLibraryScanSettings(db)
+	if err != nil {
+		t.Fatalf("load scan settings: %v", err)
+	}
+	if !settings.AssumeSameTitleFolderCompilations {
+		t.Fatal("scan setting should persist enabled")
+	}
+	var response struct {
+		Scan store.LibraryScanSettings `json:"scan"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.Scan.AssumeSameTitleFolderCompilations {
+		t.Fatal("scan setting should be returned enabled")
+	}
+}
+
 func TestAdminLibrariesSaveRejectsInvalidFederationWithoutSavingLibraries(t *testing.T) {
 	s, db := newTestServer(t)
 	if err := store.SaveLocalLibraries(db, []store.LocalLibrary{{Path: "/original", Enabled: true}}); err != nil {
