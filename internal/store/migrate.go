@@ -6,7 +6,8 @@ import "database/sql"
 // that stored columns can't re-derive, forcing a one-time full re-scan. v1:
 // albums re-keyed by album-artist (#32). v2: compilation flag forces "Various
 // Artists" when AlbumArtist is blank (#63). v3: comment-tag links extracted (#46).
-const currentLibraryVersion = 4
+// v5: opt-in same-title folder compilation heuristic can re-key albums (#114).
+const currentLibraryVersion = 5
 
 const DefaultRemoteSourceLibraryID = "default"
 

@@ -30,6 +30,7 @@ describe('buildEditableSettingsSnapshot', () => {
         token_configured: true,
         restart_required: true,
       },
+      scan: { assume_same_title_folder_compilations: true },
     });
 
     expect(JSON.parse(snapshot)).toEqual({
@@ -51,6 +52,7 @@ describe('buildEditableSettingsSnapshot', () => {
         token: 'new-token',
         peer_id: 'peer-a',
       },
+      scan: { assume_same_title_folder_compilations: true },
     });
   });
 

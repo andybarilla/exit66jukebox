@@ -47,6 +47,7 @@
   let libraryMessage = $state('');
   let libraryError = $state('');
   let federation = $state({ enabled: false, role: '', hub_addr: '', listen: '', token: '', peer_id: '', token_configured: false, restart_required: false });
+  let scan = $state({ assume_same_title_folder_compilations: false });
   let federationPeers = $state([]);
   let peerDraft = $state({ peer_id: '', display_name: '', address: '' });
   let peerBusy = $state(false);
@@ -58,7 +59,7 @@
   let pathBrowser = $state({ open: false, row: -1, path: '', parent: '', directories: [], loading: false, error: '', requestedError: '' });
 
   function currentEditableSettingsState() {
-    return { signupEnabled, guestAccess, adminMfaRequired, libraries, federation };
+    return { signupEnabled, guestAccess, adminMfaRequired, libraries, federation, scan };
   }
 
   function refreshCleanSettingsSnapshot() {
@@ -129,6 +130,7 @@
         libraries = librarySettings.local_libraries || [];
         libraryWarnings = librarySettings.warnings || [];
         federation = { ...federation, ...(librarySettings.federation || {}), token: '' };
+        scan = { ...scan, ...(librarySettings.scan || {}) };
         federationPeers = peerSettings.peers || [];
         invites = invList;
         users = userList;
@@ -343,6 +345,11 @@
     updateUnsavedState();
   }
 
+  function setScanField(field, value) {
+    scan = { ...scan, [field]: value };
+    updateUnsavedState();
+  }
+
   async function openPathBrowser(row) {
     const library = libraries[row] || {};
     pathBrowser = { ...pathBrowser, open: true, row, path: library.path || '', parent: '', directories: [], loading: true, error: '', requestedError: '' };
@@ -386,12 +393,13 @@
     libraryError = '';
     libraryMessage = '';
     try {
-      const r = await setLibraries({ local_libraries: libraries, federation, save_and_scan: saveAndScan });
+      const r = await setLibraries({ local_libraries: libraries, federation, scan, save_and_scan: saveAndScan });
       libraries = r.local_libraries || [];
       libraryWarnings = r.warnings || [];
       federation = { ...federation, ...(r.federation || {}), token: '' };
+      scan = { ...scan, ...(r.scan || {}) };
       libraryMessage = saveAndScan ? 'Saved. Scan started.' : 'Saved.';
-      updateCleanSettingsSnapshot({ libraries, federation });
+      updateCleanSettingsSnapshot({ libraries, federation, scan });
     } catch (err) {
       libraryError = err.message || 'failed to save libraries';
     } finally {
@@ -482,6 +490,14 @@
           {/each}
         </div>
         <button type="button" class="btn-copy" onclick={addLibrary}>Add path</button>
+
+        <div class="scan-box">
+          <h3>Scan behavior</h3>
+          <label class="check-row">
+            <input type="checkbox" checked={!!scan.assume_same_title_folder_compilations} onchange={(e) => setScanField('assume_same_title_folder_compilations', e.currentTarget.checked)} />
+            <span>Assume same-title albums in one folder are compilations</span>
+          </label>
+        </div>
 
         <div class="federation-box">
           <h3>Federation</h3>
@@ -763,8 +779,9 @@
   .library-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: rgba(0,0,0,0.18); box-shadow: 0 10px 30px rgba(0,0,0,0.18); }
   .library-enabled { justify-content: flex-start; margin: 0; }
   .path-input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
-  .federation-box { display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
-  .federation-box h3 { margin: 0; font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em; color: var(--neon-cyan); text-transform: uppercase; }
+   .scan-box, .federation-box { display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
+   .scan-box { padding: 12px; border: 1px solid rgba(255,42,166,0.2); border-radius: var(--radius-lg); background: linear-gradient(135deg, rgba(255,42,166,0.08), rgba(31,224,255,0.05)); }
+   .scan-box h3, .federation-box h3 { margin: 0; font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em; color: var(--neon-cyan); text-transform: uppercase; }
   .peer-box { display: grid; gap: 10px; margin-top: 8px; padding: 12px; border: 1px solid rgba(31,224,255,0.25); border-radius: var(--radius-lg); background: radial-gradient(circle at top right, rgba(31,224,255,0.12), rgba(0,0,0,0.18) 52%); }
   .peer-box h4 { margin: 0; font-family: var(--font-display); color: var(--neon-cyan); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
   .peer-draft { display: grid; gap: 8px; }

@@ -21,6 +21,8 @@ type Result struct {
 
 var audioExt = map[string]bool{".mp3": true, ".ogg": true, ".flac": true}
 
+var readTags = ReadTags
+
 type job struct {
 	libraryID  int64
 	path       string
@@ -30,10 +32,17 @@ type job struct {
 	wasIndexed bool // existed in the index but stamp differed
 }
 
+type scannedJob struct {
+	job   job
+	track model.Track
+	meta  Meta
+}
+
 // Scan walks the given roots, reads tags from new/changed audio files using
 // `workers` goroutines, and upserts them. Unchanged files (same mod_time and
-// size) are skipped without reading tags. If p is non-nil its counters are
-// updated live as files are processed, so a concurrent reader can observe
+// size) are skipped without reading tags unless the same-folder compilation
+// heuristic is enabled and needs them for grouping. If p is non-nil its counters
+// are updated live as files are processed, so a concurrent reader can observe
 // progress; pass nil when live progress isn't needed.
 func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) {
 	if workers < 1 {
@@ -41,6 +50,10 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 	}
 	if p == nil {
 		p = &Progress{}
+	}
+	scanSettings, err := store.LoadLibraryScanSettings(db)
+	if err != nil {
+		return Result{}, err
 	}
 	var res Result
 	jobs := make(chan job)
@@ -79,7 +92,7 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 				mt, sz := info.ModTime().Unix(), info.Size()
 				omt, osz, ok := store.TrackStampInLibrary(db, libraryID, p)
 				if ok && omt == mt && osz == sz {
-					jobs <- job{libraryID: libraryID, path: p, exists: true}
+					jobs <- job{libraryID: libraryID, path: p, modTime: mt, size: sz, exists: true}
 					return nil
 				}
 				jobs <- job{libraryID: libraryID, path: p, modTime: mt, size: sz, wasIndexed: ok}
@@ -97,18 +110,19 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 	}()
 
 	var wg sync.WaitGroup
-	var mu sync.Mutex // serialize writes (single SQLite writer)
+	var mu sync.Mutex
+	var scannedJobs []scannedJob
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				if j.exists {
+				if j.exists && !scanSettings.AssumeSameTitleFolderCompilations {
 					p.skipped.Add(1)
 					continue
 				}
-				meta, err := ReadTags(j.path)
+				meta, err := readTags(j.path)
 				if err != nil {
 					p.failed.Add(1)
 					continue
@@ -119,21 +133,32 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 					Duration: probeDuration(j.path), Links: meta.Links,
 				}
 				mu.Lock()
-				_, err = store.UpsertTrackInLibrary(db, j.libraryID, tr, meta.Artist, meta.AlbumArtistOrFallback(), meta.Album)
+				scannedJobs = append(scannedJobs, scannedJob{job: j, track: tr, meta: meta})
 				mu.Unlock()
-				if err != nil {
-					p.failed.Add(1)
-					continue
-				}
-				if j.wasIndexed {
-					p.updated.Add(1)
-				} else {
-					p.added.Add(1)
-				}
 			}
 		}()
 	}
 	wg.Wait()
+
+	records := make([]scannedTrack, len(scannedJobs))
+	for i, scannedJob := range scannedJobs {
+		records[i] = scannedTrack{path: scannedJob.job.path, meta: scannedJob.meta}
+	}
+	albumArtists := resolveScanAlbumArtists(records, scanSettings.AssumeSameTitleFolderCompilations)
+	for i, scannedJob := range scannedJobs {
+		_, err := store.UpsertTrackInLibrary(db, scannedJob.job.libraryID, scannedJob.track, scannedJob.meta.Artist, albumArtists[i], scannedJob.meta.Album)
+		if err != nil {
+			p.failed.Add(1)
+			continue
+		}
+		if scannedJob.job.exists {
+			p.skipped.Add(1)
+		} else if scannedJob.job.wasIndexed {
+			p.updated.Add(1)
+		} else {
+			p.added.Add(1)
+		}
+	}
 
 	// Re-pointing tracks to album-artist-keyed albums leaves the old
 	// per-track-artist album (and its artist) orphaned; clear them.

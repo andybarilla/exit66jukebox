@@ -389,6 +389,12 @@ func TestMigrateForcesRescanOnVersionBump(t *testing.T) {
 	}
 }
 
+func TestCurrentLibraryVersionBumpedForFolderCompilationHeuristic(t *testing.T) {
+	if currentLibraryVersion != 5 {
+		t.Fatalf("currentLibraryVersion = %d, want 5 for same-title folder compilation heuristic", currentLibraryVersion)
+	}
+}
+
 func TestMigrateBackfillsFromModTime(t *testing.T) {
 	db, err := Open(":memory:")
 	if err != nil {

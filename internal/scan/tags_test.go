@@ -37,6 +37,80 @@ func TestAlbumArtistOrFallback(t *testing.T) {
 	}
 }
 
+func TestResolveScanAlbumArtistsUsesVariousArtistsForSameFolderSameAlbumDifferentArtists(t *testing.T) {
+	records := []scannedTrack{
+		{path: "/music/comp/song-a.mp3", meta: Meta{Artist: "Artist A", Album: "Shared Album"}},
+		{path: "/music/comp/song-b.mp3", meta: Meta{Artist: "Artist B", Album: "Shared Album"}},
+	}
+
+	albumArtists := resolveScanAlbumArtists(records, true)
+
+	if albumArtists[0] != store.VariousArtists || albumArtists[1] != store.VariousArtists {
+		t.Fatalf("expected heuristic album artists %q, got %#v", store.VariousArtists, albumArtists)
+	}
+}
+
+func TestResolveScanAlbumArtistsPreservesFallbackAndExplicitPrecedence(t *testing.T) {
+	cases := []struct {
+		name    string
+		enabled bool
+		records []scannedTrack
+		want    []string
+	}{
+		{
+			name:    "disabled keeps track artist fallback",
+			enabled: false,
+			records: []scannedTrack{
+				{path: "/music/comp/song-a.mp3", meta: Meta{Artist: "Artist A", Album: "Shared Album"}},
+				{path: "/music/comp/song-b.mp3", meta: Meta{Artist: "Artist B", Album: "Shared Album"}},
+			},
+			want: []string{"Artist A", "Artist B"},
+		},
+		{
+			name:    "explicit album artist wins",
+			enabled: true,
+			records: []scannedTrack{
+				{path: "/music/comp/song-a.mp3", meta: Meta{Artist: "Artist A", AlbumArtist: "Curator", Album: "Shared Album"}},
+				{path: "/music/comp/song-b.mp3", meta: Meta{Artist: "Artist B", Album: "Shared Album"}},
+			},
+			want: []string{"Curator", "Artist B"},
+		},
+		{
+			name:    "compilation flag wins",
+			enabled: false,
+			records: []scannedTrack{
+				{path: "/music/comp/song-a.mp3", meta: Meta{Artist: "Artist A", Album: "Shared Album", Compilation: true}},
+			},
+			want: []string{store.VariousArtists},
+		},
+		{
+			name:    "different directories stay separate",
+			enabled: true,
+			records: []scannedTrack{
+				{path: "/music/first/song.mp3", meta: Meta{Artist: "Artist A", Album: "Shared Album"}},
+				{path: "/music/second/song.mp3", meta: Meta{Artist: "Artist B", Album: "Shared Album"}},
+			},
+			want: []string{"Artist A", "Artist B"},
+		},
+		{
+			name:    "single artist group keeps track artist",
+			enabled: true,
+			records: []scannedTrack{
+				{path: "/music/album/song-a.mp3", meta: Meta{Artist: "Artist A", Album: "Shared Album"}},
+				{path: "/music/album/song-b.mp3", meta: Meta{Artist: "Artist A", Album: "Shared Album"}},
+			},
+			want: []string{"Artist A", "Artist A"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := resolveScanAlbumArtists(c.records, c.enabled); !reflect.DeepEqual(got, c.want) {
+				t.Fatalf("resolveScanAlbumArtists() = %#v, want %#v", got, c.want)
+			}
+		})
+	}
+}
+
 func TestCompilationFlag(t *testing.T) {
 	cases := []struct {
 		name string

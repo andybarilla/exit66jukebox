@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/andybarilla/exit66jukebox/internal/model"
 )
 
 func withLibraryPathHomeDir(t *testing.T, fn func() (string, error)) {
@@ -182,6 +184,54 @@ func TestLibraryConfigurationExpandsHomePaths(t *testing.T) {
 	}
 	if len(libs) != 1 || libs[0].Path != filepath.Join(home, "Library") {
 		t.Fatalf("libraries = %#v", libs)
+	}
+}
+
+func TestLibraryScanSettingsDefaultDisabledAndRoundTrip(t *testing.T) {
+	db := mustOpenMem(t)
+
+	settings, err := LoadLibraryScanSettings(db)
+	if err != nil {
+		t.Fatalf("load default scan settings: %v", err)
+	}
+	if settings.AssumeSameTitleFolderCompilations {
+		t.Fatal("same-title folder compilation heuristic should default to disabled")
+	}
+
+	settings.AssumeSameTitleFolderCompilations = true
+	if err := SaveLibraryScanSettings(db, settings); err != nil {
+		t.Fatalf("save scan settings: %v", err)
+	}
+	settings, err = LoadLibraryScanSettings(db)
+	if err != nil {
+		t.Fatalf("load saved scan settings: %v", err)
+	}
+	if !settings.AssumeSameTitleFolderCompilations {
+		t.Fatal("same-title folder compilation heuristic should round-trip enabled")
+	}
+}
+
+func TestLibraryScanSettingsChangeForcesLocalRescan(t *testing.T) {
+	db := mustOpenMem(t)
+	libraryID, err := EnsureLocalLibrary(db, "/music", "Music")
+	if err != nil {
+		t.Fatalf("ensure library: %v", err)
+	}
+	track := model.Track{Path: "/music/a.mp3", ModTime: 123, Size: 456, Title: "Song"}
+	if _, err := UpsertTrackInLibrary(db, libraryID, track, "Artist", "Artist", "Album"); err != nil {
+		t.Fatalf("upsert track: %v", err)
+	}
+
+	if err := SaveLibraryScanSettings(db, LibraryScanSettings{AssumeSameTitleFolderCompilations: true}); err != nil {
+		t.Fatalf("save scan settings: %v", err)
+	}
+
+	modTime, size, ok := TrackStampInLibrary(db, libraryID, track.Path)
+	if !ok {
+		t.Fatal("track should remain indexed")
+	}
+	if modTime != 0 || size != 0 {
+		t.Fatalf("scan setting change should force re-read, got mod_time=%d size=%d", modTime, size)
 	}
 }
 
