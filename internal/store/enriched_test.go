@@ -146,6 +146,74 @@ func TestListAlbumsEnriched(t *testing.T) {
 	}
 }
 
+func TestDisabledLocalLibraryHiddenFromBrowse(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+
+	enabledLibraryID, err := EnsureLocalLibrary(db, "/enabled", "Enabled")
+	if err != nil {
+		t.Fatalf("enabled library: %v", err)
+	}
+	disabledLibraryID, err := EnsureLocalLibrary(db, "/disabled", "Disabled")
+	if err != nil {
+		t.Fatalf("disabled library: %v", err)
+	}
+	if _, err := UpsertTrackInLibrary(db, disabledLibraryID, model.Track{Path: "/disabled/a.mp3", Title: "Hidden", TrackNo: 1, Genre: "Rock"}, "Hidden Artist", "", "Hidden Album"); err != nil {
+		t.Fatalf("hidden track: %v", err)
+	}
+	if _, err := UpsertTrackInLibrary(db, enabledLibraryID, model.Track{Path: "/enabled/a.mp3", Title: "Visible", TrackNo: 1, Genre: "Jazz"}, "Visible Artist", "", "Visible Album"); err != nil {
+		t.Fatalf("visible track: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE local_library SET enabled = 0 WHERE id = ?`, disabledLibraryID); err != nil {
+		t.Fatalf("disable library: %v", err)
+	}
+
+	tracks, err := ListTracksEnriched(db, "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListTracksEnriched: %v", err)
+	}
+	if len(tracks) != 1 || tracks[0].Title != "Visible" || tracks[0].Code != "A1" {
+		t.Fatalf("visible tracks = %+v, want only Visible as A1", tracks)
+	}
+	if byCode, _ := ListTracksEnriched(db, "B1", 50, 0); len(byCode) != 0 {
+		t.Fatalf("disabled album consumed crate-wall code B1: %+v", byCode)
+	}
+
+	albums, err := ListAlbumsEnriched(db, "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListAlbumsEnriched: %v", err)
+	}
+	if len(albums) != 1 || albums[0].Name != "Visible Album" || albums[0].TrackCount != 1 || albums[0].Letter != "A" {
+		t.Fatalf("visible albums = %+v, want only Visible Album with count 1 as A", albums)
+	}
+
+	artists, err := ListArtistsEnriched(db, "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListArtistsEnriched: %v", err)
+	}
+	if len(artists) != 1 || artists[0].Name != "Visible Artist" || artists[0].TrackCount != 1 || artists[0].AlbumCount != 1 {
+		t.Fatalf("visible artists = %+v, want only Visible Artist with counts 1/1", artists)
+	}
+
+	if n, _ := CountTracks(db, ""); n != 1 {
+		t.Fatalf("CountTracks = %d, want 1", n)
+	}
+	if n, _ := CountAlbums(db, ""); n != 1 {
+		t.Fatalf("CountAlbums = %d, want 1", n)
+	}
+	if n, _ := CountArtists(db, ""); n != 1 {
+		t.Fatalf("CountArtists = %d, want 1", n)
+	}
+
+	albumTracks, err := TracksByAlbumEnriched(db, albums[0].ID)
+	if err != nil {
+		t.Fatalf("TracksByAlbumEnriched: %v", err)
+	}
+	if len(albumTracks) != 1 || albumTracks[0].Title != "Visible" {
+		t.Fatalf("album tracks = %+v, want only Visible", albumTracks)
+	}
+}
+
 func TestListAlbumsEnrichedSearchMatchesArtist(t *testing.T) {
 	db := seedLibrary(t)
 	defer db.Close()

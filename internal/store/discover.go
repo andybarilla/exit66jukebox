@@ -36,7 +36,7 @@ func DiscoverTracks(db *sql.DB, opts DiscoverOpts) ([]model.Track, error) {
 	}
 
 	args := []any{}
-	where := "WHERE 1=1"
+	where := "WHERE " + visibleTrackPredicate
 	if opts.Genre != "" {
 		where += " AND t.genre = ?"
 		args = append(args, opts.Genre)
@@ -85,7 +85,7 @@ func DiscoverTracks(db *sql.DB, opts DiscoverOpts) ([]model.Track, error) {
 // GenreCounts returns non-empty genres with their track counts, ordered by name.
 func GenreCounts(db *sql.DB) ([]GenreCount, error) {
 	rows, err := db.Query(
-		`SELECT genre, count(*) FROM track WHERE genre <> '' GROUP BY genre ORDER BY genre`)
+		`SELECT t.genre, count(*) FROM track t WHERE t.genre <> '' AND ` + visibleTrackPredicate + ` GROUP BY t.genre ORDER BY t.genre`)
 	if err != nil {
 		return nil, err
 	}

@@ -11,8 +11,11 @@ import (
 // in sort_key order) plus its artist name and track count. Filters are applied
 // to the CTE's output, so a row's rank stays global even under a search.
 const albumRankCTE = `
-WITH track_counts AS (
-    SELECT album_id, count(*) AS c FROM track GROUP BY album_id
+WITH visible_track AS (
+    SELECT t.* FROM track t WHERE ` + visibleTrackPredicate + `
+),
+track_counts AS (
+    SELECT album_id, count(*) AS c FROM visible_track GROUP BY album_id
 ),
 ranked_album AS (
     SELECT a.id AS album_id, a.name AS album_name, a.artist_id,
@@ -20,7 +23,7 @@ ranked_album AS (
            ROW_NUMBER() OVER (ORDER BY a.sort_key, a.id) - 1 AS rank
     FROM album a
     JOIN artist ar ON ar.id = a.artist_id
-    LEFT JOIN track_counts tc ON tc.album_id = a.id
+    JOIN track_counts tc ON tc.album_id = a.id
 )`
 
 // The displayed artist name comes from the track's own artist (ta), not the
@@ -116,10 +119,10 @@ func ListTracksEnriched(db *sql.DB, search string, limit, offset int) ([]model.E
 // bare slot code.
 func trackFilter(search string) (string, []any) {
 	if rank, trackNo, ok := parseCode(search); ok {
-		return "WHERE r.rank = ? AND t.track_no = ?", []any{rank, trackNo}
+		return "WHERE " + visibleTrackPredicate + " AND r.rank = ? AND t.track_no = ?", []any{rank, trackNo}
 	}
 	like := "%" + search + "%"
-	return "WHERE t.title LIKE ? OR r.artist_name LIKE ? OR r.album_name LIKE ?",
+	return "WHERE " + visibleTrackPredicate + " AND (t.title LIKE ? OR r.artist_name LIKE ? OR r.album_name LIKE ?)",
 		[]any{like, like, like}
 }
 
@@ -128,7 +131,7 @@ func TracksByAlbumEnriched(db *sql.DB, albumID int64) ([]model.EnrichedTrack, er
 	rows, err := db.Query(albumRankCTE+`
 		SELECT `+trackSelectCols+`
 		FROM track t JOIN ranked_album r ON r.album_id = t.album_id`+trackArtistJoin+`
-		WHERE t.album_id = ?
+		WHERE t.album_id = ? AND `+visibleTrackPredicate+`
 		ORDER BY t.track_no, t.title`, albumID)
 	if err != nil {
 		return nil, err
@@ -169,9 +172,13 @@ func EnrichTracks(db *sql.DB, tracks []model.Track) ([]model.EnrichedTrack, erro
 		} else {
 			e.ArtistName = "Unknown"
 		}
-		if info, ok := ranks[t.AlbumID]; ok {
+		if info, ok := ranks[t.AlbumID]; ok && info.rank >= 0 {
 			e.Code = slotCode(info.rank, t.TrackNo)
 			e.Tone = tone(info.rank)
+			e.AlbumName = info.albumName
+		} else if info, ok := ranks[t.AlbumID]; ok {
+			e.Code = "··"
+			e.Tone = tones[1]
 			e.AlbumName = info.albumName
 		} else {
 			e.Code = "··"
@@ -252,11 +259,10 @@ func albumRanks(db *sql.DB, albumIDs []int64) (map[int64]rankInfo, error) {
 	for i, id := range albumIDs {
 		args[i] = id
 	}
-	rows, err := db.Query(`
-		SELECT a.id, a.name,
-		       (SELECT count(*) FROM album b
-		        WHERE b.sort_key < a.sort_key OR (b.sort_key = a.sort_key AND b.id < a.id)) AS rank
+	rows, err := db.Query(albumRankCTE+`
+		SELECT a.id, a.name, r.rank
 		FROM album a
+		LEFT JOIN ranked_album r ON r.album_id = a.id
 		WHERE a.id IN (`+placeholders+`)`, args...)
 	if err != nil {
 		return nil, err
@@ -265,8 +271,14 @@ func albumRanks(db *sql.DB, albumIDs []int64) (map[int64]rankInfo, error) {
 	for rows.Next() {
 		var id int64
 		var info rankInfo
-		if err := rows.Scan(&id, &info.albumName, &info.rank); err != nil {
+		var rank sql.NullInt64
+		if err := rows.Scan(&id, &info.albumName, &rank); err != nil {
 			return nil, err
+		}
+		if rank.Valid {
+			info.rank = int(rank.Int64)
+		} else {
+			info.rank = -1
 		}
 		out[id] = info
 	}
@@ -278,10 +290,11 @@ func albumRanks(db *sql.DB, albumIDs []int64) (map[int64]rankInfo, error) {
 func ListArtistsEnriched(db *sql.DB, search string, limit, offset int) ([]model.EnrichedArtist, error) {
 	rows, err := db.Query(`
 		SELECT ar.id, ar.name,
-		       (SELECT count(*) FROM album al WHERE al.artist_id = ar.id),
-		       (SELECT count(*) FROM track t WHERE t.artist_id = ar.id)
+		       (SELECT count(DISTINCT t.album_id) FROM track t WHERE t.artist_id = ar.id AND `+visibleTrackPredicate+`),
+		       (SELECT count(*) FROM track t WHERE t.artist_id = ar.id AND `+visibleTrackPredicate+`)
 		FROM artist ar
 		WHERE ar.name LIKE ? AND ar.name <> ?
+		  AND EXISTS (SELECT 1 FROM track t WHERE t.artist_id = ar.id AND `+visibleTrackPredicate+`)
 		ORDER BY ar.sort_key, ar.id
 		LIMIT ? OFFSET ?`, "%"+search+"%", VariousArtists, pageLimit(limit), offset)
 	if err != nil {
@@ -305,7 +318,8 @@ func CountAlbums(db *sql.DB, search string) (int, error) {
 	var n int
 	err := db.QueryRow(`
 		SELECT count(*) FROM album a JOIN artist ar ON ar.id = a.artist_id
-		WHERE a.name LIKE ? OR ar.name LIKE ?`, like, like).Scan(&n)
+		WHERE (a.name LIKE ? OR ar.name LIKE ?)
+		  AND EXISTS (SELECT 1 FROM track t WHERE t.album_id = a.id AND `+visibleTrackPredicate+`)`, like, like).Scan(&n)
 	return n, err
 }
 
@@ -315,7 +329,7 @@ func CountTracks(db *sql.DB, search string) (int, error) {
 	if rank, trackNo, ok := parseCode(search); ok {
 		err := db.QueryRow(albumRankCTE+`
 			SELECT count(*) FROM track t JOIN ranked_album r ON r.album_id = t.album_id
-			WHERE r.rank = ? AND t.track_no = ?`, rank, trackNo).Scan(&n)
+			WHERE `+visibleTrackPredicate+` AND r.rank = ? AND t.track_no = ?`, rank, trackNo).Scan(&n)
 		return n, err
 	}
 	like := "%" + search + "%"
@@ -323,7 +337,7 @@ func CountTracks(db *sql.DB, search string) (int, error) {
 		SELECT count(*) FROM track t
 		JOIN album a ON a.id = t.album_id
 		JOIN artist ar ON ar.id = a.artist_id
-		WHERE t.title LIKE ? OR ar.name LIKE ? OR a.name LIKE ?`, like, like, like).Scan(&n)
+		WHERE `+visibleTrackPredicate+` AND (t.title LIKE ? OR ar.name LIKE ? OR a.name LIKE ?)`, like, like, like).Scan(&n)
 	return n, err
 }
 
@@ -331,7 +345,9 @@ func CountTracks(db *sql.DB, search string) (int, error) {
 func CountArtists(db *sql.DB, search string) (int, error) {
 	var n int
 	err := db.QueryRow(
-		`SELECT count(*) FROM artist WHERE name LIKE ? AND name <> ?`,
+		`SELECT count(*) FROM artist ar
+		 WHERE ar.name LIKE ? AND ar.name <> ?
+		   AND EXISTS (SELECT 1 FROM track t WHERE t.artist_id = ar.id AND `+visibleTrackPredicate+`)`,
 		"%"+search+"%", VariousArtists).Scan(&n)
 	return n, err
 }

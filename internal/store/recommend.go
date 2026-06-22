@@ -31,7 +31,7 @@ func TracksByRecordingMBIDs(db *sql.DB, mbids []string) ([]model.Track, error) {
 		args[i] = m
 	}
 	rows, err := db.Query(
-		`SELECT `+trackColumns+`, t.mbid FROM track t WHERE t.mbid IN (`+placeholders+`)`, args...)
+		`SELECT `+trackColumns+`, t.mbid FROM track t WHERE `+visibleTrackPredicate+` AND t.mbid IN (`+placeholders+`)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +67,7 @@ func TopArtists(db *sql.DB, limit int) ([]model.Artist, error) {
 		SELECT ar.id, ar.name, ar.mbid
 		FROM artist ar
 		JOIN track t ON t.artist_id = ar.id
+		WHERE `+visibleTrackPredicate+`
 		GROUP BY ar.id
 		HAVING SUM(t.play_count) > 0
 		ORDER BY SUM(t.play_count) DESC, ar.id ASC
@@ -122,7 +123,7 @@ func TracksBySimilarArtists(db *sql.DB, names, mbids []string, perArtist int) ([
 			                          ORDER BY t.play_count ASC, t.id ASC) AS rn
 			FROM track t
 			JOIN artist ar ON ar.id = t.artist_id
-			WHERE `+strings.Join(clauses, " OR ")+`
+			WHERE `+visibleTrackPredicate+` AND (`+strings.Join(clauses, " OR ")+`)
 		) WHERE rn <= ?
 		ORDER BY artist_id ASC, play_count ASC, id ASC`, args...)
 	if err != nil {
