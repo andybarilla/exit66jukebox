@@ -66,6 +66,9 @@ func (m *Manager) runHub() {
 }
 
 func (m *Manager) runPeer() {
+	if m.HubAddr != "" {
+		go m.runMember()
+	}
 	go m.runPeerListener()
 	go m.runPeerDialer()
 }
