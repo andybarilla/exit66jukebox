@@ -68,13 +68,13 @@ func (s Services) LastfmConfigured() bool {
 	return s.LastfmAPIKey != "" && s.LastfmAPISecret != ""
 }
 
-// Federation holds peer-sharing config. Role is "hub", "member", or "" (off).
+// Federation holds peer-sharing config. Role is "hub", "member", "peer", or "" (off).
 // Like Services, the token comes from the environment, never a flag, so it
 // doesn't leak via the process list. HubAddr is the public host:port a member
 // dials; Listen is the hub's local listen address. PeerID is this instance's
 // stable identifier within the federation.
 type Federation struct {
-	Role    string // "hub" | "member" | ""
+	Role    string // "hub" | "member" | "peer" | ""
 	HubAddr string // members only: hub's public address to dial
 	Listen  string // hub only: local address to listen on (e.g. ":8443")
 	Token   string // shared secret presented at registration
@@ -82,7 +82,7 @@ type Federation struct {
 }
 
 // Enabled reports whether federation is configured.
-func (f Federation) Enabled() bool { return f.Role == "hub" || f.Role == "member" }
+func (f Federation) Enabled() bool { return f.Role == "hub" || f.Role == "member" || f.Role == "peer" }
 
 func federationFromEnv() Federation {
 	return Federation{
