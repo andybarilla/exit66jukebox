@@ -32,7 +32,7 @@ export async function requestTrack(trackId) {
   return r.json();
 }
 export async function nextTrack() {
-  const r = await fetch(`/api/streams/${SESSION}/next`);
+  const r = await fetch(`/api/streams/${SESSION}/next`, { method: 'POST' });
   return r.json();
 }
 export function audioURL(trackId) {
@@ -92,7 +92,7 @@ export async function addManualSonos(ip) {
 }
 // nextHouse advances the shared house queue (the Sonos cast surface's Next).
 export async function nextHouse() {
-  const r = await fetch(`/api/streams/${HOUSE}/next`);
+  const r = await fetch(`/api/streams/${HOUSE}/next`, { method: 'POST' });
   return r.json();
 }
 

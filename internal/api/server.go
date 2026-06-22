@@ -183,7 +183,7 @@ func (s *Server) Handler() http.Handler {
 	// next/remove/clear/shuffle mutate the queue. They're gated only for the shared
 	// house stream (requireAdminShared); each guest's private "me" stream stays open
 	// so they can always drive their own queue.
-	mux.HandleFunc("GET /api/streams/{id}/next", s.requireAdminShared(s.nextTrack))
+	mux.HandleFunc("POST /api/streams/{id}/next", s.requireAdminShared(s.nextTrack))
 	mux.HandleFunc("POST /api/streams/{id}/requests", s.request)
 	mux.HandleFunc("DELETE /api/streams/{id}/requests/{trackID}", s.requireAdminShared(s.removeRequest))
 	mux.HandleFunc("DELETE /api/streams/{id}/requests", s.requireAdminShared(s.clearRequests))

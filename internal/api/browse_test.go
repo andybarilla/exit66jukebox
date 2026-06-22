@@ -147,7 +147,8 @@ func TestNextTrackEnriched(t *testing.T) {
 	srv.Handler().ServeHTTP(httptest.NewRecorder(), req)
 
 	// The /next payload backs now-playing; it must carry the slot code/tone/names.
-	rec := get(t, srv, "/api/streams/sess/next")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/streams/sess/next", nil))
 	body := rec.Body.String()
 	if !strings.Contains(body, `"code":"B1"`) || !strings.Contains(body, `"tone":"magenta"`) {
 		t.Fatalf("next track not enriched: %s", body)

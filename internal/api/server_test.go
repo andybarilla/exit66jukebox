@@ -162,7 +162,7 @@ func TestRequestThenNextRoundTrip(t *testing.T) {
 		t.Fatalf("request status: %d", rec.Code)
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/api/streams/sess/next", nil)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/streams/sess/next", nil)
 	rec2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {
@@ -170,5 +170,37 @@ func TestRequestThenNextRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(rec2.Body.String(), "\"ok\":true") {
 		t.Fatalf("expected ok:true, got %s", rec2.Body.String())
+	}
+}
+
+func TestGetNextDoesNotAdvanceQueue(t *testing.T) {
+	srv, _ := newTestServer(t)
+	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
+
+	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}}
+	req := httptest.NewRequest(http.MethodPost, "/api/streams/sess/requests",
+		strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("request status: %d", rec.Code)
+	}
+
+	getNext := httptest.NewRequest(http.MethodGet, "/api/streams/sess/next", nil)
+	getNextRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(getNextRec, getNext)
+	if getNextRec.Code == http.StatusOK {
+		t.Fatalf("GET next should not advance queue, got status %d and body %s", getNextRec.Code, getNextRec.Body.String())
+	}
+
+	postNext := httptest.NewRequest(http.MethodPost, "/api/streams/sess/next", nil)
+	postNextRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(postNextRec, postNext)
+	if postNextRec.Code != http.StatusOK {
+		t.Fatalf("POST next status: %d", postNextRec.Code)
+	}
+	if !strings.Contains(postNextRec.Body.String(), "\"ok\":true") {
+		t.Fatalf("expected POST next to advance queued track, got %s", postNextRec.Body.String())
 	}
 }

@@ -59,7 +59,7 @@
     if (advancing) return;
     advancing = true;
     try {
-      const r = await nextTrack(); // GET /api/streams/me/next (pops server-side)
+      const r = await nextTrack(); // POST /api/streams/me/next (pops server-side)
       if (r && r.ok && r.track) {
         s.setNowPlaying('me', normalize(r.track));
         s.setProgress('me', 0);
