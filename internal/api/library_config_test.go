@@ -81,6 +81,29 @@ func TestAdminLibrariesSavesAndReturnsScanSettings(t *testing.T) {
 	}
 }
 
+func TestAdminLibrariesSaveWithoutScanPreservesScanSettings(t *testing.T) {
+	s, db := newTestServer(t)
+	if err := store.SaveLibraryScanSettings(db, store.LibraryScanSettings{AssumeSameTitleFolderCompilations: true}); err != nil {
+		t.Fatalf("save existing scan settings: %v", err)
+	}
+	body := `{"local_libraries":[{"path":"/music","enabled":true}],"federation":{"enabled":false}}`
+	req := adminReq(t, db, http.MethodPost, "/api/admin/libraries", body)
+	rec := httptest.NewRecorder()
+
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save libraries without scan: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	settings, err := store.LoadLibraryScanSettings(db)
+	if err != nil {
+		t.Fatalf("load scan settings: %v", err)
+	}
+	if !settings.AssumeSameTitleFolderCompilations {
+		t.Fatal("omitted scan field should preserve existing enabled setting")
+	}
+}
+
 func TestAdminLibrariesSaveRejectsInvalidFederationWithoutSavingLibraries(t *testing.T) {
 	s, db := newTestServer(t)
 	if err := store.SaveLocalLibraries(db, []store.LocalLibrary{{Path: "/original", Enabled: true}}); err != nil {

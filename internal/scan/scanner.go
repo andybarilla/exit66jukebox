@@ -91,7 +91,7 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 				mt, sz := info.ModTime().Unix(), info.Size()
 				omt, osz, ok := store.TrackStampInLibrary(db, libraryID, p)
 				if ok && omt == mt && osz == sz {
-					jobs <- job{libraryID: libraryID, path: p, exists: true}
+					jobs <- job{libraryID: libraryID, path: p, modTime: mt, size: sz, exists: true}
 					return nil
 				}
 				jobs <- job{libraryID: libraryID, path: p, modTime: mt, size: sz, wasIndexed: ok}
@@ -117,7 +117,7 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				if j.exists {
+				if j.exists && !scanSettings.AssumeSameTitleFolderCompilations {
 					p.skipped.Add(1)
 					continue
 				}
@@ -150,7 +150,9 @@ func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) 
 			p.failed.Add(1)
 			continue
 		}
-		if scannedJob.job.wasIndexed {
+		if scannedJob.job.exists {
+			p.skipped.Add(1)
+		} else if scannedJob.job.wasIndexed {
 			p.updated.Add(1)
 		} else {
 			p.added.Add(1)
