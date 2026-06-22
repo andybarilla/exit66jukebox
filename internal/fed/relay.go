@@ -91,13 +91,17 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type memberResolver struct{ m *Manager }
 
 func (mr *memberResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Request, peer string, remoteID int64) {
-	hc := mr.m.HubClient()
-	if hc == nil {
+	hubPeer := mr.m.Registry.Get("@hub")
+	if hubPeer == nil || hubPeer.Client == nil {
 		http.Error(w, "hub offline", http.StatusServiceUnavailable)
 		return
 	}
+	baseURL := hubPeer.BaseURL
+	if baseURL == "" {
+		baseURL = "http://@hub"
+	}
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet,
-		fmt.Sprintf("http://@hub/fed/audio/%s/%d", peer, remoteID), nil)
+		fmt.Sprintf("%s/fed/audio/%s/%d", baseURL, peer, remoteID), nil)
 	if err != nil {
 		http.Error(w, "build request", http.StatusInternalServerError)
 		return
@@ -105,7 +109,7 @@ func (mr *memberResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Reques
 	if rng := r.Header.Get("Range"); rng != "" {
 		req.Header.Set("Range", rng)
 	}
-	resp, err := hc.Do(req)
+	resp, err := hubPeer.Client.Do(req)
 	if err != nil {
 		http.Error(w, "hub fetch failed", http.StatusBadGateway)
 		return
@@ -131,11 +135,18 @@ func (hr *hubResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Request, 
 	hr.relay.ServeHTTP(w, req)
 }
 
-type directResolver struct{ reg *Registry }
+type directResolver struct {
+	reg *Registry
+	hub *memberResolver
+}
 
 func (dr *directResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Request, peer string, remoteID int64) {
 	p := dr.reg.Get(peer)
 	if p == nil || p.Client == nil {
+		if dr.hub != nil {
+			dr.hub.ServeRemoteAudio(w, r, peer, remoteID)
+			return
+		}
 		http.Error(w, "peer offline", http.StatusServiceUnavailable)
 		return
 	}
@@ -154,6 +165,10 @@ func (dr *directResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Reques
 	}
 	resp, err := p.Client.Do(req)
 	if err != nil {
+		if dr.hub != nil {
+			dr.hub.ServeRemoteAudio(w, r, peer, remoteID)
+			return
+		}
 		http.Error(w, "peer fetch failed", http.StatusBadGateway)
 		return
 	}
@@ -174,7 +189,7 @@ func NewResolverFor(m *Manager) Resolver {
 		return &hubResolver{relay: m.Relay}
 	}
 	if m.Role == "peer" {
-		return &directResolver{reg: m.Registry}
+		return &directResolver{reg: m.Registry, hub: &memberResolver{m: m}}
 	}
 	return &memberResolver{m: m}
 }

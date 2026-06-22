@@ -66,6 +66,9 @@ func (m *Manager) runHub() {
 }
 
 func (m *Manager) runPeer() {
+	if m.HubAddr != "" {
+		go m.runMember()
+	}
 	go m.runPeerListener()
 	go m.runPeerDialer()
 }
@@ -111,13 +114,17 @@ func (m *Manager) servePeerConn(conn net.Conn) {
 
 func (m *Manager) runPeerDialer() {
 	for {
-		for peerID, addr := range m.peerAddrs() {
-			if m.Registry.Get(peerID) != nil {
-				continue
-			}
-			go m.dialPeer(peerID, addr)
-		}
+		m.runPeerDialerOnce()
 		time.Sleep(30 * time.Second)
+	}
+}
+
+func (m *Manager) runPeerDialerOnce() {
+	for peerID, addr := range m.peerAddrs() {
+		if m.Registry.Get(peerID) != nil {
+			continue
+		}
+		go m.dialPeer(peerID, addr)
 	}
 }
 

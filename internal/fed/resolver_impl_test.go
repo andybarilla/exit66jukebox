@@ -66,6 +66,9 @@ func TestPeerResolverStreamsDirectAudioWithRange(t *testing.T) {
 			t.Fatalf("range header was not forwarded: %q", r.Header.Get("Range"))
 		}
 		w.Header().Set("Content-Range", "bytes 2-5/8")
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Type", "audio/mpeg")
+		w.Header().Set("Content-Length", "4")
 		w.WriteHeader(http.StatusPartialContent)
 		io.WriteString(w, "CDEF")
 	}))
@@ -85,5 +88,56 @@ func TestPeerResolverStreamsDirectAudioWithRange(t *testing.T) {
 	}
 	if rec.Header().Get("Content-Range") != "bytes 2-5/8" {
 		t.Fatalf("content-range not preserved: %q", rec.Header().Get("Content-Range"))
+	}
+	if rec.Header().Get("Accept-Ranges") != "bytes" {
+		t.Fatalf("accept-ranges not preserved: %q", rec.Header().Get("Accept-Ranges"))
+	}
+	if rec.Header().Get("Content-Type") != "audio/mpeg" {
+		t.Fatalf("content-type not preserved: %q", rec.Header().Get("Content-Type"))
+	}
+	if rec.Header().Get("Content-Length") != "4" {
+		t.Fatalf("content-length not preserved: %q", rec.Header().Get("Content-Length"))
+	}
+}
+
+func TestPeerResolverFallsBackToHubWhenDirectPeerOffline(t *testing.T) {
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fed/audio/peer-a/42" {
+			t.Fatalf("unexpected hub path: %s", r.URL.Path)
+		}
+		io.WriteString(w, "RELAY")
+	}))
+	defer hub.Close()
+
+	reg := NewRegistry()
+	reg.put(&Peer{ID: "@hub", Client: hub.Client(), BaseURL: hub.URL})
+	resolver := NewResolverFor(&Manager{Role: "peer", Registry: reg})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tracks/9/audio", nil)
+
+	resolver.ServeRemoteAudio(rec, req, "peer-a", 42)
+
+	if rec.Code != http.StatusOK || rec.Body.String() != "RELAY" {
+		t.Fatalf("fallback audio = code %d body %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPeerResolverFallsBackToHubWhenDirectFetchFails(t *testing.T) {
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "RELAY")
+	}))
+	defer hub.Close()
+
+	reg := NewRegistry()
+	reg.put(&Peer{ID: "peer-a", Client: http.DefaultClient, BaseURL: "http://127.0.0.1:1"})
+	reg.put(&Peer{ID: "@hub", Client: hub.Client(), BaseURL: hub.URL})
+	resolver := NewResolverFor(&Manager{Role: "peer", Registry: reg})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tracks/9/audio", nil)
+
+	resolver.ServeRemoteAudio(rec, req, "peer-a", 42)
+
+	if rec.Code != http.StatusOK || rec.Body.String() != "RELAY" {
+		t.Fatalf("fallback audio = code %d body %q", rec.Code, rec.Body.String())
 	}
 }

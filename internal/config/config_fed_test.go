@@ -26,3 +26,11 @@ func TestFederationDisabledWhenRoleUnset(t *testing.T) {
 		t.Fatal("federation should be disabled when role unset")
 	}
 }
+
+func TestFederationPeerRoleEnabled(t *testing.T) {
+	t.Setenv("EXIT66_FED_ROLE", "peer")
+
+	if !federationFromEnv().Enabled() {
+		t.Fatal("peer role should enable federation")
+	}
+}
