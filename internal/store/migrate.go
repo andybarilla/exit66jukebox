@@ -24,6 +24,9 @@ func columnExists(db *sql.DB, table, col string) (bool, error) {
 // schema.sql cannot add columns to a pre-existing table, so additive column
 // changes are applied here.
 func migrate(db *sql.DB) error {
+	if err := migrateEmailVerificationSchema(db); err != nil {
+		return err
+	}
 	has, err := columnExists(db, "track", "added_at")
 	if err != nil {
 		return err
@@ -163,6 +166,46 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	return migrateLibraryVersion(db)
+}
+
+func migrateEmailVerificationSchema(db *sql.DB) error {
+	missingVerificationTable, err := tableMissing(db, "email_verification")
+	if err != nil {
+		return err
+	}
+	has, err := columnExists(db, "user", "email_verified_at")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE user ADD COLUMN email_verified_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	if !has || missingVerificationTable {
+		if _, err := db.Exec(`UPDATE user SET email_verified_at = strftime('%s','now') WHERE email_verified_at = 0`); err != nil {
+			return err
+		}
+	}
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS email_verification (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			token_hash  TEXT NOT NULL UNIQUE,
+			user_id     INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			created_at  INTEGER NOT NULL,
+			expires_at  INTEGER NOT NULL,
+			used_at     INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE INDEX IF NOT EXISTS idx_email_verification_user ON email_verification(user_id);
+		CREATE INDEX IF NOT EXISTS idx_email_verification_expires ON email_verification(expires_at);
+	`)
+	return err
+}
+
+func tableMissing(db *sql.DB, table string) (bool, error) {
+	var n int
+	err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n)
+	return n == 0, err
 }
 
 func migrateMFASchema(db *sql.DB) error {

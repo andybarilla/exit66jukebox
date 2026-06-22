@@ -260,6 +260,9 @@ func main() {
 				log.Printf("password reset email to %s: %v", to, err)
 			}
 		})
+		srv.SetVerificationEmailer(func(to, link string) error {
+			return mailer.SendVerification(to, link)
+		})
 		log.Print("SMTP invite email enabled")
 	}
 	srv.RegisterStream(houseID, houseHub, houseBus, houseNP)

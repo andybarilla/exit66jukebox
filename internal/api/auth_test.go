@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -214,11 +215,120 @@ func TestSignupBootstrapsAdmin(t *testing.T) {
 	if !u.IsAdmin {
 		t.Fatal("first user not admin")
 	}
+	if u.EmailVerifiedAt == 0 {
+		t.Fatal("first admin should be verified immediately")
+	}
 	rec2 := httptest.NewRecorder()
 	body2 := `{"email":"c@d.com","display_name":"C","password":"pw123456"}`
 	s.signup(rec2, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body2)))
 	if rec2.Code == 200 {
 		t.Fatal("second signup allowed while disabled")
+	}
+}
+
+func TestOpenSignupCreatesUnverifiedUserAndSendsVerificationEmail(t *testing.T) {
+	s, db := newTestServer(t)
+	_, _ = store.CreateUser(db, "admin@example.com", "Admin", "h", true, true)
+	if err := store.SetSignupEnabled(db, true); err != nil {
+		t.Fatalf("enable signup: %v", err)
+	}
+	s.SetPublicOrigin("https://jukebox.example.com")
+	var sentTo, sentLink string
+	s.SetVerificationEmailer(func(to, link string) error {
+		sentTo, sentLink = to, link
+		return nil
+	})
+
+	rec := httptest.NewRecorder()
+	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(`{"email":"open@example.com","display_name":"Open","password":"pw123456"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("signup: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	user, ok, err := store.GetUserByEmail(db, "open@example.com")
+	if err != nil || !ok {
+		t.Fatalf("load user: ok=%v err=%v", ok, err)
+	}
+	if user.EmailVerifiedAt != 0 {
+		t.Fatalf("open signup should be unverified, got %d", user.EmailVerifiedAt)
+	}
+	if sentTo != "open@example.com" || !strings.HasPrefix(sentLink, "https://jukebox.example.com/verify/") {
+		t.Fatalf("verification email not sent: to=%q link=%q", sentTo, sentLink)
+	}
+}
+
+func TestOpenSignupFailsWithoutVerificationEmailer(t *testing.T) {
+	s, db := newTestServer(t)
+	_, _ = store.CreateUser(db, "admin@example.com", "Admin", "h", true, true)
+	if err := store.SetSignupEnabled(db, true); err != nil {
+		t.Fatalf("enable signup: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(`{"email":"open@example.com","display_name":"Open","password":"pw123456"}`)))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("signup without emailer: want 503, got %d (%s)", rec.Code, rec.Body)
+	}
+	if _, ok, err := store.GetUserByEmail(db, "open@example.com"); err != nil || ok {
+		t.Fatalf("unreachable account was created: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestOpenSignupFailsWhenVerificationEmailCannotSend(t *testing.T) {
+	s, db := newTestServer(t)
+	_, _ = store.CreateUser(db, "admin@example.com", "Admin", "h", true, true)
+	if err := store.SetSignupEnabled(db, true); err != nil {
+		t.Fatalf("enable signup: %v", err)
+	}
+	s.SetVerificationEmailer(func(to, link string) error { return errors.New("smtp down") })
+
+	rec := httptest.NewRecorder()
+	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(`{"email":"open@example.com","display_name":"Open","password":"pw123456"}`)))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("signup on email failure: want 503, got %d (%s)", rec.Code, rec.Body)
+	}
+	if _, ok, err := store.GetUserByEmail(db, "open@example.com"); err != nil || ok {
+		t.Fatalf("unreachable account was created: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestUnverifiedOpenSignupCannotLoginUntilVerified(t *testing.T) {
+	s, db := newTestServer(t)
+	hash, _ := auth.HashPassword("pw123456")
+	userID, _ := store.CreateUser(db, "open@example.com", "Open", hash, false, false)
+	token, _ := store.CreateEmailVerification(db, userID, 4_000_000_000)
+
+	blocked := httptest.NewRecorder()
+	s.login(blocked, httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"email":"open@example.com","password":"pw123456"}`)))
+	if blocked.Code != http.StatusForbidden || !strings.Contains(blocked.Body.String(), "verify") {
+		t.Fatalf("unverified login: got %d (%s)", blocked.Code, blocked.Body)
+	}
+
+	verified := httptest.NewRecorder()
+	s.verifyEmail(verified, httptest.NewRequest("POST", "/api/auth/verify-email", strings.NewReader(`{"token":"`+token+`"}`)))
+	if verified.Code != http.StatusOK {
+		t.Fatalf("verify email: want 200, got %d (%s)", verified.Code, verified.Body)
+	}
+	allowed := httptest.NewRecorder()
+	s.login(allowed, httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"email":"open@example.com","password":"pw123456"}`)))
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("verified login: want 200, got %d (%s)", allowed.Code, allowed.Body)
+	}
+}
+
+func TestVerifyEmailEndpointRejectsBadTokensAndPassesMiddleware(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.RequireAuthMiddleware(s.Handler())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/auth/verify-email", strings.NewReader(`{"token":"forged"}`))
+	req.RemoteAddr = "203.0.113.9:1"
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatal("verify email endpoint was blocked by production middleware")
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("forged token: want 400, got %d (%s)", rec.Code, rec.Body)
 	}
 }
 

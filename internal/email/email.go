@@ -42,6 +42,10 @@ func (s *Sender) SendPasswordReset(to, link string) error {
 	return s.sendLink(to, link, passwordResetMessage)
 }
 
+func (s *Sender) SendVerification(to, link string) error {
+	return s.sendLink(to, link, verificationMessage)
+}
+
 func (s *Sender) sendLink(to, link string, buildMessage func(from, to, link string) []byte) error {
 	if !s.Enabled() {
 		return nil
@@ -75,5 +79,12 @@ func passwordResetMessage(from, to, link string) []byte {
 	return []byte(fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: Reset your Exit 66 Jukebox password\r\n\r\n"+
 			"Open this link within 1 hour to set a new password:\r\n\r\n%s\r\n",
+		from, to, link))
+}
+
+func verificationMessage(from, to, link string) []byte {
+	return []byte(fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: Verify your Exit 66 Jukebox email\r\n\r\n"+
+			"Open this link to verify your email address:\r\n\r\n%s\r\n",
 		from, to, link))
 }

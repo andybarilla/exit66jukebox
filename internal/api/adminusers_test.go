@@ -71,6 +71,39 @@ func TestAdminCreatePasswordResetReturnsLink(t *testing.T) {
 	}
 }
 
+func TestAdminCreateEmailVerificationReturnsLinkForUnverifiedUser(t *testing.T) {
+	s, db := newTestServer(t)
+	userID, err := store.CreateUser(db, "manual@example.com", "Manual", "h", false, false)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, adminReq(t, db, "POST", "/api/admin/users/"+strconv.FormatInt(userID, 10)+"/email-verification", ""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verification link: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["email"] != "manual@example.com" || !strings.Contains(body["link"], "/verify/") {
+		t.Fatalf("verification link response mismatch: %#v", body)
+	}
+}
+
+func TestAdminCreateEmailVerificationRejectsVerifiedUser(t *testing.T) {
+	s, db := newTestServer(t)
+	userID, err := store.CreateUser(db, "verified@example.com", "Verified", "h", false, true)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, adminReq(t, db, "POST", "/api/admin/users/"+strconv.FormatInt(userID, 10)+"/email-verification", ""))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("verified user: want 400, got %d (%s)", rec.Code, rec.Body)
+	}
+}
+
 func TestAdminSettingsToggle(t *testing.T) {
 	s, db := newTestServer(t)
 	req := adminReq(t, db, "POST", "/api/admin/settings", `{"signup_enabled":true,"guest_access_enabled":true}`)

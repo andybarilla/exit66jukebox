@@ -18,6 +18,7 @@
   import Signup from './lib/components/Signup.svelte';
   import InviteAccept from './lib/components/InviteAccept.svelte';
   import PasswordReset from './lib/components/PasswordReset.svelte';
+  import VerifyEmail from './lib/components/VerifyEmail.svelte';
   import AdminPanel from './lib/components/AdminPanel.svelte';
 
   const s = createStore();
@@ -27,9 +28,11 @@
   let showSignup = $state(false);
   let showAuth = $state(false);
   let adminPanelOpen = $state(false);
-  const onInvitePath = window.location.pathname.startsWith('/invite/');
-  const onResetPath = window.location.pathname.startsWith('/reset-password/');
-  let tickTimer, resizeHandler;
+  let currentPath = $state(window.location.pathname);
+  const onInvitePath = $derived(currentPath.startsWith('/invite/'));
+  const onResetPath = $derived(currentPath.startsWith('/reset-password/'));
+  const onVerifyPath = $derived(currentPath.startsWith('/verify/'));
+  let tickTimer, resizeHandler, popstateHandler;
 
   // Active now-playing slice + derived progress %.
   const np = $derived(s.nowPlaying);
@@ -116,6 +119,11 @@
     showAuth = false;
   }
 
+  function replaceRoute(path) {
+    window.history.replaceState(null, '', path);
+    currentPath = window.location.pathname;
+  }
+
   onMount(async () => {
     // Lightweight auth/config check first; only run heavy loads once access is
     // granted (logged in or guest access on), so they never 401 on the gate.
@@ -123,7 +131,9 @@
     if (s.me || s.config.guestAccess) await s.start();
     s.onResize();
     resizeHandler = () => s.onResize();
+    popstateHandler = () => { currentPath = window.location.pathname; };
     window.addEventListener('resize', resizeHandler);
+    window.addEventListener('popstate', popstateHandler);
     if (audio) audio.volume = volume / 100;
     applyStreamAudio();
     // 1s tick: personal reads exact audio time; house approximates.
@@ -146,6 +156,7 @@
   onDestroy(() => {
     clearInterval(tickTimer);
     window.removeEventListener('resize', resizeHandler);
+    window.removeEventListener('popstate', popstateHandler);
     s.teardown();
     if (audio) { audio.pause(); audio.src = ''; }
   });
@@ -193,9 +204,11 @@
   <!-- waiting for the /me round-trip — render a minimal splash -->
   <div style="flex:1;"></div>
 {:else if onInvitePath}
-  <InviteAccept onLoggedIn={(u) => { s.setMe(u); s.start(); window.history.replaceState(null, '', '/'); }} />
+  <InviteAccept onLoggedIn={(u) => { s.setMe(u); s.start(); replaceRoute('/'); }} />
 {:else if onResetPath}
-  <PasswordReset onComplete={() => window.history.replaceState(null, '', '/')} />
+  <PasswordReset onComplete={() => replaceRoute('/')} />
+{:else if onVerifyPath}
+  <VerifyEmail onComplete={() => replaceRoute('/')} />
 {:else if (!s.me && !s.config.guestAccess) || showAuth}
   {#if showSignup}
     <Signup onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />

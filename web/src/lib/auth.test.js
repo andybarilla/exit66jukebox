@@ -12,6 +12,8 @@ import {
   regenerateRecoveryCodes,
   setSettings,
   listUsers,
+  verifyEmail,
+  createEmailVerification,
 } from './auth.js';
 
 beforeEach(() => { global.fetch = vi.fn(); });
@@ -150,6 +152,24 @@ describe('auth api', () => {
     expect(opts.method).toBe('POST');
   });
 
+  it('verifyEmail redeems a verification token', async () => {
+    fetch.mockReturnValue(jsonResp({ ok: true }));
+    await verifyEmail('verify-token');
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/verify-email');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ token: 'verify-token' });
+  });
+
+  it('createEmailVerification requests an admin verification link', async () => {
+    fetch.mockReturnValue(jsonResp({ link: 'http://host/verify/token' }));
+    const result = await createEmailVerification(42);
+    expect(result.link).toContain('/verify/');
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/admin/users/42/email-verification');
+    expect(opts.method).toBe('POST');
+  });
+
   it('setSettings supports admin MFA requirement', async () => {
     fetch.mockReturnValue(jsonResp({ admin_mfa_required: true }));
     const settings = await setSettings({ admin_mfa_required: true });
@@ -161,9 +181,9 @@ describe('auth api', () => {
   });
 
   it('listUsers preserves MFA enabled state', async () => {
-    fetch.mockReturnValue(jsonResp([{ id: 1, email: 'a@b.com', mfa_enabled: true }]));
+    fetch.mockReturnValue(jsonResp([{ id: 1, email: 'a@b.com', mfa_enabled: true, email_verified: true }]));
     const users = await listUsers();
-    expect(users).toEqual([{ id: 1, email: 'a@b.com', mfa_enabled: true }]);
+    expect(users).toEqual([{ id: 1, email: 'a@b.com', mfa_enabled: true, email_verified: true }]);
     const [url] = fetch.mock.calls[0];
     expect(url).toBe('/api/admin/users');
   });
