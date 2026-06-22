@@ -40,8 +40,9 @@ type scannedJob struct {
 
 // Scan walks the given roots, reads tags from new/changed audio files using
 // `workers` goroutines, and upserts them. Unchanged files (same mod_time and
-// size) are skipped without reading tags. If p is non-nil its counters are
-// updated live as files are processed, so a concurrent reader can observe
+// size) are skipped without reading tags unless the same-folder compilation
+// heuristic is enabled and needs them for grouping. If p is non-nil its counters
+// are updated live as files are processed, so a concurrent reader can observe
 // progress; pass nil when live progress isn't needed.
 func Scan(db *sql.DB, roots []string, workers int, p *Progress) (Result, error) {
 	if workers < 1 {
