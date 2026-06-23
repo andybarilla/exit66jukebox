@@ -221,10 +221,10 @@
   <PasswordReset onComplete={() => replaceRoute('/')} />
 {:else if onVerifyPath}
   <VerifyEmail onComplete={() => replaceRoute('/')} />
-{:else if s.config.requiresProfile && !s.me}
-  <ProfilePicker onLoggedIn={afterLogin} />
 {:else if onAdminPath && !s.isAdmin}
   <Login canSignup={false} onSwitchToSignup={() => (showSignup = false)} onLoggedIn={afterLogin} />
+{:else if s.config.requiresProfile && !s.me}
+  <ProfilePicker onLoggedIn={afterLogin} />
 {:else if (!s.me && s.config.requiresLogin) || showAuth}
   {#if showSignup}
     <Signup onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />

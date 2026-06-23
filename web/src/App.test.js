@@ -24,4 +24,13 @@ describe('App security mode routing', () => {
     expect(source).toContain('adminPanelOpen = true');
     expect(source).toContain("replaceRoute('/admin')");
   });
+
+  test('routes unauthenticated /admin before household profile selection', () => {
+    const adminLoginBranch = source.indexOf('{:else if onAdminPath && !s.isAdmin}');
+    const profilePickerBranch = source.indexOf('{:else if s.config.requiresProfile && !s.me}');
+
+    expect(adminLoginBranch).toBeGreaterThan(-1);
+    expect(profilePickerBranch).toBeGreaterThan(-1);
+    expect(adminLoginBranch).toBeLessThan(profilePickerBranch);
+  });
 });
