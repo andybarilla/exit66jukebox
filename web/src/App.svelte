@@ -34,6 +34,9 @@
   const onResetPath = $derived(currentPath.startsWith('/reset-password/'));
   const onVerifyPath = $derived(currentPath.startsWith('/verify/'));
   const onAdminPath = $derived(currentPath === '/admin');
+  const needsProfileSelection = $derived(
+    s.config.requiresProfile && !onAdminPath && !s.me?.is_passwordless_profile
+  );
   let tickTimer, resizeHandler, popstateHandler;
 
   // Active now-playing slice + derived progress %.
@@ -172,7 +175,7 @@
   // When a user logs in (any path), ensure heavy loads have run (start() is
   // guarded/idempotent) and dismiss the auth overlay.
   $effect(() => {
-    if (s.me) { s.start(); showAuth = false; }
+    if (s.me && !needsProfileSelection) { s.start(); showAuth = false; }
   });
 
   $effect(() => {
@@ -223,7 +226,7 @@
   <VerifyEmail onComplete={() => replaceRoute('/')} />
 {:else if onAdminPath && !s.isAdmin}
   <Login canSignup={false} onSwitchToSignup={() => (showSignup = false)} onLoggedIn={afterLogin} />
-{:else if s.config.requiresProfile && !s.me}
+{:else if needsProfileSelection}
   <ProfilePicker onLoggedIn={afterLogin} />
 {:else if (!s.me && s.config.requiresLogin) || showAuth}
   {#if showSignup}

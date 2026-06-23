@@ -27,10 +27,31 @@ describe('App security mode routing', () => {
 
   test('routes unauthenticated /admin before household profile selection', () => {
     const adminLoginBranch = source.indexOf('{:else if onAdminPath && !s.isAdmin}');
-    const profilePickerBranch = source.indexOf('{:else if s.config.requiresProfile && !s.me}');
+    const profilePickerBranch = source.indexOf('{:else if needsProfileSelection}');
 
     expect(adminLoginBranch).toBeGreaterThan(-1);
     expect(profilePickerBranch).toBeGreaterThan(-1);
     expect(adminLoginBranch).toBeLessThan(profilePickerBranch);
+  });
+
+  test('blocks normal sessions in household profile mode on non-admin routes', () => {
+    expect(source).toMatch(
+      /const\s+needsProfileSelection\s*=\s*\$derived\(\s*s\.config\.requiresProfile\s*&&\s*!onAdminPath\s*&&\s*!s\.me\?\.is_passwordless_profile\s*\)/
+    );
+    expect(source).toContain('{:else if needsProfileSelection}');
+  });
+
+  test('allows explicit /admin route before household profile blocking', () => {
+    const adminLoginBranch = source.indexOf('{:else if onAdminPath && !s.isAdmin}');
+    const profilePickerBranch = source.indexOf('{:else if needsProfileSelection}');
+
+    expect(adminLoginBranch).toBeGreaterThan(-1);
+    expect(profilePickerBranch).toBeGreaterThan(-1);
+    expect(adminLoginBranch).toBeLessThan(profilePickerBranch);
+  });
+
+  test('allows passwordless profile sessions through household profile mode', () => {
+    expect(source).toContain('!s.me?.is_passwordless_profile');
+    expect(source).not.toContain('s.config.requiresProfile && !s.me}');
   });
 });
