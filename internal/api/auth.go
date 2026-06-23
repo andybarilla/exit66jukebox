@@ -24,21 +24,31 @@ const mfaTicketTTL = 5 * time.Minute
 
 var errVerificationEmailerUnavailable = errors.New("verification emailer unavailable")
 
-// requireAuth gates browser API routes. A valid session always passes. Anonymous
-// browser access passes only in open modes; household_profiles and full_login
-// require a session before the main API is usable.
+// requireAuth gates browser API routes. Anonymous browser access passes only in
+// open modes; household_profiles requires a passwordless profile session and
+// full_login requires a password account session.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.currentUser(r); ok {
-			next(w, r)
-			return
-		}
-		mode := store.SecurityModeSetting(s.db)
-		if store.SecurityModeAllowsAnonymous(mode) {
+		if s.browserAccessAllowed(r) {
 			next(w, r)
 			return
 		}
 		writeErr(w, http.StatusUnauthorized, "login required")
+	}
+}
+
+func (s *Server) browserAccessAllowed(r *http.Request) bool {
+	mode := store.SecurityModeSetting(s.db)
+	user, hasUser := s.currentUser(r)
+	switch mode {
+	case store.SecurityModeOpen, store.SecurityModeOpenAdminLocked:
+		return true
+	case store.SecurityModeHouseholdProfiles:
+		return hasUser && user.IsPasswordlessProfile
+	case store.SecurityModeFullLogin:
+		return hasUser && !user.IsPasswordlessProfile
+	default:
+		return false
 	}
 }
 
@@ -789,10 +799,7 @@ func (s *Server) inviteAccept(w http.ResponseWriter, r *http.Request) {
 // bypass would open the whole API to the internet. Cookie-less internal callers
 // (the ffmpeg house source) and Sonos use signed URLs instead — see signedOK.
 func (s *Server) mediaAllowed(r *http.Request) bool {
-	if _, ok := s.currentUser(r); ok {
-		return true
-	}
-	return store.GuestAccessEnabled(s.db)
+	return s.browserAccessAllowed(r)
 }
 
 // signedOK reports whether the request carries a path-scoped signed token valid

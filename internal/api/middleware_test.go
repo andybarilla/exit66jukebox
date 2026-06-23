@@ -81,6 +81,46 @@ func TestMiddlewareAllowsSessionAndSignedURL(t *testing.T) {
 	}
 }
 
+func TestMiddlewareRejectsPasswordlessProfileSessionInFullLogin(t *testing.T) {
+	s, db := newTestServer(t)
+	if err := store.SetSecurityMode(db, store.SecurityModeFullLogin); err != nil {
+		t.Fatalf("SetSecurityMode: %v", err)
+	}
+	profileID, err := store.CreatePasswordlessProfile(db, "Casey")
+	if err != nil {
+		t.Fatalf("CreatePasswordlessProfile: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tracks", nil)
+	req.AddCookie(createSessionCookie(t, db, profileID))
+	s.RequireAuthMiddleware(okHandler()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("passwordless profile in full_login: want 401, got %d", rec.Code)
+	}
+}
+
+func TestMiddlewareRejectsPasswordAccountSessionInHouseholdProfiles(t *testing.T) {
+	s, db := newTestServer(t)
+	if err := store.SetSecurityMode(db, store.SecurityModeHouseholdProfiles); err != nil {
+		t.Fatalf("SetSecurityMode: %v", err)
+	}
+	userID, err := store.CreateUser(db, "account@example.com", "Account", "h", false)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/tracks", nil)
+	req.AddCookie(createSessionCookie(t, db, userID))
+	s.RequireAuthMiddleware(okHandler()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("password account in household_profiles: want 401, got %d", rec.Code)
+	}
+}
+
 // TestMiddlewareLoopbackNotTrusted locks in the fix: a loopback peer with no
 // cookie/guest/signed-token is NOT trusted, so a same-host reverse proxy can't
 // be used to bypass auth.
