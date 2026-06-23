@@ -50,10 +50,12 @@ function buildEditableScanSettings(scan = {}) {
   };
 }
 
-export function buildEditableSettingsSnapshot({ signupEnabled, guestAccess, libraries = [], federation = {}, scan = {} }) {
+export function buildEditableSettingsSnapshot({ signupEnabled, guestAccess, securityMode, adminMfaRequired, libraries = [], federation = {}, scan = {} }) {
   return JSON.stringify({
     signupEnabled: !!signupEnabled,
     guestAccess: !!guestAccess,
+    securityMode,
+    adminMfaRequired,
     libraries: libraries.map(buildEditableLibrary),
     federation: buildEditableFederation(federation),
     scan: buildEditableScanSettings(scan),
