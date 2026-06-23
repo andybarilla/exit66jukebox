@@ -24,15 +24,17 @@ const mfaTicketTTL = 5 * time.Minute
 
 var errVerificationEmailerUnavailable = errors.New("verification emailer unavailable")
 
-// requireAuth gates non-admin routes. A valid session passes. With no session it
-// passes only when guest access is enabled; otherwise 401.
+// requireAuth gates browser API routes. A valid session always passes. Anonymous
+// browser access passes only in open modes; household_profiles and full_login
+// require a session before the main API is usable.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.currentUser(r); ok {
 			next(w, r)
 			return
 		}
-		if store.GuestAccessEnabled(s.db) {
+		mode := store.SecurityModeSetting(s.db)
+		if store.SecurityModeAllowsAnonymous(mode) {
 			next(w, r)
 			return
 		}
@@ -147,6 +149,10 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bootstrap := n == 0
+	if !bootstrap && store.SecurityModeSetting(s.db) != store.SecurityModeFullLogin {
+		writeErr(w, http.StatusForbidden, "signup is available only in full_login mode")
+		return
+	}
 	if !bootstrap && !store.SignupEnabled(s.db) {
 		writeErr(w, http.StatusForbidden, "signup is disabled")
 		return
