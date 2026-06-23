@@ -20,6 +20,7 @@
   import PasswordReset from './lib/components/PasswordReset.svelte';
   import VerifyEmail from './lib/components/VerifyEmail.svelte';
   import AdminPanel from './lib/components/AdminPanel.svelte';
+  import ProfilePicker from './lib/components/ProfilePicker.svelte';
 
   const s = createStore();
   let audio;
@@ -32,6 +33,7 @@
   const onInvitePath = $derived(currentPath.startsWith('/invite/'));
   const onResetPath = $derived(currentPath.startsWith('/reset-password/'));
   const onVerifyPath = $derived(currentPath.startsWith('/verify/'));
+  const onAdminPath = $derived(currentPath === '/admin');
   let tickTimer, resizeHandler, popstateHandler;
 
   // Active now-playing slice + derived progress %.
@@ -124,11 +126,17 @@
     currentPath = window.location.pathname;
   }
 
+  function openAdminRoute() {
+    replaceRoute('/admin');
+    if (s.isAdmin) adminPanelOpen = true;
+    else showAuth = true;
+  }
+
   onMount(async () => {
     // Lightweight auth/config check first; only run heavy loads once access is
     // granted (logged in or guest access on), so they never 401 on the gate.
     await s.bootstrap();
-    if (s.me || s.config.guestAccess) await s.start();
+    if ((s.me || s.config.guestAccess) && !s.config.requiresProfile) await s.start();
     s.onResize();
     resizeHandler = () => s.onResize();
     popstateHandler = () => { currentPath = window.location.pathname; };
@@ -165,6 +173,10 @@
   // guarded/idempotent) and dismiss the auth overlay.
   $effect(() => {
     if (s.me) { s.start(); showAuth = false; }
+  });
+
+  $effect(() => {
+    if (onAdminPath && s.authChecked && s.isAdmin) adminPanelOpen = true;
   });
 
   // re-apply audio when the user switches streams
@@ -209,7 +221,11 @@
   <PasswordReset onComplete={() => replaceRoute('/')} />
 {:else if onVerifyPath}
   <VerifyEmail onComplete={() => replaceRoute('/')} />
-{:else if (!s.me && !s.config.guestAccess) || showAuth}
+{:else if s.config.requiresProfile && !s.me}
+  <ProfilePicker onLoggedIn={afterLogin} />
+{:else if onAdminPath && !s.isAdmin}
+  <Login canSignup={false} onSwitchToSignup={() => (showSignup = false)} onLoggedIn={afterLogin} />
+{:else if (!s.me && s.config.requiresLogin) || showAuth}
   {#if showSignup}
     <Signup onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />
   {:else}
@@ -223,7 +239,7 @@
     onToast={(tone, title, msg) => s.pushToast(tone, title, msg)}
     onCastActive={(v) => s.setCastActive(v)}
     isAdmin={s.isAdmin} me={s.me} onLogout={() => s.signOut()}
-    onOpenSettings={() => (adminPanelOpen = true)} onLogin={() => (showAuth = true)} />
+    onOpenSettings={openAdminRoute} onLogin={() => (showAuth = true)} />
 
   <!-- BODY -->
   <div style="display:flex; flex:1; min-height:0;">
@@ -340,7 +356,7 @@
   <audio bind:this={audio} style="display:none;"></audio>
 
   {#if adminPanelOpen}
-    <AdminPanel onClose={() => (adminPanelOpen = false)} />
+    <AdminPanel onClose={() => { adminPanelOpen = false; if (onAdminPath) replaceRoute('/'); }} />
   {/if}
 {/if}
 </div>

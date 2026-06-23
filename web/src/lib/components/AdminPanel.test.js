@@ -80,6 +80,20 @@ describe('AdminPanel Svelte wiring', () => {
     expect(source).toContain('Disable MFA');
   });
 
+  test('renders security mode choices and trusted network warning', () => {
+    expect(source).toContain('Security mode');
+    expect(source).toContain('open_admin_locked');
+    expect(source).toContain('household_profiles');
+    expect(source).toContain('full_login');
+    expect(source).toContain('trusted/private networks');
+  });
+
+  test('saves security mode through admin settings endpoint', () => {
+    expect(source).toContain('securityMode = $state');
+    expect(functionBody('currentEditableSettingsState')).toMatch(/securityMode/);
+    expect(functionBody('onChangeSecurityMode')).toMatch(/setSettings\s*\(\s*{\s*security_mode:\s*v\s*}\s*\)/);
+  });
+
   test('contains path browser state and folder selection wiring', () => {
     expect(source).toContain('openPathBrowser');
     expect(source).toContain('loadLibraryPath');
