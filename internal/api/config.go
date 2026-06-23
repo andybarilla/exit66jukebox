@@ -13,13 +13,17 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 		peers = s.fedPeers()
 	}
 	u, authed := s.currentUser(r)
+	mode := store.SecurityModeSetting(s.db)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mute_local_on_cast": s.muteLocalOnCast,
 		"fed_peers":          peers,
 		"authenticated":      authed,
 		"is_admin":           authed && u.IsAdmin,
-		"guest_access":       store.GuestAccessEnabled(s.db),
-		"signup_enabled":     store.SignupEnabled(s.db),
+		"security_mode":      string(mode),
+		"guest_access":       store.SecurityModeAllowsAnonymous(mode),
+		"requires_profile":   mode == store.SecurityModeHouseholdProfiles && !authed,
+		"requires_login":     mode == store.SecurityModeFullLogin && !authed,
+		"signup_enabled":     mode == store.SecurityModeFullLogin && store.SignupEnabled(s.db),
 		"needs_bootstrap":    countUsersZero(s.db),
 	})
 }
