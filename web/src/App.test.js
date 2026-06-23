@@ -68,4 +68,16 @@ describe('App security mode routing', () => {
     expect(accountLoginBranch).toBeGreaterThan(-1);
     expect(adminLoginBranch).toBeLessThan(accountLoginBranch);
   });
+
+  test('opens house queue controls only in open mode for non-admin sessions', () => {
+    expect(source).toMatch(/import\s+\{[^}]*nextHouse[^}]*\}\s+from\s+'\.\/lib\/api\.js'/s);
+    expect(source).toMatch(/if\s*\(s\.stream\s*===\s*'house'\)\s*nextHouse\(\)/);
+    expect(source).toMatch(
+      /const\s+canControlHouseQueue\s*=\s*\$derived\(\s*s\.isAdmin\s*\|\|\s*\(\s*s\.config\.securityMode\s*===\s*'open'\s*&&\s*s\.stream\s*===\s*'house'\s*\)\s*\)/
+    );
+    expect(source).toMatch(
+      /const\s+canControl\s*=\s*\$derived\(\s*canControlHouseQueue\s*\|\|\s*s\.stream\s*===\s*'me'\s*\)/
+    );
+    expect(source).not.toMatch(/open_admin_locked[^\n]*canControl/);
+  });
 });

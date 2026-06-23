@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { createStore } from './lib/store.svelte.js';
-  import { audioURL, houseStreamURL, nextTrack } from './lib/api.js';
+  import { audioURL, houseStreamURL, nextHouse, nextTrack } from './lib/api.js';
   import { fmt, keyActivate } from './lib/format.js';
   import TopBar from './lib/components/TopBar.svelte';
   import Tabs from './lib/components/Tabs.svelte';
@@ -49,9 +49,12 @@
   const npPct = $derived((dur ? Math.min(100, (cur / dur) * 100) : 0) + '%');
   const streamLabel = $derived(s.stream === 'house' ? 'House' : 'Personal');
   const chip = $derived(`${streamLabel} · ${s.listeners}`);
-  // Privileged controls (skip/remove/clear/shuffle) show for an admin, or for any
-  // guest on their own personal stream (which the server never gates).
-  const canControl = $derived(s.isAdmin || s.stream === 'me');
+  // Queue controls show for admins on any stream, for open-mode house guests,
+  // and for any guest on their own personal stream (which the server never gates).
+  const canControlHouseQueue = $derived(
+    s.isAdmin || (s.config.securityMode === 'open' && s.stream === 'house')
+  );
+  const canControl = $derived(canControlHouseQueue || s.stream === 'me');
 
   // Attempt playback and let the audio element's play/pause events drive the
   // `playing` flag. A blocked autoplay rejects without firing 'pause', so the
@@ -110,6 +113,7 @@
   }
   function onNext() {
     if (s.stream === 'me') advancePersonal();
+    if (s.stream === 'house') nextHouse();
     // house: next is server-driven; SSE will update now-playing.
   }
   function onPrev() { s.setProgress(s.stream, 0); if (audio && s.stream === 'me') audio.currentTime = 0; }
