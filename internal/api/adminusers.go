@@ -52,7 +52,7 @@ func (s *Server) setAdminSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.GuestAccessEnabled != nil {
+	if req.GuestAccessEnabled != nil && req.SecurityMode == nil {
 		if err := store.SetGuestAccessEnabled(s.db, *req.GuestAccessEnabled); err != nil {
 			writeErr(w, http.StatusInternalServerError, "db error")
 			return

@@ -146,6 +146,25 @@ func TestAdminSettingsReadsAndWritesSecurityMode(t *testing.T) {
 	}
 }
 
+func TestAdminSettingsSecurityModeWinsOverLegacyGuestAccess(t *testing.T) {
+	db := setupAPITestDB(t)
+	s := NewServer(db, nil, nil)
+
+	req := adminReq(t, db, http.MethodPost, "/api/admin/settings", `{"security_mode":"household_profiles","guest_access_enabled":false}`)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := store.SecurityModeSetting(db); got != store.SecurityModeHouseholdProfiles {
+		t.Fatalf("security mode = %q", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"security_mode":"household_profiles"`) {
+		t.Fatalf("response security mode mismatch: %s", rec.Body.String())
+	}
+}
+
 func TestAdminSettingsRejectsUnsupportedSecurityMode(t *testing.T) {
 	db := setupAPITestDB(t)
 	s := NewServer(db, nil, nil)
