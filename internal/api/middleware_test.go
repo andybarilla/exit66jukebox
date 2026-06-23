@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/auth"
@@ -118,6 +120,54 @@ func TestMiddlewareRejectsPasswordAccountSessionInHouseholdProfiles(t *testing.T
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("password account in household_profiles: want 401, got %d", rec.Code)
+	}
+}
+
+func TestMiddlewareAllowsHouseholdProfileEntryEndpoints(t *testing.T) {
+	s, db := newTestServer(t)
+	if err := store.SetSecurityMode(db, store.SecurityModeHouseholdProfiles); err != nil {
+		t.Fatalf("SetSecurityMode: %v", err)
+	}
+	profileID, err := store.CreatePasswordlessProfile(db, "Casey")
+	if err != nil {
+		t.Fatalf("CreatePasswordlessProfile: %v", err)
+	}
+	h := s.RequireAuthMiddleware(s.Handler())
+
+	list := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/api/auth/profiles", nil)
+	listReq.RemoteAddr = "203.0.113.9:1"
+	h.ServeHTTP(list, listReq)
+	if list.Code != http.StatusOK {
+		t.Fatalf("profile list: want 200, got %d (%s)", list.Code, list.Body)
+	}
+
+	selectRec := httptest.NewRecorder()
+	selectReq := httptest.NewRequest(http.MethodPost, "/api/auth/profiles/select", strings.NewReader(`{"id":`+strconv.FormatInt(profileID, 10)+`}`))
+	selectReq.RemoteAddr = "203.0.113.9:1"
+	h.ServeHTTP(selectRec, selectReq)
+	if selectRec.Code != http.StatusOK {
+		t.Fatalf("profile select: want 200, got %d (%s)", selectRec.Code, selectRec.Body)
+	}
+}
+
+func TestMiddlewareAllowsPasswordAdminAPIInHouseholdProfiles(t *testing.T) {
+	s, db := newTestServer(t)
+	if err := store.SetSecurityMode(db, store.SecurityModeHouseholdProfiles); err != nil {
+		t.Fatalf("SetSecurityMode: %v", err)
+	}
+	adminID, err := store.CreateUser(db, "admin@example.com", "Admin", "h", true)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
+	req.AddCookie(createSessionCookie(t, db, adminID))
+	s.RequireAuthMiddleware(s.Handler()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin API in household_profiles: want 200, got %d (%s)", rec.Code, rec.Body)
 	}
 }
 

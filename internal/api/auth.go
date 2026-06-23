@@ -899,6 +899,14 @@ func (s *Server) mediaAllowed(r *http.Request) bool {
 	return s.browserAccessAllowed(r)
 }
 
+func (s *Server) adminAPIAllowed(r *http.Request) bool {
+	if !strings.HasPrefix(r.URL.Path, "/api/admin/") {
+		return false
+	}
+	_, hasUser := s.currentUser(r)
+	return hasUser
+}
+
 // signedOK reports whether the request carries a path-scoped signed token valid
 // for its own URL path (the Sonos cast and the ffmpeg house source both fetch
 // with no cookie). A forged or wrong-path token fails VerifyPath.
@@ -915,7 +923,7 @@ func (s *Server) signedOK(r *http.Request) bool {
 // gate; it wraps ONLY the public http.Server, never the federation MemberHandler.
 func (s *Server) RequireAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") || isOpenPath(r.URL.Path) || s.mediaAllowed(r) || s.signedOK(r) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || isOpenPath(r.URL.Path) || s.adminAPIAllowed(r) || s.mediaAllowed(r) || s.signedOK(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -931,6 +939,7 @@ func isOpenPath(p string) bool {
 	case "/api/auth/login", "/api/auth/signup", "/api/auth/logout",
 		"/api/auth/mfa/complete",
 		"/api/auth/me", "/api/auth/invite/accept",
+		"/api/auth/profiles", "/api/auth/profiles/select",
 		"/api/auth/verify-email",
 		"/api/auth/password-reset/forgot", "/api/auth/password-reset/redeem",
 		"/api/config":
