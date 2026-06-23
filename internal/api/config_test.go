@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -94,4 +95,97 @@ func TestConfigExposesSecurityModeEntryFlow(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConfigEntryFlowUsesSessionUserKind(t *testing.T) {
+	cases := []struct {
+		name            string
+		mode            store.SecurityMode
+		userID          func(*testing.T, *sql.DB) int64
+		requiresProfile bool
+		requiresLogin   bool
+	}{
+		{
+			name: "household profiles requires profile for password account session",
+			mode: store.SecurityModeHouseholdProfiles,
+			userID: func(t *testing.T, db *sql.DB) int64 {
+				return createConfigPasswordUser(t, db)
+			},
+			requiresProfile: true,
+			requiresLogin:   false,
+		},
+		{
+			name: "household profiles accepts passwordless profile session",
+			mode: store.SecurityModeHouseholdProfiles,
+			userID: func(t *testing.T, db *sql.DB) int64 {
+				id, err := store.CreatePasswordlessProfile(db, "Casey")
+				if err != nil {
+					t.Fatalf("CreatePasswordlessProfile: %v", err)
+				}
+				return id
+			},
+			requiresProfile: false,
+			requiresLogin:   false,
+		},
+		{
+			name: "full login requires login for passwordless profile session",
+			mode: store.SecurityModeFullLogin,
+			userID: func(t *testing.T, db *sql.DB) int64 {
+				id, err := store.CreatePasswordlessProfile(db, "Casey")
+				if err != nil {
+					t.Fatalf("CreatePasswordlessProfile: %v", err)
+				}
+				return id
+			},
+			requiresProfile: false,
+			requiresLogin:   true,
+		},
+		{
+			name: "full login accepts password account session",
+			mode: store.SecurityModeFullLogin,
+			userID: func(t *testing.T, db *sql.DB) int64 {
+				return createConfigPasswordUser(t, db)
+			},
+			requiresProfile: false,
+			requiresLogin:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupAPITestDB(t)
+			if err := store.SetSecurityMode(db, tc.mode); err != nil {
+				t.Fatalf("SetSecurityMode: %v", err)
+			}
+			srv := NewServer(db, nil, nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+			req.AddCookie(createSessionCookie(t, db, tc.userID(t, db)))
+			rec := httptest.NewRecorder()
+
+			srv.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d", rec.Code)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("json: %v", err)
+			}
+			if got["requires_profile"] != tc.requiresProfile {
+				t.Fatalf("requires_profile = %v, want %v", got["requires_profile"], tc.requiresProfile)
+			}
+			if got["requires_login"] != tc.requiresLogin {
+				t.Fatalf("requires_login = %v, want %v", got["requires_login"], tc.requiresLogin)
+			}
+		})
+	}
+}
+
+func createConfigPasswordUser(t *testing.T, db *sql.DB) int64 {
+	t.Helper()
+	userID, err := store.CreateUser(db, "account@example.com", "Account", "h", false)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	return userID
 }

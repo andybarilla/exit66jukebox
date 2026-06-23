@@ -14,6 +14,7 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	u, authed := s.currentUser(r)
 	mode := store.SecurityModeSetting(s.db)
+	isPasswordlessProfile := authed && u.IsPasswordlessProfile
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mute_local_on_cast": s.muteLocalOnCast,
 		"fed_peers":          peers,
@@ -21,8 +22,8 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 		"is_admin":           authed && u.IsAdmin,
 		"security_mode":      string(mode),
 		"guest_access":       store.SecurityModeAllowsAnonymous(mode),
-		"requires_profile":   mode == store.SecurityModeHouseholdProfiles && !authed,
-		"requires_login":     mode == store.SecurityModeFullLogin && !authed,
+		"requires_profile":   mode == store.SecurityModeHouseholdProfiles && !isPasswordlessProfile,
+		"requires_login":     mode == store.SecurityModeFullLogin && (!authed || isPasswordlessProfile),
 		"signup_enabled":     mode == store.SecurityModeFullLogin && store.SignupEnabled(s.db),
 		"needs_bootstrap":    countUsersZero(s.db),
 	})
