@@ -210,6 +210,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/mfa/enroll/confirm", s.mfaEnrollConfirm)
 	mux.HandleFunc("POST /api/auth/mfa/disable", s.mfaDisable)
 	mux.HandleFunc("POST /api/auth/mfa/recovery/regenerate", s.mfaRecoveryRegenerate)
+	mux.HandleFunc("GET /api/auth/profiles", s.listPasswordlessProfiles)
+	mux.HandleFunc("POST /api/auth/profiles", s.createPasswordlessProfile)
+	mux.HandleFunc("POST /api/auth/profiles/select", s.selectPasswordlessProfile)
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/auth/me", s.me)
 	mux.HandleFunc("POST /api/auth/invite/accept", s.inviteAccept)
@@ -243,6 +246,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/admin/users/{id}/email-verification", s.requireAdmin(s.createEmailVerification))
 	mux.HandleFunc("DELETE /api/admin/users/{id}", s.requireAdmin(s.deleteUser))
 	if s.ui != nil {
+		mux.HandleFunc("GET /admin", s.serveUIIndex)
 		mux.HandleFunc("GET /verify/", s.serveUIIndex)
 		mux.HandleFunc("GET /invite/", s.serveUIIndex)
 		mux.HandleFunc("GET /reset-password/", s.serveUIIndex)

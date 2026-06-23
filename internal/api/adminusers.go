@@ -234,6 +234,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 			"id": u.ID, "email": u.Email, "display_name": u.DisplayName,
 			"is_admin": u.IsAdmin, "created_at": u.CreatedAt, "mfa_enabled": ok && factor.EnabledAt > 0,
 			"email_verified": u.EmailVerifiedAt != 0, "email_verified_at": u.EmailVerifiedAt,
+			"is_passwordless_profile": u.IsPasswordlessProfile,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

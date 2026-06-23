@@ -131,6 +131,105 @@ func decodeJSON(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
+func userJSON(u store.User) map[string]any {
+	return map[string]any{
+		"id":                      u.ID,
+		"email":                   u.Email,
+		"display_name":            u.DisplayName,
+		"is_admin":                u.IsAdmin,
+		"email_verified":          u.EmailVerifiedAt != 0,
+		"is_passwordless_profile": u.IsPasswordlessProfile,
+	}
+}
+
+type passwordlessProfileReq struct {
+	DisplayName string `json:"display_name"`
+}
+
+type selectPasswordlessProfileReq struct {
+	ID int64 `json:"id"`
+}
+
+func (s *Server) passwordlessProfilesEnabled(w http.ResponseWriter) bool {
+	if store.SecurityModeSetting(s.db) == store.SecurityModeHouseholdProfiles {
+		return true
+	}
+	writeErr(w, http.StatusForbidden, "passwordless profiles require household_profiles mode")
+	return false
+}
+
+func profileJSON(u store.User) map[string]any {
+	return map[string]any{"id": u.ID, "display_name": u.DisplayName}
+}
+
+func (s *Server) listPasswordlessProfiles(w http.ResponseWriter, r *http.Request) {
+	if !s.passwordlessProfilesEnabled(w) {
+		return
+	}
+	profiles, err := store.ListPasswordlessProfiles(s.db)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	out := make([]map[string]any, 0, len(profiles))
+	for _, profile := range profiles {
+		out = append(out, profileJSON(profile))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) createPasswordlessProfile(w http.ResponseWriter, r *http.Request) {
+	if !s.passwordlessProfilesEnabled(w) {
+		return
+	}
+	var req passwordlessProfileReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	if req.DisplayName == "" {
+		writeErr(w, http.StatusBadRequest, "display name is required")
+		return
+	}
+	id, err := store.CreatePasswordlessProfile(s.db, req.DisplayName)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	user, ok, err := store.GetUserByID(s.db, id)
+	if err != nil || !ok {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, profileJSON(user))
+}
+
+func (s *Server) selectPasswordlessProfile(w http.ResponseWriter, r *http.Request) {
+	if !s.passwordlessProfilesEnabled(w) {
+		return
+	}
+	var req selectPasswordlessProfileReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	user, ok, err := store.GetUserByID(s.db, req.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !ok || !user.IsPasswordlessProfile {
+		writeErr(w, http.StatusNotFound, "profile not found")
+		return
+	}
+	if err := s.setSessionCookie(w, r, user.ID); err != nil {
+		writeErr(w, http.StatusInternalServerError, "session error")
+		return
+	}
+	writeJSON(w, http.StatusOK, userJSON(user))
+}
+
 type signupReq struct {
 	Email       string `json:"email"`
 	DisplayName string `json:"display_name"`
@@ -306,7 +405,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "session error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": u.ID, "email": u.Email, "is_admin": u.IsAdmin, "email_verified": u.EmailVerifiedAt != 0})
+	writeJSON(w, http.StatusOK, userJSON(u))
 }
 
 func (s *Server) createMFATicket(w http.ResponseWriter, userID int64) {
@@ -375,7 +474,7 @@ func (s *Server) mfaComplete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "session error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": u.ID, "email": u.Email, "is_admin": u.IsAdmin})
+	writeJSON(w, http.StatusOK, userJSON(u))
 }
 
 func (s *Server) acceptMFAChallenge(w http.ResponseWriter, req mfaCompleteReq, factor store.MFAFactor) bool {
@@ -627,9 +726,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "not logged in")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "is_admin": u.IsAdmin, "email_verified": u.EmailVerifiedAt != 0,
-	})
+	writeJSON(w, http.StatusOK, userJSON(u))
 }
 
 type verifyEmailReq struct {

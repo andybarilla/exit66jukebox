@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -175,6 +176,28 @@ func TestAdminSettingsRejectsUnsupportedSecurityMode(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminUserListIncludesPasswordlessProfileMarker(t *testing.T) {
+	db := setupAPITestDB(t)
+	profileID, err := store.CreatePasswordlessProfile(db, "Casey")
+	if err != nil {
+		t.Fatalf("CreatePasswordlessProfile: %v", err)
+	}
+	s := NewServer(db, nil, nil)
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, adminReq(t, db, http.MethodGet, "/api/admin/users", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), fmt.Sprintf(`"id":%d`, profileID)) {
+		t.Fatalf("response missing profile id: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"is_passwordless_profile":true`) {
+		t.Fatalf("response missing passwordless marker: %s", rec.Body.String())
 	}
 }
 

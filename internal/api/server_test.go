@@ -54,7 +54,7 @@ func TestClientRoutesServeUIIndex(t *testing.T) {
 	srv := NewServer(nil, nil, ui)
 	handler := srv.Handler()
 
-	for _, path := range []string{"/", "/verify/email-token", "/invite/invite-token", "/reset-password/reset-token"} {
+	for _, path := range []string{"/", "/admin", "/verify/email-token", "/invite/invite-token", "/reset-password/reset-token"} {
 		t.Run(path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
