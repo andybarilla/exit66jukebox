@@ -171,6 +171,26 @@ func TestMiddlewareAllowsPasswordAdminAPIInHouseholdProfiles(t *testing.T) {
 	}
 }
 
+func TestMiddlewareAllowsPasswordAdminHouseControlsInHouseholdProfiles(t *testing.T) {
+	s, db := newTestServer(t)
+	if err := store.SetSecurityMode(db, store.SecurityModeHouseholdProfiles); err != nil {
+		t.Fatalf("SetSecurityMode: %v", err)
+	}
+	adminID, err := store.CreateUser(db, "admin@example.com", "Admin", "h", true)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/streams/house/shuffle", strings.NewReader(`{"shuffle":true}`))
+	req.AddCookie(createSessionCookie(t, db, adminID))
+	s.RequireAuthMiddleware(s.Handler()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("house shuffle as password admin in household_profiles: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+}
+
 // TestMiddlewareLoopbackNotTrusted locks in the fix: a loopback peer with no
 // cookie/guest/signed-token is NOT trusted, so a same-host reverse proxy can't
 // be used to bypass auth.

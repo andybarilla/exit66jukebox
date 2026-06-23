@@ -899,12 +899,45 @@ func (s *Server) mediaAllowed(r *http.Request) bool {
 	return s.browserAccessAllowed(r)
 }
 
-func (s *Server) adminAPIAllowed(r *http.Request) bool {
-	if !strings.HasPrefix(r.URL.Path, "/api/admin/") {
+func (s *Server) adminRouteAllowed(r *http.Request) bool {
+	user, hasUser := s.currentUser(r)
+	if !hasUser || !user.IsAdmin {
 		return false
 	}
-	_, hasUser := s.currentUser(r)
-	return hasUser
+	return routeRequiresAdmin(r.Method, r.URL.Path)
+}
+
+func routeRequiresAdmin(method, path string) bool {
+	if strings.HasPrefix(path, "/api/admin/") {
+		return true
+	}
+	if sharedHouseStreamRouteRequiresAdmin(method, path) {
+		return true
+	}
+	switch path {
+	case "/api/sonos/cast", "/api/sonos/stop", "/api/sonos/volume", "/api/enrich":
+		return method == http.MethodPost
+	default:
+		return false
+	}
+}
+
+func sharedHouseStreamRouteRequiresAdmin(method, path string) bool {
+	const houseStreamPrefix = "/api/streams/" + sharedStreamID + "/"
+	if !strings.HasPrefix(path, houseStreamPrefix) {
+		return false
+	}
+	suffix := strings.TrimPrefix(path, houseStreamPrefix)
+	switch suffix {
+	case "next", "shuffle":
+		return method == http.MethodPost
+	case "requests":
+		return method == http.MethodDelete
+	case "station":
+		return method == http.MethodPost || method == http.MethodDelete
+	default:
+		return method == http.MethodDelete && strings.HasPrefix(suffix, "requests/")
+	}
 }
 
 // signedOK reports whether the request carries a path-scoped signed token valid
@@ -923,7 +956,7 @@ func (s *Server) signedOK(r *http.Request) bool {
 // gate; it wraps ONLY the public http.Server, never the federation MemberHandler.
 func (s *Server) RequireAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") || isOpenPath(r.URL.Path) || s.adminAPIAllowed(r) || s.mediaAllowed(r) || s.signedOK(r) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || isOpenPath(r.URL.Path) || s.adminRouteAllowed(r) || s.mediaAllowed(r) || s.signedOK(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
