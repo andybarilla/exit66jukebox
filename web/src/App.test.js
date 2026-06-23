@@ -54,4 +54,18 @@ describe('App security mode routing', () => {
     expect(source).toContain('!s.me?.is_passwordless_profile');
     expect(source).not.toContain('s.config.requiresProfile && !s.me}');
   });
+
+  test('requires normal account login for stale passwordless profiles in full login mode', () => {
+    expect(source).toMatch(
+      /const\s+needsAccountLogin\s*=\s*\$derived\(\s*s\.config\.requiresLogin\s*&&\s*\(\s*!s\.me\s*\|\|\s*s\.me\?\.is_passwordless_profile\s*\)\s*\)/
+    );
+    expect(source).toContain('{:else if needsAccountLogin || showAuth}');
+
+    const adminLoginBranch = source.indexOf('{:else if onAdminPath && !s.isAdmin}');
+    const accountLoginBranch = source.indexOf('{:else if needsAccountLogin || showAuth}');
+
+    expect(adminLoginBranch).toBeGreaterThan(-1);
+    expect(accountLoginBranch).toBeGreaterThan(-1);
+    expect(adminLoginBranch).toBeLessThan(accountLoginBranch);
+  });
 });

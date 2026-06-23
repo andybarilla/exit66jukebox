@@ -37,6 +37,9 @@
   const needsProfileSelection = $derived(
     s.config.requiresProfile && !onAdminPath && !s.me?.is_passwordless_profile
   );
+  const needsAccountLogin = $derived(
+    s.config.requiresLogin && (!s.me || s.me?.is_passwordless_profile)
+  );
   let tickTimer, resizeHandler, popstateHandler;
 
   // Active now-playing slice + derived progress %.
@@ -139,7 +142,7 @@
     // Lightweight auth/config check first; only run heavy loads once access is
     // granted (logged in or guest access on), so they never 401 on the gate.
     await s.bootstrap();
-    if ((s.me || s.config.guestAccess) && !s.config.requiresProfile) await s.start();
+    if ((s.me || s.config.guestAccess) && !s.config.requiresProfile && !needsAccountLogin) await s.start();
     s.onResize();
     resizeHandler = () => s.onResize();
     popstateHandler = () => { currentPath = window.location.pathname; };
@@ -175,7 +178,7 @@
   // When a user logs in (any path), ensure heavy loads have run (start() is
   // guarded/idempotent) and dismiss the auth overlay.
   $effect(() => {
-    if (s.me && !needsProfileSelection) { s.start(); showAuth = false; }
+    if (s.me && !needsProfileSelection && !needsAccountLogin) { s.start(); showAuth = false; }
   });
 
   $effect(() => {
@@ -228,7 +231,7 @@
   <Login canSignup={false} onSwitchToSignup={() => (showSignup = false)} onLoggedIn={afterLogin} />
 {:else if needsProfileSelection}
   <ProfilePicker onLoggedIn={afterLogin} />
-{:else if (!s.me && s.config.requiresLogin) || showAuth}
+{:else if needsAccountLogin || showAuth}
   {#if showSignup}
     <Signup onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />
   {:else}
