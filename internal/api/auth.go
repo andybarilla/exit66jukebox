@@ -24,19 +24,31 @@ const mfaTicketTTL = 5 * time.Minute
 
 var errVerificationEmailerUnavailable = errors.New("verification emailer unavailable")
 
-// requireAuth gates non-admin routes. A valid session passes. With no session it
-// passes only when guest access is enabled; otherwise 401.
+// requireAuth gates browser API routes. Anonymous browser access passes only in
+// open modes; household_profiles requires a passwordless profile session and
+// full_login requires a password account session.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.currentUser(r); ok {
-			next(w, r)
-			return
-		}
-		if store.GuestAccessEnabled(s.db) {
+		if s.browserAccessAllowed(r) {
 			next(w, r)
 			return
 		}
 		writeErr(w, http.StatusUnauthorized, "login required")
+	}
+}
+
+func (s *Server) browserAccessAllowed(r *http.Request) bool {
+	mode := store.SecurityModeSetting(s.db)
+	user, hasUser := s.currentUser(r)
+	switch mode {
+	case store.SecurityModeOpen, store.SecurityModeOpenAdminLocked:
+		return true
+	case store.SecurityModeHouseholdProfiles:
+		return hasUser && user.IsPasswordlessProfile
+	case store.SecurityModeFullLogin:
+		return hasUser && !user.IsPasswordlessProfile
+	default:
+		return false
 	}
 }
 
@@ -119,6 +131,105 @@ func decodeJSON(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
 }
 
+func userJSON(u store.User) map[string]any {
+	return map[string]any{
+		"id":                      u.ID,
+		"email":                   u.Email,
+		"display_name":            u.DisplayName,
+		"is_admin":                u.IsAdmin,
+		"email_verified":          u.EmailVerifiedAt != 0,
+		"is_passwordless_profile": u.IsPasswordlessProfile,
+	}
+}
+
+type passwordlessProfileReq struct {
+	DisplayName string `json:"display_name"`
+}
+
+type selectPasswordlessProfileReq struct {
+	ID int64 `json:"id"`
+}
+
+func (s *Server) passwordlessProfilesEnabled(w http.ResponseWriter) bool {
+	if store.SecurityModeSetting(s.db) == store.SecurityModeHouseholdProfiles {
+		return true
+	}
+	writeErr(w, http.StatusForbidden, "passwordless profiles require household_profiles mode")
+	return false
+}
+
+func profileJSON(u store.User) map[string]any {
+	return map[string]any{"id": u.ID, "display_name": u.DisplayName}
+}
+
+func (s *Server) listPasswordlessProfiles(w http.ResponseWriter, r *http.Request) {
+	if !s.passwordlessProfilesEnabled(w) {
+		return
+	}
+	profiles, err := store.ListPasswordlessProfiles(s.db)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	out := make([]map[string]any, 0, len(profiles))
+	for _, profile := range profiles {
+		out = append(out, profileJSON(profile))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) createPasswordlessProfile(w http.ResponseWriter, r *http.Request) {
+	if !s.passwordlessProfilesEnabled(w) {
+		return
+	}
+	var req passwordlessProfileReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	if req.DisplayName == "" {
+		writeErr(w, http.StatusBadRequest, "display name is required")
+		return
+	}
+	id, err := store.CreatePasswordlessProfile(s.db, req.DisplayName)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	user, ok, err := store.GetUserByID(s.db, id)
+	if err != nil || !ok {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, profileJSON(user))
+}
+
+func (s *Server) selectPasswordlessProfile(w http.ResponseWriter, r *http.Request) {
+	if !s.passwordlessProfilesEnabled(w) {
+		return
+	}
+	var req selectPasswordlessProfileReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	user, ok, err := store.GetUserByID(s.db, req.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !ok || !user.IsPasswordlessProfile {
+		writeErr(w, http.StatusNotFound, "profile not found")
+		return
+	}
+	if err := s.setSessionCookie(w, r, user.ID); err != nil {
+		writeErr(w, http.StatusInternalServerError, "session error")
+		return
+	}
+	writeJSON(w, http.StatusOK, userJSON(user))
+}
+
 type signupReq struct {
 	Email       string `json:"email"`
 	DisplayName string `json:"display_name"`
@@ -147,6 +258,10 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bootstrap := n == 0
+	if !bootstrap && store.SecurityModeSetting(s.db) != store.SecurityModeFullLogin {
+		writeErr(w, http.StatusForbidden, "signup is available only in full_login mode")
+		return
+	}
 	if !bootstrap && !store.SignupEnabled(s.db) {
 		writeErr(w, http.StatusForbidden, "signup is disabled")
 		return
@@ -290,7 +405,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "session error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": u.ID, "email": u.Email, "is_admin": u.IsAdmin, "email_verified": u.EmailVerifiedAt != 0})
+	writeJSON(w, http.StatusOK, userJSON(u))
 }
 
 func (s *Server) createMFATicket(w http.ResponseWriter, userID int64) {
@@ -359,7 +474,7 @@ func (s *Server) mfaComplete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "session error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": u.ID, "email": u.Email, "is_admin": u.IsAdmin})
+	writeJSON(w, http.StatusOK, userJSON(u))
 }
 
 func (s *Server) acceptMFAChallenge(w http.ResponseWriter, req mfaCompleteReq, factor store.MFAFactor) bool {
@@ -611,9 +726,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "not logged in")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id": u.ID, "email": u.Email, "display_name": u.DisplayName, "is_admin": u.IsAdmin, "email_verified": u.EmailVerifiedAt != 0,
-	})
+	writeJSON(w, http.StatusOK, userJSON(u))
 }
 
 type verifyEmailReq struct {
@@ -783,10 +896,48 @@ func (s *Server) inviteAccept(w http.ResponseWriter, r *http.Request) {
 // bypass would open the whole API to the internet. Cookie-less internal callers
 // (the ffmpeg house source) and Sonos use signed URLs instead — see signedOK.
 func (s *Server) mediaAllowed(r *http.Request) bool {
-	if _, ok := s.currentUser(r); ok {
+	return s.browserAccessAllowed(r)
+}
+
+func (s *Server) adminRouteAllowed(r *http.Request) bool {
+	user, hasUser := s.currentUser(r)
+	if !hasUser || !user.IsAdmin {
+		return false
+	}
+	return routeRequiresAdmin(r.Method, r.URL.Path)
+}
+
+func routeRequiresAdmin(method, path string) bool {
+	if strings.HasPrefix(path, "/api/admin/") {
 		return true
 	}
-	return store.GuestAccessEnabled(s.db)
+	if sharedHouseStreamRouteRequiresAdmin(method, path) {
+		return true
+	}
+	switch path {
+	case "/api/sonos/cast", "/api/sonos/stop", "/api/sonos/volume", "/api/enrich":
+		return method == http.MethodPost
+	default:
+		return false
+	}
+}
+
+func sharedHouseStreamRouteRequiresAdmin(method, path string) bool {
+	const houseStreamPrefix = "/api/streams/" + sharedStreamID + "/"
+	if !strings.HasPrefix(path, houseStreamPrefix) {
+		return false
+	}
+	suffix := strings.TrimPrefix(path, houseStreamPrefix)
+	switch suffix {
+	case "next", "shuffle":
+		return method == http.MethodPost
+	case "requests":
+		return method == http.MethodDelete
+	case "station":
+		return method == http.MethodPost || method == http.MethodDelete
+	default:
+		return method == http.MethodDelete && strings.HasPrefix(suffix, "requests/")
+	}
 }
 
 // signedOK reports whether the request carries a path-scoped signed token valid
@@ -805,7 +956,7 @@ func (s *Server) signedOK(r *http.Request) bool {
 // gate; it wraps ONLY the public http.Server, never the federation MemberHandler.
 func (s *Server) RequireAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") || isOpenPath(r.URL.Path) || s.mediaAllowed(r) || s.signedOK(r) {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || isOpenPath(r.URL.Path) || s.adminRouteAllowed(r) || s.mediaAllowed(r) || s.signedOK(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -821,6 +972,7 @@ func isOpenPath(p string) bool {
 	case "/api/auth/login", "/api/auth/signup", "/api/auth/logout",
 		"/api/auth/mfa/complete",
 		"/api/auth/me", "/api/auth/invite/accept",
+		"/api/auth/profiles", "/api/auth/profiles/select",
 		"/api/auth/verify-email",
 		"/api/auth/password-reset/forgot", "/api/auth/password-reset/redeem",
 		"/api/config":

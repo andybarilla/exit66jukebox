@@ -54,7 +54,7 @@ func TestClientRoutesServeUIIndex(t *testing.T) {
 	srv := NewServer(nil, nil, ui)
 	handler := srv.Handler()
 
-	for _, path := range []string{"/", "/verify/email-token", "/invite/invite-token", "/reset-password/reset-token"} {
+	for _, path := range []string{"/", "/admin", "/verify/email-token", "/invite/invite-token", "/reset-password/reset-token"} {
 		t.Run(path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
@@ -202,5 +202,33 @@ func TestGetNextDoesNotAdvanceQueue(t *testing.T) {
 	}
 	if !strings.Contains(postNextRec.Body.String(), "\"ok\":true") {
 		t.Fatalf("expected POST next to advance queued track, got %s", postNextRec.Body.String())
+	}
+}
+
+func TestRawHandlerDoesNotApplyBrowserAuth(t *testing.T) {
+	srv, db := newTestServer(t)
+	if err := store.SetSecurityMode(db, store.SecurityModeFullLogin); err != nil {
+		t.Fatalf("SetSecurityMode: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("raw Handler status = %d, want 200", rec.Code)
+	}
+}
+
+func TestPublicHandlerAppliesBrowserAuthAroundRawHandler(t *testing.T) {
+	srv, db := newTestServer(t)
+	if err := store.SetSecurityMode(db, store.SecurityModeFullLogin); err != nil {
+		t.Fatalf("SetSecurityMode: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	srv.RequireAuthMiddleware(srv.Handler()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tracks", nil))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("public handler status = %d, want 401", rec.Code)
 	}
 }

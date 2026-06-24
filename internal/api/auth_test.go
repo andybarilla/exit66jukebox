@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -200,6 +201,126 @@ func TestMiddlewareGuestToggle(t *testing.T) {
 	h(rec, httptest.NewRequest("GET", "/api/tracks", nil))
 	if rec.Code != 200 {
 		t.Fatalf("guest access on: want 200, got %d", rec.Code)
+	}
+}
+
+func TestRequireAuthUsesSecurityModeForBrowserAccess(t *testing.T) {
+	cases := []struct {
+		name string
+		mode store.SecurityMode
+		want int
+	}{
+		{"open", store.SecurityModeOpen, http.StatusOK},
+		{"open admin locked", store.SecurityModeOpenAdminLocked, http.StatusOK},
+		{"household profiles", store.SecurityModeHouseholdProfiles, http.StatusUnauthorized},
+		{"full login", store.SecurityModeFullLogin, http.StatusUnauthorized},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, db := newTestServer(t)
+			if err := store.SetSecurityMode(db, tc.mode); err != nil {
+				t.Fatalf("SetSecurityMode: %v", err)
+			}
+			h := s.requireAuth(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+
+			rec := httptest.NewRecorder()
+			h(rec, httptest.NewRequest(http.MethodGet, "/api/tracks", nil))
+
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
+			}
+		})
+	}
+}
+
+func TestSignupToggleAppliesOnlyToFullLogin(t *testing.T) {
+	cases := []struct {
+		name string
+		mode store.SecurityMode
+		want int
+	}{
+		{"open", store.SecurityModeOpen, http.StatusForbidden},
+		{"open admin locked", store.SecurityModeOpenAdminLocked, http.StatusForbidden},
+		{"household profiles", store.SecurityModeHouseholdProfiles, http.StatusForbidden},
+		{"full login", store.SecurityModeFullLogin, http.StatusServiceUnavailable},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, db := newTestServer(t)
+			if _, err := store.CreateUser(db, "admin@example.com", "Admin", "hash", true); err != nil {
+				t.Fatalf("CreateUser: %v", err)
+			}
+			if err := store.SetSignupEnabled(db, true); err != nil {
+				t.Fatalf("SetSignupEnabled: %v", err)
+			}
+			if err := store.SetSecurityMode(db, tc.mode); err != nil {
+				t.Fatalf("SetSecurityMode: %v", err)
+			}
+
+			rec := httptest.NewRecorder()
+			body := strings.NewReader(`{"email":"new@example.com","display_name":"New","password":"password123"}`)
+			s.signup(rec, httptest.NewRequest(http.MethodPost, "/api/auth/signup", body))
+
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestPasswordlessProfileCreationAndSelectionCreatesSession(t *testing.T) {
+	db := setupAPITestDB(t)
+	if err := store.SetSecurityMode(db, store.SecurityModeHouseholdProfiles); err != nil {
+		t.Fatalf("SetSecurityMode: %v", err)
+	}
+	srv := NewServer(db, nil, nil)
+
+	create := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/auth/profiles", strings.NewReader(`{"display_name":"Casey"}`)))
+	if create.Code != http.StatusOK {
+		t.Fatalf("create status = %d body=%s", create.Code, create.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+
+	selectBody := fmt.Sprintf(`{"id":%.0f}`, created["id"].(float64))
+	selectRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(selectRec, httptest.NewRequest(http.MethodPost, "/api/auth/profiles/select", strings.NewReader(selectBody)))
+	if selectRec.Code != http.StatusOK {
+		t.Fatalf("select status = %d body=%s", selectRec.Code, selectRec.Body.String())
+	}
+	if len(selectRec.Result().Cookies()) == 0 {
+		t.Fatalf("select did not set a session cookie")
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	meReq.AddCookie(selectRec.Result().Cookies()[0])
+	meRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("me status = %d body=%s", meRec.Code, meRec.Body.String())
+	}
+	if !strings.Contains(meRec.Body.String(), `"is_passwordless_profile":true`) {
+		t.Fatalf("me missing passwordless marker: %s", meRec.Body.String())
+	}
+}
+
+func TestPasswordlessProfileEndpointsRequireHouseholdProfilesMode(t *testing.T) {
+	db := setupAPITestDB(t)
+	if err := store.SetSecurityMode(db, store.SecurityModeOpen); err != nil {
+		t.Fatalf("SetSecurityMode: %v", err)
+	}
+	srv := NewServer(db, nil, nil)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/auth/profiles", strings.NewReader(`{"display_name":"Casey"}`)))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

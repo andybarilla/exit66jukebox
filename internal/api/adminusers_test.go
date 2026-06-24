@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -21,6 +22,16 @@ func adminReq(t *testing.T, db *sql.DB, method, path, body string) *http.Request
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.AddCookie(cookie)
 	return req
+}
+
+func setupAPITestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
 }
 
 func adminSessionWithEmail(t *testing.T, db *sql.DB, email string) (int64, *http.Cookie) {
@@ -117,6 +128,79 @@ func TestAdminSettingsToggle(t *testing.T) {
 	}
 }
 
+func TestAdminSettingsReadsAndWritesSecurityMode(t *testing.T) {
+	db := setupAPITestDB(t)
+	s := NewServer(db, nil, nil)
+
+	req := adminReq(t, db, http.MethodPost, "/api/admin/settings", `{"security_mode":"household_profiles"}`)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := store.SecurityModeSetting(db); got != store.SecurityModeHouseholdProfiles {
+		t.Fatalf("security mode = %q", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"security_mode":"household_profiles"`) {
+		t.Fatalf("response missing security mode: %s", rec.Body.String())
+	}
+}
+
+func TestAdminSettingsSecurityModeWinsOverLegacyGuestAccess(t *testing.T) {
+	db := setupAPITestDB(t)
+	s := NewServer(db, nil, nil)
+
+	req := adminReq(t, db, http.MethodPost, "/api/admin/settings", `{"security_mode":"household_profiles","guest_access_enabled":false}`)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := store.SecurityModeSetting(db); got != store.SecurityModeHouseholdProfiles {
+		t.Fatalf("security mode = %q", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"security_mode":"household_profiles"`) {
+		t.Fatalf("response security mode mismatch: %s", rec.Body.String())
+	}
+}
+
+func TestAdminSettingsRejectsUnsupportedSecurityMode(t *testing.T) {
+	db := setupAPITestDB(t)
+	s := NewServer(db, nil, nil)
+
+	req := adminReq(t, db, http.MethodPost, "/api/admin/settings", `{"security_mode":"guest"}`)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminUserListIncludesPasswordlessProfileMarker(t *testing.T) {
+	db := setupAPITestDB(t)
+	profileID, err := store.CreatePasswordlessProfile(db, "Casey")
+	if err != nil {
+		t.Fatalf("CreatePasswordlessProfile: %v", err)
+	}
+	s := NewServer(db, nil, nil)
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, adminReq(t, db, http.MethodGet, "/api/admin/users", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), fmt.Sprintf(`"id":%d`, profileID)) {
+		t.Fatalf("response missing profile id: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"is_passwordless_profile":true`) {
+		t.Fatalf("response missing passwordless marker: %s", rec.Body.String())
+	}
+}
+
 func TestAdminSettingsIncludesAdminMFARequired(t *testing.T) {
 	s, db := newTestServer(t)
 	if err := store.SetAdminMFARequired(db, true); err != nil {
@@ -131,11 +215,11 @@ func TestAdminSettingsIncludesAdminMFARequired(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("want 200, got %d (%s)", rec.Code, rec.Body)
 	}
-	var body map[string]bool
+	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode settings: %v", err)
 	}
-	if !body["admin_mfa_required"] {
+	if body["admin_mfa_required"] != true {
 		t.Fatalf("admin_mfa_required missing or false: %#v", body)
 	}
 }
@@ -191,11 +275,11 @@ func TestAdminSettingsEnableMFASucceedsWhenCurrentAdminHasEnabledMFA(t *testing.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("enable admin MFA: want 200, got %d (%s)", rec.Code, rec.Body)
 	}
-	var body map[string]bool
+	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode settings: %v", err)
 	}
-	if !body["admin_mfa_required"] {
+	if body["admin_mfa_required"] != true {
 		t.Fatalf("admin_mfa_required missing or false: %#v", body)
 	}
 	if !store.AdminMFARequired(db) {
@@ -327,6 +411,35 @@ func TestHouseStationRequiresAdmin(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("%s house station as non-admin: want 403, got %d", method, rec.Code)
 		}
+	}
+}
+
+func TestHouseControlsAreModeAware(t *testing.T) {
+	cases := []struct {
+		mode store.SecurityMode
+		want int
+	}{
+		{store.SecurityModeOpen, http.StatusOK},
+		{store.SecurityModeOpenAdminLocked, http.StatusUnauthorized},
+		{store.SecurityModeHouseholdProfiles, http.StatusUnauthorized},
+		{store.SecurityModeFullLogin, http.StatusUnauthorized},
+	}
+
+	for _, tc := range cases {
+		t.Run(string(tc.mode), func(t *testing.T) {
+			srv, db := newTestServer(t)
+			if err := store.SetSecurityMode(db, tc.mode); err != nil {
+				t.Fatalf("SetSecurityMode: %v", err)
+			}
+			rec := httptest.NewRecorder()
+
+			req := httptest.NewRequest(http.MethodPost, "/api/streams/house/shuffle", strings.NewReader(`{"shuffle":true}`))
+			srv.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
 	}
 }
 

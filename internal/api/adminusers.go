@@ -16,14 +16,16 @@ func (s *Server) getAdminSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"signup_enabled":       store.SignupEnabled(s.db),
 		"guest_access_enabled": store.GuestAccessEnabled(s.db),
+		"security_mode":        string(store.SecurityModeSetting(s.db)),
 		"admin_mfa_required":   store.AdminMFARequired(s.db),
 	})
 }
 
 type adminSettingsReq struct {
-	SignupEnabled      *bool `json:"signup_enabled"`
-	GuestAccessEnabled *bool `json:"guest_access_enabled"`
-	AdminMFARequired   *bool `json:"admin_mfa_required"`
+	SignupEnabled      *bool   `json:"signup_enabled"`
+	GuestAccessEnabled *bool   `json:"guest_access_enabled"`
+	SecurityMode       *string `json:"security_mode"`
+	AdminMFARequired   *bool   `json:"admin_mfa_required"`
 }
 
 // setAdminSettings flips whichever toggles are present in the body.
@@ -33,13 +35,24 @@ func (s *Server) setAdminSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
+	if req.SecurityMode != nil {
+		mode, err := store.ParseSecurityMode(*req.SecurityMode)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "unsupported security mode")
+			return
+		}
+		if err := store.SetSecurityMode(s.db, mode); err != nil {
+			writeErr(w, http.StatusInternalServerError, "db error")
+			return
+		}
+	}
 	if req.SignupEnabled != nil {
 		if err := store.SetSignupEnabled(s.db, *req.SignupEnabled); err != nil {
 			writeErr(w, http.StatusInternalServerError, "db error")
 			return
 		}
 	}
-	if req.GuestAccessEnabled != nil {
+	if req.GuestAccessEnabled != nil && req.SecurityMode == nil {
 		if err := store.SetGuestAccessEnabled(s.db, *req.GuestAccessEnabled); err != nil {
 			writeErr(w, http.StatusInternalServerError, "db error")
 			return
@@ -221,6 +234,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 			"id": u.ID, "email": u.Email, "display_name": u.DisplayName,
 			"is_admin": u.IsAdmin, "created_at": u.CreatedAt, "mfa_enabled": ok && factor.EnabledAt > 0,
 			"email_verified": u.EmailVerifiedAt != 0, "email_verified_at": u.EmailVerifiedAt,
+			"is_passwordless_profile": u.IsPasswordlessProfile,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

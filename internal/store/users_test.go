@@ -173,3 +173,62 @@ func TestRegenerateEmailVerificationReplacesPendingToken(t *testing.T) {
 		t.Fatalf("new token not pending: ok=%v err=%v", ok, err)
 	}
 }
+
+func TestCreatePasswordlessProfileUsesExistingUserTable(t *testing.T) {
+	db := mustOpenMem(t)
+
+	id, err := CreatePasswordlessProfile(db, "Casey")
+	if err != nil {
+		t.Fatalf("CreatePasswordlessProfile: %v", err)
+	}
+
+	user, ok, err := GetUserByID(db, id)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if !ok {
+		t.Fatalf("created profile user was not found")
+	}
+	if user.Email != "profile-1@passwordless.local" {
+		t.Fatalf("profile email = %q", user.Email)
+	}
+	if user.DisplayName != "Casey" {
+		t.Fatalf("display name = %q", user.DisplayName)
+	}
+	if user.PasswordHash != PasswordlessPasswordHash {
+		t.Fatalf("password hash = %q", user.PasswordHash)
+	}
+	if !user.IsPasswordlessProfile {
+		t.Fatalf("profile marker was not loaded")
+	}
+	if user.IsAdmin {
+		t.Fatalf("passwordless profile must not be admin")
+	}
+}
+
+func TestListPasswordlessProfilesExcludesPasswordUsers(t *testing.T) {
+	db := mustOpenMem(t)
+
+	if _, err := CreateUser(db, "admin@example.com", "Admin", "hash", true); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	firstID, err := CreatePasswordlessProfile(db, "Avery")
+	if err != nil {
+		t.Fatalf("CreatePasswordlessProfile first: %v", err)
+	}
+	secondID, err := CreatePasswordlessProfile(db, "Blair")
+	if err != nil {
+		t.Fatalf("CreatePasswordlessProfile second: %v", err)
+	}
+
+	profiles, err := ListPasswordlessProfiles(db)
+	if err != nil {
+		t.Fatalf("ListPasswordlessProfiles: %v", err)
+	}
+	if len(profiles) != 2 {
+		t.Fatalf("len(profiles) = %d, want 2", len(profiles))
+	}
+	if profiles[0].ID != firstID || profiles[1].ID != secondID {
+		t.Fatalf("profile ids = %d,%d want %d,%d", profiles[0].ID, profiles[1].ID, firstID, secondID)
+	}
+}

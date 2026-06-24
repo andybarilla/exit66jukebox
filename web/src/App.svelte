@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { createStore } from './lib/store.svelte.js';
-  import { audioURL, houseStreamURL, nextTrack } from './lib/api.js';
+  import { audioURL, houseStreamURL, nextHouse, nextTrack } from './lib/api.js';
   import { fmt, keyActivate } from './lib/format.js';
   import TopBar from './lib/components/TopBar.svelte';
   import Tabs from './lib/components/Tabs.svelte';
@@ -20,6 +20,7 @@
   import PasswordReset from './lib/components/PasswordReset.svelte';
   import VerifyEmail from './lib/components/VerifyEmail.svelte';
   import AdminPanel from './lib/components/AdminPanel.svelte';
+  import ProfilePicker from './lib/components/ProfilePicker.svelte';
 
   const s = createStore();
   let audio;
@@ -32,6 +33,13 @@
   const onInvitePath = $derived(currentPath.startsWith('/invite/'));
   const onResetPath = $derived(currentPath.startsWith('/reset-password/'));
   const onVerifyPath = $derived(currentPath.startsWith('/verify/'));
+  const onAdminPath = $derived(currentPath === '/admin');
+  const needsProfileSelection = $derived(
+    s.config.requiresProfile && !onAdminPath && !s.me?.is_passwordless_profile
+  );
+  const needsAccountLogin = $derived(
+    s.config.requiresLogin && (!s.me || s.me?.is_passwordless_profile)
+  );
   let tickTimer, resizeHandler, popstateHandler;
 
   // Active now-playing slice + derived progress %.
@@ -41,9 +49,12 @@
   const npPct = $derived((dur ? Math.min(100, (cur / dur) * 100) : 0) + '%');
   const streamLabel = $derived(s.stream === 'house' ? 'House' : 'Personal');
   const chip = $derived(`${streamLabel} · ${s.listeners}`);
-  // Privileged controls (skip/remove/clear/shuffle) show for an admin, or for any
-  // guest on their own personal stream (which the server never gates).
-  const canControl = $derived(s.isAdmin || s.stream === 'me');
+  // Queue controls show for admins on any stream, for open-mode house guests,
+  // and for any guest on their own personal stream (which the server never gates).
+  const canControlHouseQueue = $derived(
+    s.isAdmin || (s.config.securityMode === 'open' && s.stream === 'house')
+  );
+  const canControl = $derived(canControlHouseQueue || s.stream === 'me');
 
   // Attempt playback and let the audio element's play/pause events drive the
   // `playing` flag. A blocked autoplay rejects without firing 'pause', so the
@@ -102,6 +113,7 @@
   }
   function onNext() {
     if (s.stream === 'me') advancePersonal();
+    if (s.stream === 'house') nextHouse();
     // house: next is server-driven; SSE will update now-playing.
   }
   function onPrev() { s.setProgress(s.stream, 0); if (audio && s.stream === 'me') audio.currentTime = 0; }
@@ -124,11 +136,17 @@
     currentPath = window.location.pathname;
   }
 
+  function openAdminRoute() {
+    replaceRoute('/admin');
+    if (s.isAdmin) adminPanelOpen = true;
+    else showAuth = true;
+  }
+
   onMount(async () => {
     // Lightweight auth/config check first; only run heavy loads once access is
     // granted (logged in or guest access on), so they never 401 on the gate.
     await s.bootstrap();
-    if (s.me || s.config.guestAccess) await s.start();
+    if ((s.me || s.config.guestAccess) && !s.config.requiresProfile && !needsAccountLogin) await s.start();
     s.onResize();
     resizeHandler = () => s.onResize();
     popstateHandler = () => { currentPath = window.location.pathname; };
@@ -164,7 +182,11 @@
   // When a user logs in (any path), ensure heavy loads have run (start() is
   // guarded/idempotent) and dismiss the auth overlay.
   $effect(() => {
-    if (s.me) { s.start(); showAuth = false; }
+    if (s.me && !needsProfileSelection && !needsAccountLogin) { s.start(); showAuth = false; }
+  });
+
+  $effect(() => {
+    if (onAdminPath && s.authChecked && s.isAdmin) adminPanelOpen = true;
   });
 
   // re-apply audio when the user switches streams
@@ -209,7 +231,11 @@
   <PasswordReset onComplete={() => replaceRoute('/')} />
 {:else if onVerifyPath}
   <VerifyEmail onComplete={() => replaceRoute('/')} />
-{:else if (!s.me && !s.config.guestAccess) || showAuth}
+{:else if onAdminPath && !s.isAdmin}
+  <Login canSignup={false} onSwitchToSignup={() => (showSignup = false)} onLoggedIn={afterLogin} />
+{:else if needsProfileSelection}
+  <ProfilePicker onLoggedIn={afterLogin} />
+{:else if needsAccountLogin || showAuth}
   {#if showSignup}
     <Signup onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />
   {:else}
@@ -223,7 +249,7 @@
     onToast={(tone, title, msg) => s.pushToast(tone, title, msg)}
     onCastActive={(v) => s.setCastActive(v)}
     isAdmin={s.isAdmin} me={s.me} onLogout={() => s.signOut()}
-    onOpenSettings={() => (adminPanelOpen = true)} onLogin={() => (showAuth = true)} />
+    onOpenSettings={openAdminRoute} onLogin={() => (showAuth = true)} />
 
   <!-- BODY -->
   <div style="display:flex; flex:1; min-height:0;">
@@ -340,7 +366,7 @@
   <audio bind:this={audio} style="display:none;"></audio>
 
   {#if adminPanelOpen}
-    <AdminPanel onClose={() => (adminPanelOpen = false)} />
+    <AdminPanel onClose={() => { adminPanelOpen = false; if (onAdminPath) replaceRoute('/'); }} />
   {/if}
 {/if}
 </div>

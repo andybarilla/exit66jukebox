@@ -31,6 +31,9 @@ export const acceptInvite = (token, display_name, password) =>
 export const requestPasswordReset = (email) => postJSON('/api/auth/password-reset/forgot', { email });
 export const resetPassword = (token, password) => postJSON('/api/auth/password-reset/redeem', { token, password });
 export const verifyEmail = (token) => postJSON('/api/auth/verify-email', { token });
+export const listProfiles = () => fetch('/api/auth/profiles').then((r) => r.json());
+export const createProfile = (display_name) => postJSON('/api/auth/profiles', { display_name });
+export const selectProfile = (id) => postJSON('/api/auth/profiles/select', { id });
 
 export async function logout() {
   await fetch('/api/auth/logout', { method: 'POST' });

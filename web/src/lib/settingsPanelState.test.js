@@ -103,6 +103,20 @@ describe('buildEditableSettingsSnapshot', () => {
     expect(snapshot).not.toContain('last_scan_at');
   });
 
+  test('includes security mode in editable settings snapshot', () => {
+    const snapshot = buildEditableSettingsSnapshot({
+      signupEnabled: true,
+      guestAccess: false,
+      securityMode: 'open_admin_locked',
+      adminMfaRequired: false,
+      libraries: [],
+      federation: { enabled: false, role: '', hub_addr: '', listen: '', token: '', peer_id: '', token_configured: false, restart_required: false },
+      scan: { assume_same_title_folder_compilations: false },
+    });
+
+    expect(snapshot).toContain('open_admin_locked');
+  });
+
   test('produces stable normalized JSON when transient fields differ', () => {
     const baseState = {
       signupEnabled: true,
