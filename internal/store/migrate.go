@@ -163,6 +163,29 @@ func migrate(db *sql.DB) error {
 	); err != nil {
 		return err
 	}
+	// Federation direct-P2P settings (#124): three additive columns on
+	// federation_settings. Defaults: direct_p2p enabled (1), no STUN/TURN.
+	if has, err := columnExists(db, "federation_settings", "direct_p2p"); err != nil {
+		return err
+	} else if !has {
+		if _, err := db.Exec(`ALTER TABLE federation_settings ADD COLUMN direct_p2p INTEGER NOT NULL DEFAULT 1`); err != nil {
+			return err
+		}
+	}
+	if has, err := columnExists(db, "federation_settings", "stun_servers"); err != nil {
+		return err
+	} else if !has {
+		if _, err := db.Exec(`ALTER TABLE federation_settings ADD COLUMN stun_servers TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if has, err := columnExists(db, "federation_settings", "turn_url"); err != nil {
+		return err
+	} else if !has {
+		if _, err := db.Exec(`ALTER TABLE federation_settings ADD COLUMN turn_url TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
 	if err := migrateMFASchema(db); err != nil {
 		return err
 	}

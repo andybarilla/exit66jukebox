@@ -29,12 +29,15 @@ type LocalLibrary struct {
 }
 
 type FederationSettings struct {
-	Enabled bool   `json:"enabled"`
-	Role    string `json:"role"`
-	HubAddr string `json:"hub_addr"`
-	Listen  string `json:"listen"`
-	Token   string `json:"token,omitempty"`
-	PeerID  string `json:"peer_id"`
+	Enabled     bool     `json:"enabled"`
+	Role        string   `json:"role"`
+	HubAddr     string   `json:"hub_addr"`
+	Listen      string   `json:"listen"`
+	Token       string   `json:"token,omitempty"`
+	PeerID      string   `json:"peer_id"`
+	DirectP2P   bool     `json:"direct_p2p"`
+	STUNServers []string `json:"stun_servers"`
+	TURNURL     string   `json:"turn_url,omitempty"`
 }
 
 type LibraryScanSettings struct {
@@ -386,30 +389,64 @@ func SaveFederationSettings(db *sql.DB, settings FederationSettings) error {
 	}
 	_, err := db.Exec(federationSettingsUpsertSQL,
 		boolToInt(settings.Enabled), settings.Role, settings.HubAddr, settings.Listen, settings.Token, settings.PeerID,
+		boolToInt(settings.DirectP2P), joinSTUN(settings.STUNServers), settings.TURNURL,
 	)
 	return err
 }
 
-const federationSettingsUpsertSQL = `INSERT INTO federation_settings(id, enabled, role, hub_addr, listen, token, peer_id, created_at, updated_at)
-	 VALUES(1, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
-	 ON CONFLICT(id) DO UPDATE SET
-	   enabled=excluded.enabled, role=excluded.role, hub_addr=excluded.hub_addr,
-	   listen=excluded.listen, token=excluded.token, peer_id=excluded.peer_id,
-	   updated_at=strftime('%s','now')`
+const federationSettingsUpsertSQL = `INSERT INTO federation_settings(id, enabled, role, hub_addr, listen, token, peer_id, direct_p2p, stun_servers, turn_url, created_at, updated_at)
+		 VALUES(1, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+		 ON CONFLICT(id) DO UPDATE SET
+		   enabled=excluded.enabled, role=excluded.role, hub_addr=excluded.hub_addr,
+		   listen=excluded.listen, token=excluded.token, peer_id=excluded.peer_id,
+		   direct_p2p=excluded.direct_p2p, stun_servers=excluded.stun_servers, turn_url=excluded.turn_url,
+		   updated_at=strftime('%s','now')`
 
 func saveFederationSettingsTx(tx *sql.Tx, settings FederationSettings) error {
 	_, err := tx.Exec(federationSettingsUpsertSQL,
 		boolToInt(settings.Enabled), settings.Role, settings.HubAddr, settings.Listen, settings.Token, settings.PeerID,
+		boolToInt(settings.DirectP2P), joinSTUN(settings.STUNServers), settings.TURNURL,
 	)
 	return err
 }
 
+// joinSTUN serializes a STUN server list as a comma-separated string for
+// storage. Empty entries are dropped.
+func joinSTUN(servers []string) string {
+	var out []string
+	for _, s := range servers {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return strings.Join(out, ",")
+}
+
+// splitSTUN parses a comma-separated STUN server list back into a slice.
+func splitSTUN(joined string) []string {
+	if joined = strings.TrimSpace(joined); joined == "" {
+		return nil
+	}
+	parts := strings.Split(joined, ",")
+	var out []string
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func LoadFederationSettings(db *sql.DB) (FederationSettings, bool, error) {
 	var settings FederationSettings
-	var enabled int
+	var (
+		enabled     int
+		directP2P   int
+		stunServers string
+	)
 	err := db.QueryRow(
-		`SELECT enabled, role, hub_addr, listen, token, peer_id FROM federation_settings WHERE id = 1`,
-	).Scan(&enabled, &settings.Role, &settings.HubAddr, &settings.Listen, &settings.Token, &settings.PeerID)
+		`SELECT enabled, role, hub_addr, listen, token, peer_id, direct_p2p, stun_servers, turn_url FROM federation_settings WHERE id = 1`,
+	).Scan(&enabled, &settings.Role, &settings.HubAddr, &settings.Listen, &settings.Token, &settings.PeerID, &directP2P, &stunServers, &settings.TURNURL)
 	if err == sql.ErrNoRows {
 		return FederationSettings{}, false, nil
 	}
@@ -417,6 +454,8 @@ func LoadFederationSettings(db *sql.DB) (FederationSettings, bool, error) {
 		return FederationSettings{}, false, err
 	}
 	settings.Enabled = enabled != 0
+	settings.DirectP2P = directP2P != 0
+	settings.STUNServers = splitSTUN(stunServers)
 	return settings, true, nil
 }
 
@@ -426,6 +465,8 @@ func normalizeFederationSettings(settings FederationSettings) FederationSettings
 	settings.Listen = strings.TrimSpace(settings.Listen)
 	settings.Token = strings.TrimSpace(settings.Token)
 	settings.PeerID = strings.TrimSpace(settings.PeerID)
+	settings.TURNURL = strings.TrimSpace(settings.TURNURL)
+	settings.STUNServers = splitSTUN(joinSTUN(settings.STUNServers))
 	if !settings.Enabled {
 		settings.Role = ""
 	}
@@ -455,7 +496,15 @@ func validateFederationSettings(settings FederationSettings) error {
 }
 
 func FederationSettingsEqual(a, b FederationSettings) bool {
-	return comparableFederationSettings(a) == comparableFederationSettings(b)
+	a = comparableFederationSettings(a)
+	b = comparableFederationSettings(b)
+	if a.Enabled != b.Enabled || a.Role != b.Role || a.HubAddr != b.HubAddr ||
+		a.Listen != b.Listen || a.Token != b.Token || a.PeerID != b.PeerID ||
+		a.DirectP2P != b.DirectP2P || a.TURNURL != b.TURNURL ||
+		joinSTUN(a.STUNServers) != joinSTUN(b.STUNServers) {
+		return false
+	}
+	return true
 }
 
 func comparableFederationSettings(settings FederationSettings) FederationSettings {
