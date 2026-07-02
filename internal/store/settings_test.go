@@ -18,6 +18,67 @@ func TestSettingsDefaults(t *testing.T) {
 	}
 }
 
+func TestSecurityModeDefaultsToFullLogin(t *testing.T) {
+	db := mustOpenMem(t)
+
+	if got := SecurityModeSetting(db); got != SecurityModeFullLogin {
+		t.Fatalf("default security mode = %q, want %q", got, SecurityModeFullLogin)
+	}
+}
+
+func TestParseSecurityModeAcceptsOnlyApprovedModes(t *testing.T) {
+	valid := []SecurityMode{SecurityModeOpen, SecurityModeOpenAdminLocked, SecurityModeHouseholdProfiles, SecurityModeFullLogin}
+	for _, mode := range valid {
+		got, err := ParseSecurityMode(string(mode))
+		if err != nil {
+			t.Fatalf("ParseSecurityMode(%q) returned error: %v", mode, err)
+		}
+		if got != mode {
+			t.Fatalf("ParseSecurityMode(%q) = %q", mode, got)
+		}
+	}
+
+	if _, err := ParseSecurityMode("guest"); err == nil {
+		t.Fatalf("ParseSecurityMode accepted an unsupported mode")
+	}
+}
+
+func TestSecurityModeMigratesFromGuestAccessWhenModeMissing(t *testing.T) {
+	db := mustOpenMem(t)
+
+	if err := setMetaFlag(db, keyGuestAccess, true); err != nil {
+		t.Fatalf("set legacy guest access: %v", err)
+	}
+	if got := SecurityModeSetting(db); got != SecurityModeOpenAdminLocked {
+		t.Fatalf("guest enabled migrated to %q, want %q", got, SecurityModeOpenAdminLocked)
+	}
+
+	db = mustOpenMem(t)
+	if err := setMetaFlag(db, keyGuestAccess, false); err != nil {
+		t.Fatalf("set legacy guest access: %v", err)
+	}
+	if got := SecurityModeSetting(db); got != SecurityModeFullLogin {
+		t.Fatalf("guest disabled migrated to %q, want %q", got, SecurityModeFullLogin)
+	}
+}
+
+func TestSecurityModeOverridesLegacyGuestAccess(t *testing.T) {
+	db := mustOpenMem(t)
+	if err := setMetaFlag(db, keyGuestAccess, true); err != nil {
+		t.Fatalf("set legacy guest access: %v", err)
+	}
+	if err := SetSecurityMode(db, SecurityModeHouseholdProfiles); err != nil {
+		t.Fatalf("set security mode: %v", err)
+	}
+
+	if got := SecurityModeSetting(db); got != SecurityModeHouseholdProfiles {
+		t.Fatalf("security mode = %q, want %q", got, SecurityModeHouseholdProfiles)
+	}
+	if GuestAccessEnabled(db) {
+		t.Fatalf("legacy guest access should map from household_profiles as false")
+	}
+}
+
 func TestSettingsRoundTrip(t *testing.T) {
 	db := mustOpenMem(t)
 	if err := SetSignupEnabled(db, true); err != nil {

@@ -8,6 +8,7 @@
 
   let signupEnabled = $state(false);
   let guestAccess = $state(false);
+  let securityMode = $state('full_login');
   let adminMfaRequired = $state(false);
   let invites = $state([]);
   let users = $state([]);
@@ -59,7 +60,7 @@
   let pathBrowser = $state({ open: false, row: -1, path: '', parent: '', directories: [], loading: false, error: '', requestedError: '' });
 
   function currentEditableSettingsState() {
-    return { signupEnabled, guestAccess, adminMfaRequired, libraries, federation, scan };
+    return { signupEnabled, guestAccess, securityMode, adminMfaRequired, libraries, federation, scan };
   }
 
   function refreshCleanSettingsSnapshot() {
@@ -126,6 +127,7 @@
         const [settings, librarySettings, peerSettings, invList, userList] = await Promise.all([getSettings(), getLibraries(), getFederationPeers(), listInvites(), listUsers()]);
         signupEnabled = !!settings.signup_enabled;
         guestAccess = !!settings.guest_access_enabled;
+        securityMode = settings.security_mode || 'full_login';
         adminMfaRequired = !!settings.admin_mfa_required;
         libraries = librarySettings.local_libraries || [];
         libraryWarnings = librarySettings.warnings || [];
@@ -165,6 +167,22 @@
     const r = await setSettings({ guest_access_enabled: v });
     guestAccess = !!r.guest_access_enabled;
     updateCleanSettingsSnapshot({ guestAccess });
+  }
+
+  async function onChangeSecurityMode(v) {
+    accessError = '';
+    securityMode = v;
+    updateUnsavedState();
+    try {
+      const r = await setSettings({ security_mode: v });
+      securityMode = r.security_mode || v;
+      guestAccess = !!r.guest_access_enabled;
+      signupEnabled = !!r.signup_enabled;
+      updateCleanSettingsSnapshot({ securityMode, guestAccess, signupEnabled });
+    } catch (err) {
+      accessError = err.message || 'failed to update security mode';
+      updateUnsavedState();
+    }
   }
 
   async function onToggleAdminMFA(v) {
@@ -454,14 +472,33 @@
       <!-- Toggles -->
       <section class="section">
         <h2 class="section-title">Access</h2>
+        <section class="mode-section">
+          <h3>Security mode</h3>
+          <div class="mode-list">
+            {#each [
+              { value: 'open', label: 'Open', help: 'Frictionless trusted household jukebox. Normal queue controls are open.' },
+              { value: 'open_admin_locked', label: 'Open, admin locked', help: 'Public jukebox playback with settings and protected house controls behind /admin.' },
+              { value: 'household_profiles', label: 'Household profiles', help: 'Visitors choose or create a passwordless profile before using the jukebox.' },
+              { value: 'full_login', label: 'Full login', help: 'Password accounts are required before app access.' },
+            ] as option}
+              <label class="mode-card">
+                <input type="radio" name="security-mode" value={option.value} checked={securityMode === option.value} onchange={() => onChangeSecurityMode(option.value)} />
+                <span class="mode-copy">
+                  <strong>{option.label}</strong>
+                  <span>{option.help}</span>
+                </span>
+              </label>
+            {/each}
+          </div>
+          {#if securityMode !== 'full_login'}
+            <p class="warning">Open, admin-locked, and household profile modes are intended for trusted/private networks. Use full_login for public exposure.</p>
+          {/if}
+        </section>
         <label class="toggle-row">
-          <span class="toggle-label">Signup enabled</span>
+          <span class="toggle-label">Signup enabled <small>(full_login accounts only)</small></span>
           <Switch checked={signupEnabled} onChange={onToggleSignup} tone="cyan" />
         </label>
-        <label class="toggle-row">
-          <span class="toggle-label">Guest access</span>
-          <Switch checked={guestAccess} onChange={onToggleGuest} tone="cyan" />
-        </label>
+        {#if securityMode !== 'full_login'}<p class="muted">Signup applies only to full_login mode.</p>{/if}
         <label class="toggle-row">
           <span class="toggle-label">Require MFA for admin access</span>
           <Switch checked={adminMfaRequired} onChange={onToggleAdminMFA} tone="cyan" />
@@ -741,6 +778,15 @@
   .section-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-faint); margin: 0 0 12px 0; }
   .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; cursor: pointer; }
   .toggle-label { font-family: var(--font-sans); font-size: 14px; color: var(--text-body); }
+  .toggle-label small { display: block; color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+  .mode-section { display: grid; gap: 10px; margin-bottom: 14px; }
+  .mode-section h3 { margin: 0; font-family: var(--font-display); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--neon-cyan); }
+  .mode-list { display: grid; gap: 8px; }
+  .mode-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; padding: 10px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: rgba(0,0,0,0.16); cursor: pointer; }
+  .mode-card input { margin-top: 2px; }
+  .mode-copy { display: grid; gap: 3px; }
+  .mode-copy strong { font-family: var(--font-display); font-size: 13px; color: var(--text-strong); }
+  .mode-copy span { font-family: var(--font-sans); font-size: 12px; color: var(--text-muted); }
   .invite-form { display: flex; flex-direction: column; gap: 8px; }
   input[type="email"], input[type="text"], input[type="password"], select { padding: 8px 10px; background: var(--bg-inset); border: 1px solid var(--border-strong); border-radius: var(--radius-md); color: var(--text-body); font-family: var(--font-sans); font-size: 13px; width: 100%; box-sizing: border-box; }
   input[type="email"]:focus, input[type="text"]:focus, input[type="password"]:focus, select:focus { outline: none; border-color: var(--neon-cyan); }
