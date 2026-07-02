@@ -1,6 +1,7 @@
 package fed
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net"
@@ -29,16 +30,23 @@ type Manager struct {
 	Relay         *Relay  // hub role: the single relay instance shared with HubHandler
 	DB            *sql.DB // member: local DB the sync loop pushes/pulls against
 	PeerAddrs     map[string]string
+	Caps          Capabilities     // this instance's advertised transports
+	Signaler      *Signaler        // relays WebRTC signaling between authenticated peers
+	WebRTC        *WebRTCTransport // direct NAT-traversing audio transport (peer role)
 
-	mu         sync.Mutex     // guards online
-	online     []string       // member: peers the hub last reported online
-	hubSession *yamux.Session // member side: the live session to the hub
+	mu         sync.Mutex      // guards online
+	online     []string        // member: peers the hub last reported online
+	hubSession *yamux.Session  // member side: the live session to the hub
+	ctx        context.Context // optional lifetime context for background loops
 }
 
 // Start launches the role's networking in background goroutines.
 func (m *Manager) Start() {
 	if m.Registry == nil {
 		m.Registry = NewRegistry()
+	}
+	if m.Signaler == nil {
+		m.Signaler = NewSignaler()
 	}
 	switch m.Role {
 	case "hub":
@@ -48,6 +56,43 @@ func (m *Manager) Start() {
 	case "peer":
 		go m.runPeer()
 	}
+	// Start the WebRTC transport's answerer loop (also serves the offerer's own
+	// reply mailbox). It serves inbound data channels against the app handler so
+	// remote peers can stream this instance's audio directly. PeerHandler already
+	// routes /api/tracks/{id}/audio to the local app handler.
+	if m.WebRTC != nil {
+		ctx := m.rootCtx()
+		appHandler := m.PeerHandler
+		if appHandler == nil {
+			appHandler = m.MemberHandler
+		}
+		m.WebRTC.Listen(ctx, func(conn *dataChannelConn) {
+			go func() {
+				if err := ServeAudioOverConn(conn, appHandler, ""); err != nil {
+					log.Printf("fed webrtc serve %s: %v", conn.peerID, err)
+				}
+			}()
+		})
+	}
+}
+
+// SetContext supplies a lifetime context for background loops (e.g. the WebRTC
+// answerer). Call before Start.
+func (m *Manager) SetContext(ctx context.Context) {
+	m.mu.Lock()
+	m.ctx = ctx
+	m.mu.Unlock()
+}
+
+// rootCtx returns a background context for the manager's lifetime when no
+// cancellation context was supplied.
+func (m *Manager) rootCtx() context.Context {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ctx != nil {
+		return m.ctx
+	}
+	return context.Background()
 }
 
 func (m *Manager) runHub() {
@@ -104,6 +149,7 @@ func (m *Manager) servePeerConn(conn net.Conn) {
 	if m.DB != nil {
 		_ = store.MarkFederationPeerAuthenticated(m.DB, p.ID)
 	}
+	m.learnCaps(p)
 	go m.startDirectSyncLoop(p, p.Session.CloseChan())
 	if m.PeerHandler != nil {
 		_ = http.Serve(p.Session, m.PeerHandler)
@@ -144,6 +190,7 @@ func (m *Manager) dialPeer(peerID, addr string) {
 	}
 	p := &Peer{ID: peerID, Session: sess, Client: SessionClient(sess), BaseURL: "http://" + peerID}
 	m.Registry.put(p)
+	m.learnCaps(p)
 	go m.startDirectSyncLoop(p, sess.CloseChan())
 	if m.PeerHandler != nil {
 		_ = http.Serve(sess, m.PeerHandler)
@@ -192,6 +239,16 @@ func (m *Manager) directSyncOnce(peer *Peer) {
 		return
 	}
 	_ = PullPeerCatalog(m.DB, peer.Client, peer.ID, peer.BaseURL)
+}
+
+// learnCaps fetches the remote peer's capabilities over its authenticated
+// session and records them on the Peer so the resolver can pick a transport.
+// Best-effort: a zero value (relay only) is left in place on any error.
+func (m *Manager) learnCaps(peer *Peer) {
+	if peer == nil {
+		return
+	}
+	peer.Caps = fetchCaps(peer.Client, peer.BaseURL)
 }
 
 // serveHubConn performs the handshake, registers the peer, and serves HubHandler

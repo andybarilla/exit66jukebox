@@ -13,12 +13,15 @@ import (
 )
 
 // Peer is a live federated connection: the multiplexed session plus an http
-// client for outbound calls over it.
+// client for outbound calls over it. Caps holds the transports the remote
+// peer advertised after the session was authenticated (zero value = relay
+// only).
 type Peer struct {
 	ID      string
 	Session *yamux.Session
 	Client  *http.Client
 	BaseURL string
+	Caps    Capabilities
 }
 
 // Registry tracks live peer sessions by id. A peer present here is online.

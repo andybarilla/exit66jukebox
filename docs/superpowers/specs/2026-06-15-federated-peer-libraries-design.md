@@ -36,7 +36,8 @@ session is up, either side opens streams on demand.
   another peer's request.
 
 All inter-peer traffic transits the hub (any-to-any relay). Direct peer-to-peer
-audio that bypasses the hub when NAT permits is a separate future issue.
+audio that bypasses the hub when NAT permits is implemented as an optional
+transport on top of this relay (see "Direct P2P audio transport" below; #124).
 
 ### Auth
 
@@ -167,8 +168,49 @@ first.
 
 ## Out of scope (future issues)
 
-- **Direct peer-to-peer audio** — bypass the hub relay when NAT/connectivity
-  allows, for advanced users. (Explicitly requested as a follow-up issue.)
 - **Listening groups** — named federations with membership control, replacing the
   single shared token.
 - Cross-peer dedupe of identical files.
+
+## Direct P2P audio transport (#124)
+
+The v1 hub relay is the default and fallback path. On top of it there are now
+two direct transports that bypass the hub when connectivity allows, selected by
+the `directResolver` cascade in `internal/fed/relay.go` (peer role only):
+
+1. **WebRTC data channel** (`internal/fed/webrtc.go`) — NAT-traversing. ICE
+   gathers host, server-reflexive (STUN), and relay (TURN) candidates so two
+   peers behind NAT can stream audio directly with no inbound firewall openings.
+   This is the tier that reaches peers the yamux path cannot.
+2. **yamux TCP direct path** (issue #87, `directResolver` body) — works when the
+   peer is reachable (same LAN via mDNS discovery, or a routable/port-forwarded
+   address).
+
+Each tier fails closed to the next; if all direct tiers fail, playback continues
+through the hub relay with no user-visible breakage.
+
+**Signaling** rides the authenticated hub relay (`internal/fed/signaling.go`):
+SDP offer/answer and trickle ICE candidates are relayed only between registered,
+token-authenticated peers (a `POST /fed/signal/{to}` endpoint on the hub
+session), preserving the federation's SSRF-safety property. Correlation across
+an exchange is by a per-negotiation SID. Peers advertise direct-transport
+support via capabilities exchanged over the authenticated session
+(`internal/fed/caps.go`).
+
+**Required settings:** at least one STUN server (`EXIT66_FED_STUN`, default
+`stun:stun.l.google.com:19302`). A TURN server (`EXIT66_FED_TURN` as
+`turn://user:pass@host:port`) is required for symmetric NAT or restrictive
+firewalls where a host/srflx candidate pair cannot connect. Direct P2P can be
+disabled with `EXIT66_FED_DIRECT_P2P=0`; the hub relay then behaves exactly as
+before.
+
+**Why WebRTC over other transports:** pion/webrtc provides a full ICE/STUN/TURN
+implementation in pure Go (no cgo), and data channels give reliable ordered
+byte streams with no inbound firewall openings — the property the existing
+yamux-direct path lacks for NAT'd peers. Range/seek semantics pass through a
+tiny length-prefixed request/response frame (`internal/fed/webrtc_audio.go`)
+mirroring the HTTP headers the relay path preserves.
+
+**Diagnostics:** each resolved stream logs its transport
+(`transport=webrtc|direct|relay`) so the chosen path is observable without a UI.
+

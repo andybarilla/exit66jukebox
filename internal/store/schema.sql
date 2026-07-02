@@ -61,15 +61,18 @@ CREATE TABLE IF NOT EXISTS remote_library (
     UNIQUE(source_peer, source_library_id)
 );
 CREATE TABLE IF NOT EXISTS federation_settings (
-    id         INTEGER PRIMARY KEY CHECK (id = 1),
-    enabled    INTEGER NOT NULL DEFAULT 0,
-    role       TEXT NOT NULL DEFAULT '',
-    hub_addr   TEXT NOT NULL DEFAULT '',
-    listen     TEXT NOT NULL DEFAULT '',
-    token      TEXT NOT NULL DEFAULT '',
-    peer_id    TEXT NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled       INTEGER NOT NULL DEFAULT 0,
+    role          TEXT NOT NULL DEFAULT '',
+    hub_addr      TEXT NOT NULL DEFAULT '',
+    listen        TEXT NOT NULL DEFAULT '',
+    token         TEXT NOT NULL DEFAULT '',
+    peer_id       TEXT NOT NULL DEFAULT '',
+    direct_p2p    INTEGER NOT NULL DEFAULT 1,
+    stun_servers  TEXT NOT NULL DEFAULT '',
+    turn_url      TEXT NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS federation_peer (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,

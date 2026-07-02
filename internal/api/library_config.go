@@ -23,13 +23,16 @@ type librariesResponse struct {
 }
 
 type federationResponse struct {
-	Enabled         bool   `json:"enabled"`
-	Role            string `json:"role"`
-	HubAddr         string `json:"hub_addr"`
-	Listen          string `json:"listen"`
-	PeerID          string `json:"peer_id"`
-	TokenConfigured bool   `json:"token_configured"`
-	RestartRequired bool   `json:"restart_required"`
+	Enabled         bool     `json:"enabled"`
+	Role            string   `json:"role"`
+	HubAddr         string   `json:"hub_addr"`
+	Listen          string   `json:"listen"`
+	PeerID          string   `json:"peer_id"`
+	DirectP2P       bool     `json:"direct_p2p"`
+	STUNServers     []string `json:"stun_servers"`
+	TURNURL         string   `json:"turn_url"`
+	TokenConfigured bool     `json:"token_configured"`
+	RestartRequired bool     `json:"restart_required"`
 }
 
 type saveLibrariesRequest struct {
@@ -257,6 +260,9 @@ func (s *Server) librarySettingsResponse() (librariesResponse, error) {
 			HubAddr:         fedSettings.HubAddr,
 			Listen:          fedSettings.Listen,
 			PeerID:          fedSettings.PeerID,
+			DirectP2P:       fedSettings.DirectP2P,
+			STUNServers:     fedSettings.STUNServers,
+			TURNURL:         fedSettings.TURNURL,
 			TokenConfigured: fedSettings.Token != "",
 			RestartRequired: !store.FederationSettingsEqual(fedSettings, s.activeFed),
 		},

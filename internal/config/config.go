@@ -7,6 +7,7 @@ import (
 	"flag"
 	"os"
 	"strconv"
+	"strings"
 )
 
 const mfaKeySize = 32
@@ -79,19 +80,44 @@ type Federation struct {
 	Listen  string // hub only: local address to listen on (e.g. ":8443")
 	Token   string // shared secret presented at registration
 	PeerID  string // this instance's id (e.g. "home", "vps")
+	// DirectP2P enables the WebRTC direct transport (peer role) so audio can
+	// bypass the hub relay when NAT traversal succeeds. Defaults on.
+	DirectP2P   bool
+	STUNServers []string
+	TURNURL     string
 }
 
 // Enabled reports whether federation is configured.
 func (f Federation) Enabled() bool { return f.Role == "hub" || f.Role == "member" || f.Role == "peer" }
 
 func federationFromEnv() Federation {
-	return Federation{
+	f := Federation{
 		Role:    os.Getenv("EXIT66_FED_ROLE"),
 		HubAddr: os.Getenv("EXIT66_FED_HUB"),
 		Listen:  os.Getenv("EXIT66_FED_LISTEN"),
 		Token:   os.Getenv("EXIT66_FED_TOKEN"),
 		PeerID:  os.Getenv("EXIT66_FED_PEER_ID"),
+		TURNURL: os.Getenv("EXIT66_FED_TURN"),
 	}
+	// Direct P2P defaults on; an explicit EXIT66_FED_DIRECT_P2P=0 turns it off.
+	f.DirectP2P = os.Getenv("EXIT66_FED_DIRECT_P2P") != "0"
+	f.STUNServers = parseSTUNList(os.Getenv("EXIT66_FED_STUN"))
+	return f
+}
+
+// parseSTUNList splits a comma-separated STUN URL list, trimming spaces. An
+// empty value yields a nil slice (callers apply the default STUN server).
+func parseSTUNList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // servicesFromEnv reads service credentials from the environment.
