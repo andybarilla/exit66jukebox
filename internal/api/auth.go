@@ -120,9 +120,10 @@ func decodeJSON(r *http.Request, v any) error {
 }
 
 type signupReq struct {
-	Email       string `json:"email"`
-	DisplayName string `json:"display_name"`
-	Password    string `json:"password"`
+	Email          string `json:"email"`
+	DisplayName    string `json:"display_name"`
+	Password       string `json:"password"`
+	BootstrapToken string `json:"bootstrap_token"`
 }
 
 const minPasswordLen = 8
@@ -147,6 +148,10 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bootstrap := n == 0
+	if bootstrap && !s.acceptsBootstrapToken(strings.TrimSpace(req.BootstrapToken)) {
+		writeErr(w, http.StatusForbidden, "valid bootstrap token required")
+		return
+	}
 	if !bootstrap && !store.SignupEnabled(s.db) {
 		writeErr(w, http.StatusForbidden, "signup is disabled")
 		return
@@ -180,8 +185,12 @@ func (s *Server) createSignupAccount(w http.ResponseWriter, r *http.Request, ema
 		writeJSON(w, http.StatusOK, map[string]any{"id": uid, "email": email, "is_admin": false, "email_verified": false})
 		return
 	}
-	uid, err := store.CreateUser(s.db, email, name, hash, true, true)
+	uid, err := store.CreateFirstAdmin(s.db, email, name, hash)
 	if err != nil {
+		if errors.Is(err, store.ErrBootstrapAlreadyClaimed) {
+			writeErr(w, http.StatusConflict, "bootstrap already claimed")
+			return
+		}
 		writeErr(w, http.StatusConflict, "email already registered")
 		return
 	}

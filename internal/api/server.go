@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"io/fs"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andybarilla/exit66jukebox/internal/auth"
 	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/events"
@@ -47,8 +49,9 @@ type Server struct {
 
 	// signingSecret is the HMAC secret used to sign Sonos media URLs; loaded once
 	// at startup from the store (store.MediaSigningSecret).
-	signingSecret []byte
-	mfaKey        []byte
+	signingSecret      []byte
+	mfaKey             []byte
+	bootstrapTokenHash string
 	// loginAttempts throttles the password form per client IP (soft brute-force
 	// guard); guarded by loginMu.
 	loginMu       sync.Mutex
@@ -152,6 +155,17 @@ func (s *Server) SetVerificationEmailer(fn func(to, link string) error) { s.emai
 func (s *Server) SetSigningSecret(secret []byte) { s.signingSecret = secret }
 
 func (s *Server) SetMFAKey(key []byte) { s.mfaKey = append([]byte(nil), key...) }
+
+func (s *Server) SetBootstrapToken(token string) { s.bootstrapTokenHash = storeTokenHash(token) }
+
+func (s *Server) acceptsBootstrapToken(token string) bool {
+	if s.bootstrapTokenHash == "" || token == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(s.bootstrapTokenHash), []byte(storeTokenHash(token))) == 1
+}
+
+func storeTokenHash(token string) string { return auth.HashToken(token) }
 
 // RegisterStream attaches a broadcast hub, event bus, and now-playing tracker
 // for a shared stream id. np may be nil for streams that don't track current

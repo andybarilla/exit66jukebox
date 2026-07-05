@@ -27,6 +27,7 @@
   let volume = $state(68);
   let showSignup = $state(false);
   let showAuth = $state(false);
+  let bootstrapToken = $state('');
   let adminPanelOpen = $state(false);
   let currentPath = $state(window.location.pathname);
   const onInvitePath = $derived(currentPath.startsWith('/invite/'));
@@ -125,6 +126,8 @@
   }
 
   onMount(async () => {
+    bootstrapToken = new URLSearchParams(window.location.search).get('bootstrap_token') || '';
+    if (bootstrapToken) showSignup = true;
     // Lightweight auth/config check first; only run heavy loads once access is
     // granted (logged in or guest access on), so they never 401 on the gate.
     await s.bootstrap();
@@ -211,7 +214,7 @@
   <VerifyEmail onComplete={() => replaceRoute('/')} />
 {:else if (!s.me && !s.config.guestAccess) || showAuth}
   {#if showSignup}
-    <Signup onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />
+    <Signup bootstrapToken={bootstrapToken} needsBootstrap={s.config.needsBootstrap} onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />
   {:else}
     <Login canSignup={s.config.signupEnabled || s.config.needsBootstrap}
            onSwitchToSignup={() => (showSignup = true)}

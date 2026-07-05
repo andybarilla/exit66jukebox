@@ -2,9 +2,12 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 
 	"github.com/andybarilla/exit66jukebox/internal/auth"
 )
+
+var ErrBootstrapAlreadyClaimed = errors.New("bootstrap already claimed")
 
 // User is an account row. PasswordHash is the encoded pbkdf2 string from
 // internal/auth; this package never hashes or compares passwords itself.
@@ -40,6 +43,25 @@ func CreateUser(db *sql.DB, email, displayName, passwordHash string, isAdmin boo
 		email, displayName, passwordHash, boolToInt(isAdmin))
 	if err != nil {
 		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func CreateFirstAdmin(db *sql.DB, email, displayName, passwordHash string) (int64, error) {
+	res, err := db.Exec(
+		`INSERT INTO user(email, display_name, password_hash, is_admin, created_at, email_verified_at)
+		 SELECT ?, ?, ?, 1, strftime('%s','now'), strftime('%s','now')
+		 WHERE NOT EXISTS (SELECT 1 FROM user)`,
+		email, displayName, passwordHash)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if rows == 0 {
+		return 0, ErrBootstrapAlreadyClaimed
 	}
 	return res.LastInsertId()
 }

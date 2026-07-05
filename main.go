@@ -9,9 +9,11 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -242,6 +244,10 @@ func main() {
 	srv.SetMFAKey(cfg.MFAKey)
 	srv.SetListenAddr(cfg.Addr)
 	srv.SetPublicOrigin(cfg.PublicOrigin)
+	if token, ok := bootstrapToken(db); ok {
+		srv.SetBootstrapToken(token)
+		log.Printf("First admin bootstrap URL: %s", bootstrapURL(cfg.PublicOrigin, cfg.Addr, token))
+	}
 	srv.SetMuteLocalOnCast(cfg.MuteLocalOnCast)
 	srv.SetSigningSecret(signingSecret)
 	srv.SetScanWorkers(cfg.ScanWorkers)
@@ -367,6 +373,47 @@ func waitForClose(done <-chan struct{}, timeout time.Duration) bool {
 	case <-time.After(timeout):
 		return false
 	}
+}
+
+func bootstrapToken(db *sql.DB) (string, bool) {
+	n, err := store.CountUsers(db)
+	if err != nil {
+		log.Printf("bootstrap token skipped: count users: %v", err)
+		return "", false
+	}
+	if n != 0 {
+		return "", false
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		log.Fatalf("bootstrap token: %v", err)
+	}
+	return token, true
+}
+
+func bootstrapURL(publicOrigin, listenAddr, token string) string {
+	base := strings.TrimRight(publicOrigin, "/")
+	if base == "" {
+		base = "http://" + localHTTPHost(listenAddr)
+	}
+	u, err := url.Parse(base + "/")
+	if err != nil {
+		log.Fatalf("bootstrap URL: %v", err)
+	}
+	q := u.Query()
+	q.Set("bootstrap_token", token)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func localHTTPHost(addr string) string {
+	if addr == "" || strings.HasPrefix(addr, ":") {
+		return "127.0.0.1" + addr
+	}
+	if _, _, err := net.SplitHostPort(addr); err != nil && !strings.Contains(addr, ":") {
+		return net.JoinHostPort(addr, "80")
+	}
+	return addr
 }
 
 func startupLibraryRoots(db *sql.DB, cliRoots []string) ([]string, error) {

@@ -24,8 +24,8 @@ export const disableMfa = (password, code, useRecovery = false) =>
   postJSON('/api/auth/mfa/disable', useRecovery ? { password, recovery_code: code } : { password, code });
 export const regenerateRecoveryCodes = (password, code, useRecovery = false) =>
   postJSON('/api/auth/mfa/recovery/regenerate', useRecovery ? { password, recovery_code: code } : { password, code });
-export const signup = (email, display_name, password) =>
-  postJSON('/api/auth/signup', { email, display_name, password });
+export const signup = (email, display_name, password, bootstrap_token = '') =>
+  postJSON('/api/auth/signup', { email, display_name, password, bootstrap_token });
 export const acceptInvite = (token, display_name, password) =>
   postJSON('/api/auth/invite/accept', { token, display_name, password });
 export const requestPasswordReset = (email) => postJSON('/api/auth/password-reset/forgot', { email });

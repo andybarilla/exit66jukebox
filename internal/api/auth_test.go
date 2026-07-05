@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -205,8 +206,9 @@ func TestMiddlewareGuestToggle(t *testing.T) {
 
 func TestSignupBootstrapsAdmin(t *testing.T) {
 	s, db := newTestServer(t)
+	s.SetBootstrapToken("boot-token")
 	rec := httptest.NewRecorder()
-	body := `{"email":"a@b.com","display_name":"A","password":"pw123456"}`
+	body := `{"email":"a@b.com","display_name":"A","password":"pw123456","bootstrap_token":"boot-token"}`
 	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
 	if rec.Code != 200 {
 		t.Fatalf("bootstrap signup: want 200, got %d (%s)", rec.Code, rec.Body)
@@ -223,6 +225,84 @@ func TestSignupBootstrapsAdmin(t *testing.T) {
 	s.signup(rec2, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body2)))
 	if rec2.Code == 200 {
 		t.Fatal("second signup allowed while disabled")
+	}
+}
+
+func TestSignupBootstrapRejectsMissingOrInvalidToken(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetBootstrapToken("boot-token")
+	for _, body := range []string{
+		`{"email":"a@b.com","display_name":"A","password":"pw123456"}`,
+		`{"email":"a@b.com","display_name":"A","password":"pw123456","bootstrap_token":"wrong"}`,
+	} {
+		rec := httptest.NewRecorder()
+		s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("bootstrap signup without valid token: want 403, got %d (%s)", rec.Code, rec.Body)
+		}
+	}
+	if n, err := store.CountUsers(db); err != nil || n != 0 {
+		t.Fatalf("invalid bootstrap created users: n=%d err=%v", n, err)
+	}
+}
+
+func TestSignupBootstrapTokenRotatesAcrossServerInstances(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetBootstrapToken("new-token")
+	rec := httptest.NewRecorder()
+	body := `{"email":"a@b.com","display_name":"A","password":"pw123456","bootstrap_token":"old-token"}`
+	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("old token: want 403, got %d (%s)", rec.Code, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	body = `{"email":"a@b.com","display_name":"A","password":"pw123456","bootstrap_token":"new-token"}`
+	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("new token: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	user, _, _ := store.GetUserByEmail(db, "a@b.com")
+	if !user.IsAdmin {
+		t.Fatal("new token did not create admin")
+	}
+}
+
+func TestSignupBootstrapConcurrentRaceCreatesOneAdmin(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetBootstrapToken("boot-token")
+	const attempts = 12
+	var wg sync.WaitGroup
+	statuses := make(chan int, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			body := `{"email":"` + string(rune('a'+i)) + `@b.com","display_name":"A","password":"pw123456","bootstrap_token":"boot-token"}`
+			rec := httptest.NewRecorder()
+			s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
+			statuses <- rec.Code
+		}(i)
+	}
+	wg.Wait()
+	close(statuses)
+
+	winners := 0
+	for status := range statuses {
+		if status == http.StatusOK {
+			winners++
+			continue
+		}
+		if status != http.StatusConflict && status != http.StatusForbidden {
+			t.Fatalf("unexpected race status: %d", status)
+		}
+	}
+	users, err := store.ListUsers(db)
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	if winners != 1 || len(users) != 1 || !users[0].IsAdmin {
+		t.Fatalf("race results: winners=%d users=%+v", winners, users)
 	}
 }
 
