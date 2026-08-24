@@ -1222,3 +1222,87 @@ func TestSignupBootstrapDisarmsTokenAfterFirstAdmin(t *testing.T) {
 		t.Fatalf("claimed bootstrap created an account: users=%+v err=%v", users, err)
 	}
 }
+
+func TestForgotPasswordRefusesWithoutPublicOrigin(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetListenAddr("0.0.0.0:8066")
+	h, _ := auth.HashPassword("oldpassword")
+	if _, err := store.CreateUser(db, "reset@example.com", "Reset", h, false); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	sent := false
+	s.SetPasswordResetEmailer(func(to, link string) { sent = true })
+
+	rec := httptest.NewRecorder()
+	s.forgotPassword(rec, httptest.NewRequest("POST", "/api/auth/password-reset/forgot", strings.NewReader(`{"email":"reset@example.com"}`)))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("forgot: want 503, got %d (%s)", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "EXIT66_PUBLIC_ORIGIN") {
+		t.Fatalf("error should name the missing setting: %s", rec.Body)
+	}
+	if sent {
+		t.Fatal("reset email sent despite an unresolvable link")
+	}
+	if resets, _ := store.ListInvites(db); len(resets) != 0 {
+		t.Fatalf("no invite should exist, got %d", len(resets))
+	}
+}
+
+// The refusal must land before the account lookup so it reads identically for a
+// registered and an unregistered address — forgotPassword is enumeration-safe
+// and this must not become the one response that distinguishes them.
+func TestForgotPasswordRefusalIsIdenticalForUnknownEmail(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.SetListenAddr("0.0.0.0:8066")
+	s.SetPasswordResetEmailer(func(to, link string) {})
+
+	rec := httptest.NewRecorder()
+	s.forgotPassword(rec, httptest.NewRequest("POST", "/api/auth/password-reset/forgot", strings.NewReader(`{"email":"nobody@example.com"}`)))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unknown email: want 503, got %d (%s)", rec.Code, rec.Body)
+	}
+}
+
+// A signup whose verification mail cannot be addressed is refused outright,
+// with no row left behind: an unverified account can't log in (login gates on
+// EmailVerifiedAt) and would hold the address against a later retry.
+func TestOpenSignupRefusesWithoutPublicOrigin(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetListenAddr("0.0.0.0:8066")
+	_, _ = store.CreateUser(db, "admin@example.com", "Admin", "h", true, true)
+	if err := store.SetSignupEnabled(db, true); err != nil {
+		t.Fatalf("enable signup: %v", err)
+	}
+	sent := false
+	s.SetVerificationEmailer(func(to, link string) error { sent = true; return nil })
+
+	rec := httptest.NewRecorder()
+	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(`{"email":"open@example.com","display_name":"Open","password":"pw123456"}`)))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("signup: want 503, got %d (%s)", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "EXIT66_PUBLIC_ORIGIN") {
+		t.Fatalf("error should name the missing setting: %s", rec.Body)
+	}
+	if sent {
+		t.Fatal("verification email sent despite an unresolvable link")
+	}
+	if _, ok, err := store.GetUserByEmail(db, "open@example.com"); err != nil || ok {
+		t.Fatalf("refused signup left an account behind: ok=%v err=%v", ok, err)
+	}
+}
+
+// The first-admin bootstrap is the one signup that mints no emailed link, so it
+// must still work on a wildcard bind with no public origin configured.
+func TestBootstrapSignupUnaffectedByMissingPublicOrigin(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.SetListenAddr("0.0.0.0:8066")
+	s.SetBootstrapToken("boot-token")
+
+	rec := httptest.NewRecorder()
+	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(`{"email":"first@example.com","display_name":"First","password":"pw123456","bootstrap_token":"boot-token"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bootstrap signup: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+}

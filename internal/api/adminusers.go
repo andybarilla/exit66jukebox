@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"strconv"
@@ -129,7 +130,9 @@ type createInviteReq struct {
 const inviteTTL = 7 * 24 * time.Hour
 
 // createInvite issues a single-use invite and returns the shareable link. The
-// link base is derived from the request (scheme + host).
+// link base comes from remoteBaseURL, never from the request: an invite is
+// pasted to someone else, and a Host header the caller chose would let them
+// pick where the recipient lands.
 func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 	var req createInviteReq
 	if err := decodeJSON(r, &req); err != nil {
@@ -150,12 +153,17 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "token error")
 		return
 	}
+	base, err := s.remoteBaseURL()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, publicOriginRequired)
+		return
+	}
 	exp := time.Now().Add(inviteTTL).Unix()
 	if _, err := store.CreateInvite(s.db, auth.HashToken(raw), req.Email, req.IsAdmin, u.ID, exp); err != nil {
 		writeErr(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	link := s.publicBaseURL() + "/invite/" + raw
+	link := base + "/invite/" + raw
 	// Best-effort email when SMTP is configured; failure doesn't fail the call.
 	if s.emailInvite != nil && req.Email != "" {
 		go s.emailInvite(req.Email, link)
@@ -163,10 +171,14 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"link": link, "email": req.Email})
 }
 
-// publicBaseURL is the single resolver for browser-facing links (invite,
-// password reset, email verification, first-admin bootstrap). A wildcard listen
-// address is rewritten to loopback, since "http://0.0.0.0:8066" is not a URL
-// anyone can open.
+// publicBaseURL resolves a browser-facing base URL, guessing when it must: a
+// wildcard listen address is rewritten to loopback, since "http://0.0.0.0:8066"
+// is not a URL anyone can open. That guess only holds for a reader on this
+// machine, which is why the two callers are the first-admin bootstrap URL
+// (printed to the server's own log and opened by whoever is at the machine)
+// and remoteBaseURL, which calls it only once it has established the bind is
+// loopback and the guess is therefore not one. Anything mailed to someone else
+// goes through remoteBaseURL so it refuses rather than guesses.
 func (s *Server) publicBaseURL() string {
 	if s.publicOrigin != "" {
 		return s.publicOrigin
@@ -182,6 +194,50 @@ func (s *Server) publicBaseURL() string {
 		return "http://127.0.0.1"
 	}
 	return "http://" + net.JoinHostPort(host, "80")
+}
+
+// errPublicOriginUnset is returned by remoteBaseURL when there is no honest
+// answer: no public origin is configured and the listen address is one other
+// machines can reach, so any link minted here would point at the recipient.
+var errPublicOriginUnset = errors.New("public origin is not configured")
+
+// publicOriginRequired is the message every caller shows when link generation
+// is refused. It names the setting because the operator reading it is the only
+// person who can fix it.
+const publicOriginRequired = "set EXIT66_PUBLIC_ORIGIN: links can't be generated from this listen address"
+
+// remoteBaseURL is publicBaseURL for links that reach someone other than the
+// operator standing at the machine — invite, password reset, email
+// verification. Those must not be guessed: publicBaseURL rewrites a wildcard
+// bind to loopback so the operator has something openable, but a loopback link
+// in someone else's inbox points at their machine and silently fails. Callers
+// fail the operation rather than send it.
+func (s *Server) remoteBaseURL() (string, error) {
+	if s.publicOrigin != "" {
+		return s.publicOrigin, nil
+	}
+	if !s.listensOnLoopback() {
+		return "", errPublicOriginUnset
+	}
+	return s.publicBaseURL(), nil
+}
+
+// listensOnLoopback reports whether the listen address is one only this machine
+// can reach, which is the single case where an unconfigured install can still
+// mint a link that works for its recipient. A wildcard bind is deliberately
+// excluded even though publicBaseURL maps it to loopback: it stands for every
+// interface, including the ones a remote recipient came in on.
+func (s *Server) listensOnLoopback() bool {
+	host := s.listenAddr
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // isWildcardHost reports whether host is an "any interface" bind address.
@@ -275,12 +331,17 @@ func (s *Server) createEmailVerification(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusBadRequest, "user is already verified")
 		return
 	}
+	base, err := s.remoteBaseURL()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, publicOriginRequired)
+		return
+	}
 	raw, err := store.RegenerateEmailVerification(s.db, u.ID, time.Now().Add(emailVerificationTTL).Unix())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "token error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"link": s.publicBaseURL() + "/verify/" + raw, "email": u.Email})
+	writeJSON(w, http.StatusOK, map[string]any{"link": base + "/verify/" + raw, "email": u.Email})
 }
 
 func (s *Server) createPasswordReset(w http.ResponseWriter, r *http.Request) {
@@ -298,6 +359,11 @@ func (s *Server) createPasswordReset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "user not found")
 		return
 	}
+	base, err := s.remoteBaseURL()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, publicOriginRequired)
+		return
+	}
 	raw, err := auth.GenerateToken()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "token error")
@@ -307,7 +373,7 @@ func (s *Server) createPasswordReset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"link": s.publicBaseURL() + "/reset-password/" + raw, "email": u.Email})
+	writeJSON(w, http.StatusOK, map[string]any{"link": base + "/reset-password/" + raw, "email": u.Email})
 }
 
 // deleteUser removes an account. An admin can't delete themselves (avoids

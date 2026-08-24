@@ -304,6 +304,10 @@ func (s *Server) createSignupAccount(w http.ResponseWriter, r *http.Request, ema
 				writeErr(w, http.StatusServiceUnavailable, "verification email is not configured")
 				return
 			}
+			if errors.Is(err, errPublicOriginUnset) {
+				writeErr(w, http.StatusServiceUnavailable, publicOriginRequired)
+				return
+			}
 			writeErr(w, http.StatusServiceUnavailable, "verification email could not be sent")
 			return
 		}
@@ -331,11 +335,19 @@ func (s *Server) createAndSendVerification(email, name, hash string) (int64, err
 	if s.emailVerification == nil {
 		return 0, errVerificationEmailerUnavailable
 	}
+	// Resolve the link before the insert. An account whose verification mail
+	// can't be addressed is worse than no account: login gates on
+	// EmailVerifiedAt, so the row would be permanently unusable while still
+	// holding the address against a retry.
+	base, err := s.remoteBaseURL()
+	if err != nil {
+		return 0, err
+	}
 	uid, raw, err := store.CreateUnverifiedUserWithEmailVerification(s.db, email, name, hash, time.Now().Add(emailVerificationTTL).Unix())
 	if err != nil {
 		return 0, err
 	}
-	if err := s.emailVerification(email, s.publicBaseURL()+"/verify/"+raw); err != nil {
+	if err := s.emailVerification(email, base+"/verify/"+raw); err != nil {
 		if deleteErr := store.DeleteUser(s.db, uid); deleteErr != nil {
 			return 0, deleteErr
 		}
@@ -796,6 +808,14 @@ func (s *Server) forgotPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, passwordResetAccepted())
 		return
 	}
+	// Ahead of the lookup on purpose: this refusal depends only on server
+	// configuration, so it reads the same for a registered and an unregistered
+	// address and can't be used to enumerate accounts.
+	base, err := s.remoteBaseURL()
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, publicOriginRequired)
+		return
+	}
 	u, ok, err := store.GetUserByEmail(s.db, req.Email)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "db error")
@@ -815,7 +835,7 @@ func (s *Server) forgotPassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "db error")
 		return
 	}
-	s.emailPasswordReset(req.Email, s.publicBaseURL()+"/reset-password/"+raw)
+	s.emailPasswordReset(req.Email, base+"/reset-password/"+raw)
 	writeJSON(w, http.StatusOK, passwordResetAccepted())
 }
 
