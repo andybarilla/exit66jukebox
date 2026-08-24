@@ -145,7 +145,11 @@
 
   onMount(async () => {
     bootstrapToken = new URLSearchParams(window.location.search).get('bootstrap_token') || '';
-    if (bootstrapToken) showSignup = true;
+    // showAuth as well as showSignup: requiresLogin is only set in full_login
+    // mode, so a zero-user instance carrying the legacy guest_access flag
+    // (open_admin_locked) would otherwise drop the bootstrap link into the main
+    // app with no signup form.
+    if (bootstrapToken) showSignup = showAuth = true;
     // Lightweight auth/config check first; only run heavy loads once access is
     // granted (logged in or guest access on), so they never 401 on the gate.
     await s.bootstrap();
@@ -240,7 +244,7 @@
   <ProfilePicker onLoggedIn={afterLogin} />
 {:else if needsAccountLogin || showAuth}
   {#if showSignup}
-    <Signup bootstrapToken={bootstrapToken} needsBootstrap={s.config.needsBootstrap} onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />
+    <Signup {bootstrapToken} needsBootstrap={s.config.needsBootstrap} onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />
   {:else}
     <Login canSignup={s.config.signupEnabled || s.config.needsBootstrap}
            onSwitchToSignup={() => (showSignup = true)}

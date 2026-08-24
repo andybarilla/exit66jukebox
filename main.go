@@ -9,11 +9,9 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -246,8 +244,7 @@ func main() {
 	srv.SetListenAddr(cfg.Addr)
 	srv.SetPublicOrigin(cfg.PublicOrigin)
 	if token, ok := bootstrapToken(db); ok {
-		srv.SetBootstrapToken(token)
-		log.Printf("First admin bootstrap URL: %s", bootstrapURL(cfg.PublicOrigin, cfg.Addr, token))
+		log.Printf("First admin bootstrap URL: %s", srv.SetBootstrapToken(token))
 	}
 	srv.SetMuteLocalOnCast(cfg.MuteLocalOnCast)
 	srv.SetSigningSecret(signingSecret)
@@ -391,6 +388,9 @@ func waitForClose(done <-chan struct{}, timeout time.Duration) bool {
 	}
 }
 
+// bootstrapToken mints the startup first-admin token, or reports false when the
+// instance already has users (or the count/mint fails, in which case the server
+// still starts — a missing bootstrap link is not worth refusing to boot over).
 func bootstrapToken(db *sql.DB) (string, bool) {
 	n, err := store.CountUsers(db)
 	if err != nil {
@@ -402,34 +402,10 @@ func bootstrapToken(db *sql.DB) (string, bool) {
 	}
 	token, err := auth.GenerateToken()
 	if err != nil {
-		log.Fatalf("bootstrap token: %v", err)
+		log.Printf("bootstrap token skipped: generate: %v", err)
+		return "", false
 	}
 	return token, true
-}
-
-func bootstrapURL(publicOrigin, listenAddr, token string) string {
-	base := strings.TrimRight(publicOrigin, "/")
-	if base == "" {
-		base = "http://" + localHTTPHost(listenAddr)
-	}
-	u, err := url.Parse(base + "/")
-	if err != nil {
-		log.Fatalf("bootstrap URL: %v", err)
-	}
-	q := u.Query()
-	q.Set("bootstrap_token", token)
-	u.RawQuery = q.Encode()
-	return u.String()
-}
-
-func localHTTPHost(addr string) string {
-	if addr == "" || strings.HasPrefix(addr, ":") {
-		return "127.0.0.1" + addr
-	}
-	if _, _, err := net.SplitHostPort(addr); err != nil && !strings.Contains(addr, ":") {
-		return net.JoinHostPort(addr, "80")
-	}
-	return addr
 }
 
 func startupLibraryRoots(db *sql.DB, cliRoots []string) ([]string, error) {

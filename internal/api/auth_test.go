@@ -1171,3 +1171,39 @@ func TestLoginThrottlePerEmailDefeatsIPRotation(t *testing.T) {
 		t.Fatalf("per-email throttle should trip despite rotating IPs: got %d", last)
 	}
 }
+
+// The spec requires that once any user exists the server stops accepting a
+// bootstrap token. The signup handler's CountUsers check covers the normal
+// case, but the armed token must also be disarmed so that deleting every user
+// while the process is still running can't re-arm bootstrap with the old token.
+func TestSignupBootstrapDisarmsTokenAfterFirstAdmin(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetBootstrapToken("boot-token")
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"email":"admin@example.com","display_name":"Admin","password":"password123","bootstrap_token":"boot-token"}`)
+	s.signup(rec, httptest.NewRequest(http.MethodPost, "/api/auth/signup", body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bootstrap signup: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	if s.acceptsBootstrapToken("boot-token") {
+		t.Fatal("token should be disarmed once the first admin exists")
+	}
+
+	users, err := store.ListUsers(db)
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	for _, u := range users {
+		if err := store.DeleteUser(db, u.ID); err != nil {
+			t.Fatalf("delete user: %v", err)
+		}
+	}
+
+	rec = httptest.NewRecorder()
+	body = strings.NewReader(`{"email":"attacker@example.com","display_name":"X","password":"password123","bootstrap_token":"boot-token"}`)
+	s.signup(rec, httptest.NewRequest(http.MethodPost, "/api/auth/signup", body))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("stale token re-armed bootstrap: got %d (%s)", rec.Code, rec.Body)
+	}
+}

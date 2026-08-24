@@ -232,3 +232,48 @@ func TestPublicHandlerAppliesBrowserAuthAroundRawHandler(t *testing.T) {
 		t.Fatalf("public handler status = %d, want 401", rec.Code)
 	}
 }
+
+func TestPublicBaseURLMapsWildcardListenHost(t *testing.T) {
+	cases := []struct{ addr, want string }{
+		{"", "http://127.0.0.1"},
+		{":8066", "http://127.0.0.1:8066"},
+		{"127.0.0.1:8066", "http://127.0.0.1:8066"},
+		{"0.0.0.0:8066", "http://127.0.0.1:8066"},
+		{"[::]:8066", "http://127.0.0.1:8066"},
+		{"::", "http://127.0.0.1"},
+		{"jukebox.lan", "http://jukebox.lan:80"},
+	}
+	for _, tc := range cases {
+		s := &Server{}
+		s.SetListenAddr(tc.addr)
+		if got := s.publicBaseURL(); got != tc.want {
+			t.Errorf("publicBaseURL(addr=%q) = %q, want %q", tc.addr, got, tc.want)
+		}
+	}
+
+	s := &Server{}
+	s.SetListenAddr("0.0.0.0:8066")
+	s.SetPublicOrigin("https://jukebox.example.com/")
+	if got := s.publicBaseURL(); got != "https://jukebox.example.com" {
+		t.Errorf("public origin should win: %q", got)
+	}
+}
+
+func TestSetBootstrapTokenReturnsOpenableURL(t *testing.T) {
+	s := &Server{}
+	s.SetListenAddr("0.0.0.0:8066")
+	got := s.SetBootstrapToken("tok en/+")
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse %q: %v", got, err)
+	}
+	if parsed.Scheme != "http" || parsed.Host != "127.0.0.1:8066" || parsed.Path != "/" {
+		t.Fatalf("bootstrap URL = %q", got)
+	}
+	if parsed.Query().Get("bootstrap_token") != "tok en/+" {
+		t.Fatalf("token not round-tripped through %q", got)
+	}
+	if !s.acceptsBootstrapToken("tok en/+") {
+		t.Fatal("SetBootstrapToken should arm the token it returns a URL for")
+	}
+}

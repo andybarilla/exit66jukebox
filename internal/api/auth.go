@@ -310,6 +310,7 @@ func (s *Server) createSignupAccount(w http.ResponseWriter, r *http.Request, ema
 		writeErr(w, http.StatusConflict, "email already registered")
 		return
 	}
+	s.clearBootstrapToken()
 	if err := s.setSessionCookie(w, r, uid); err != nil {
 		writeErr(w, http.StatusInternalServerError, "session error")
 		return

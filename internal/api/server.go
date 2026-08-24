@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,8 +50,11 @@ type Server struct {
 
 	// signingSecret is the HMAC secret used to sign Sonos media URLs; loaded once
 	// at startup from the store (store.MediaSigningSecret).
-	signingSecret      []byte
-	mfaKey             []byte
+	signingSecret []byte
+	mfaKey        []byte
+	// bootstrapTokenHash is the armed first-admin bootstrap token, hashed;
+	// empty once claimed. Read by concurrent signups, cleared by the winner.
+	bootstrapMu        sync.RWMutex
 	bootstrapTokenHash string
 	// loginAttempts throttles the password form per client IP (soft brute-force
 	// guard); guarded by loginMu.
@@ -156,16 +160,34 @@ func (s *Server) SetSigningSecret(secret []byte) { s.signingSecret = secret }
 
 func (s *Server) SetMFAKey(key []byte) { s.mfaKey = append([]byte(nil), key...) }
 
-func (s *Server) SetBootstrapToken(token string) { s.bootstrapTokenHash = storeTokenHash(token) }
-
-func (s *Server) acceptsBootstrapToken(token string) bool {
-	if s.bootstrapTokenHash == "" || token == "" {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(s.bootstrapTokenHash), []byte(storeTokenHash(token))) == 1
+// SetBootstrapToken arms the one-time first-admin bootstrap token and returns
+// the URL an operator opens to claim it. The token itself is never persisted,
+// so a restart before the first admin exists mints a fresh one.
+func (s *Server) SetBootstrapToken(token string) string {
+	s.bootstrapMu.Lock()
+	s.bootstrapTokenHash = auth.HashToken(token)
+	s.bootstrapMu.Unlock()
+	return s.publicBaseURL() + "/?bootstrap_token=" + url.QueryEscape(token)
 }
 
-func storeTokenHash(token string) string { return auth.HashToken(token) }
+// clearBootstrapToken disarms bootstrap once a user exists, so deleting every
+// account while the process is still running can't re-arm it with the old
+// token.
+func (s *Server) clearBootstrapToken() {
+	s.bootstrapMu.Lock()
+	s.bootstrapTokenHash = ""
+	s.bootstrapMu.Unlock()
+}
+
+func (s *Server) acceptsBootstrapToken(token string) bool {
+	s.bootstrapMu.RLock()
+	hash := s.bootstrapTokenHash
+	s.bootstrapMu.RUnlock()
+	if hash == "" || token == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(hash), []byte(auth.HashToken(token))) == 1
+}
 
 // RegisterStream attaches a broadcast hub, event bus, and now-playing tracker
 // for a shared stream id. np may be nil for streams that don't track current

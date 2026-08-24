@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,26 +146,6 @@ func TestBootstrapTokenOnlyGeneratedForEmptyUserTable(t *testing.T) {
 	}
 	if token, ok := bootstrapToken(db); ok || token != "" {
 		t.Fatalf("existing users should not get bootstrap token: token=%q ok=%v", token, ok)
-	}
-}
-
-func TestBootstrapURLUsesPublicOriginOrListenAddr(t *testing.T) {
-	withOrigin := bootstrapURL("https://jukebox.example.com/app/", ":8066", "abc")
-	parsed, err := url.Parse(withOrigin)
-	if err != nil {
-		t.Fatalf("parse public bootstrap URL: %v", err)
-	}
-	if parsed.Scheme != "https" || parsed.Host != "jukebox.example.com" || parsed.Query().Get("bootstrap_token") != "abc" {
-		t.Fatalf("public bootstrap URL = %q", withOrigin)
-	}
-
-	local := bootstrapURL("", "127.0.0.1:8066", "abc")
-	parsed, err = url.Parse(local)
-	if err != nil {
-		t.Fatalf("parse local bootstrap URL: %v", err)
-	}
-	if parsed.Scheme != "http" || parsed.Host != "127.0.0.1:8066" || parsed.Query().Get("bootstrap_token") != "abc" {
-		t.Fatalf("local bootstrap URL = %q", local)
 	}
 }
 

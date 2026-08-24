@@ -163,18 +163,34 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"link": link, "email": req.Email})
 }
 
+// publicBaseURL is the single resolver for browser-facing links (invite,
+// password reset, email verification, first-admin bootstrap). A wildcard listen
+// address is rewritten to loopback, since "http://0.0.0.0:8066" is not a URL
+// anyone can open.
 func (s *Server) publicBaseURL() string {
 	if s.publicOrigin != "" {
 		return s.publicOrigin
 	}
 	host := s.listenAddr
-	if host == "" || strings.HasPrefix(host, ":") {
-		return "http://127.0.0.1" + host
+	if h, port, err := net.SplitHostPort(host); err == nil {
+		if isWildcardHost(h) {
+			h = "127.0.0.1"
+		}
+		return "http://" + net.JoinHostPort(h, port)
 	}
-	if _, _, err := net.SplitHostPort(host); err != nil && !strings.Contains(host, ":") {
-		host = net.JoinHostPort(host, "80")
+	if isWildcardHost(host) {
+		return "http://127.0.0.1"
 	}
-	return "http://" + host
+	return "http://" + net.JoinHostPort(host, "80")
+}
+
+// isWildcardHost reports whether host is an "any interface" bind address.
+func isWildcardHost(host string) bool {
+	switch strings.Trim(host, "[]") {
+	case "0.0.0.0", "::", "":
+		return true
+	}
+	return false
 }
 
 // listInvites returns all invites with a derived status.

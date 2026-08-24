@@ -81,3 +81,15 @@ describe('App security mode routing', () => {
     expect(source).not.toMatch(/open_admin_locked[^\n]*canControl/);
   });
 });
+
+describe('App first-admin bootstrap link', () => {
+  test('a bootstrap token opens the auth screen regardless of security mode', () => {
+    // requiresLogin is only set for full_login, so showSignup alone leaves the
+    // link broken on a zero-user instance in open_admin_locked mode.
+    expect(source).toMatch(/if\s*\(bootstrapToken\)\s*showSignup\s*=\s*showAuth\s*=\s*true/);
+  });
+
+  test('passes the token and bootstrap state into Signup', () => {
+    expect(source).toMatch(/<Signup\s+\{bootstrapToken\}\s+needsBootstrap=\{s\.config\.needsBootstrap\}/);
+  });
+});
