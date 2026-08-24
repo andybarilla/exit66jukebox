@@ -69,10 +69,15 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) requireAdminShared(next http.HandlerFunc) http.HandlerFunc {
 	gated := s.requireAdmin(next)
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.PathValue("id") == sharedStreamID {
-			gated(w, r)
+		if r.PathValue("id") != sharedStreamID {
+			next(w, r)
 			return
 		}
-		next(w, r)
+		mode := store.SecurityModeSetting(s.db)
+		if mode == store.SecurityModeOpen {
+			next(w, r)
+			return
+		}
+		gated(w, r)
 	}
 }

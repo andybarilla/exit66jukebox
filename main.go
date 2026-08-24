@@ -33,6 +33,7 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/scrobble"
 	"github.com/andybarilla/exit66jukebox/internal/store"
 	"github.com/andybarilla/exit66jukebox/internal/web"
+	"github.com/pion/webrtc/v4"
 )
 
 func main() {
@@ -306,16 +307,24 @@ func main() {
 	// can fetch /api/tracks/{id}/audio from it.
 	if fedSettings.Enabled {
 		reg := fed.NewRegistry()
+		signaler := fed.NewSignaler()
+		// Caps describe the transports this instance advertises to peers. They ride
+		// the token-authenticated session after the handshake. The WebRTC transport
+		// is only meaningful for the peer role with direct P2P enabled.
+		caps := fed.Capabilities{DirectWebRTC: fedSettings.Role == "peer" && fedSettings.DirectP2P}
 		fm := &fed.Manager{
 			Role:          fedSettings.Role,
 			Token:         fedSettings.Token,
 			PeerID:        fedSettings.PeerID,
 			HubAddr:       fedSettings.HubAddr, // member: hub to dial
 			HubListen:     fedSettings.Listen,  // hub/peer: local listen addr
-			MemberHandler: srv.Handler(),
+			MemberHandler: fed.WithCapsRoute(caps, srv.Handler()),
 			Registry:      reg,
 			DB:            db,
+			Caps:          caps,
+			Signaler:      signaler,
 		}
+		fm.SetContext(rootCtx)
 		if fedSettings.Role == "hub" {
 			// One relay instance shared by the session handler and the resolver so
 			// the hub's own browse sees remote tracks (catalog ingest lands here in a
@@ -323,16 +332,23 @@ func main() {
 			relay := fed.NewRelay(reg, db)
 			relay.SetSelf(fedSettings.PeerID)
 			fm.Relay = relay
-			fm.HubHandler = relay.Routes()
+			fm.HubHandler = fed.WithCapsRoute(caps, fed.WithSignalRelay(signaler, relay.Routes()))
 		}
 		if fedSettings.Role == "peer" {
-			fm.PeerHandler = fed.PeerRoutes(db, srv.Handler())
+			fm.PeerHandler = fed.WithCapsRoute(caps, fed.PeerRoutes(db, srv.Handler()))
 			fed.StartLANDiscovery(rootCtx, db, fedSettings.PeerID, fedSettings.PeerID, fedSettings.Listen)
+			// Direct P2P (WebRTC) transport: NAT-traversing audio path that bypasses
+			// the hub when both peers advertise support and ICE connects. Disabled by
+			// setting; falls back to the yamux-direct then hub-relay tiers on any
+			// failure, so playback is never broken.
+			if fedSettings.DirectP2P {
+				fm.WebRTC = fed.NewWebRTCTransport(fedSettings.PeerID, fedICEServers(fedSettings), signaler, nil)
+			}
 		}
 		fm.Start()
 		srv.SetFedResolver(fed.NewResolverFor(fm))
 		srv.SetFedPeers(fm.OnlinePeers)
-		log.Printf("federation: role=%s peer=%s", fedSettings.Role, fedSettings.PeerID)
+		log.Printf("federation: role=%s peer=%s direct_p2p=%t", fedSettings.Role, fedSettings.PeerID, fedSettings.DirectP2P)
 	}
 
 	log.Printf("Exit 66 Jukebox listening on %s", cfg.Addr)
@@ -432,13 +448,37 @@ func federationSettings(db *sql.DB, env config.Federation) (store.FederationSett
 		return settings, nil
 	}
 	return store.FederationSettings{
-		Enabled: env.Enabled(),
-		Role:    env.Role,
-		HubAddr: env.HubAddr,
-		Listen:  env.Listen,
-		Token:   env.Token,
-		PeerID:  env.PeerID,
+		Enabled:     env.Enabled(),
+		Role:        env.Role,
+		HubAddr:     env.HubAddr,
+		Listen:      env.Listen,
+		Token:       env.Token,
+		PeerID:      env.PeerID,
+		DirectP2P:   env.DirectP2P,
+		STUNServers: env.STUNServers,
+		TURNURL:     env.TURNURL,
 	}, nil
+}
+
+// fedICEServers builds the webrtc.ICEServer list from settings: at least one
+// STUN server (defaulting to Google's public STUN when none configured), plus a
+// TURN server when EXIT66_FED_TURN is set. TURN credentials live in the URL
+// (turn://user:pass@host:port) so the federation token never appears here.
+var defaultSTUNServer = "stun:stun.l.google.com:19302"
+
+func fedICEServers(s store.FederationSettings) []webrtc.ICEServer {
+	stun := s.STUNServers
+	if len(stun) == 0 {
+		stun = []string{defaultSTUNServer}
+	}
+	var servers []webrtc.ICEServer
+	for _, u := range stun {
+		servers = append(servers, webrtc.ICEServer{URLs: []string{u}})
+	}
+	if s.TURNURL != "" {
+		servers = append(servers, webrtc.ICEServer{URLs: []string{s.TURNURL}})
+	}
+	return servers
 }
 
 // nowPlayer is anything that accepts a fire-and-forget now-playing notification.

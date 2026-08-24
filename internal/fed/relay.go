@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -122,6 +123,7 @@ func (mr *memberResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+	log.Printf("fed audio %s/%d transport=relay", peer, remoteID)
 }
 
 // hubResolver implements Resolver on the hub side — the hub IS the relay, so it
@@ -136,12 +138,47 @@ func (hr *hubResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Request, 
 }
 
 type directResolver struct {
-	reg *Registry
-	hub *memberResolver
+	reg    *Registry
+	hub    *memberResolver
+	webrtc *WebRTCTransport // nil when direct P2P is disabled or unsupported
+}
+
+// triedWebRTC reports whether the WebRTC transport should be attempted for peer:
+// it must be configured and both this peer and the remote must advertise direct
+// WebRTC capability.
+func (dr *directResolver) triedWebRTC(p *Peer) bool {
+	return dr.webrtc != nil && p != nil && p.Caps.DirectWebRTC
+}
+
+// serveWebRTC attempts the WebRTC direct transport tier. Returns ok=true if it
+// wrote a response (success or a hard error); ok=false means the caller should
+// fall through to the next tier. On a successful stream the response is fully
+// written; on a setup failure ok=false signals fallback without writing.
+func (dr *directResolver) serveWebRTC(w http.ResponseWriter, r *http.Request, peer string, remoteID int64) bool {
+	conn, err := dr.webrtc.Dial(r.Context(), peer)
+	if err != nil {
+		// Setup failed: fall back silently to the next tier (do not write).
+		return false
+	}
+	if err := serveAudioRequest(conn, w, remoteID, r.Header.Get("Range")); err != nil {
+		// A mid-stream failure after headers/body started cannot be retried on
+		// another tier; the client sees a truncated response. Log and stop.
+		log.Printf("fed audio %s/%d transport=webrtc stream error: %v", peer, remoteID, err)
+		return true
+	}
+	log.Printf("fed audio %s/%d transport=webrtc", peer, remoteID)
+	return true
 }
 
 func (dr *directResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Request, peer string, remoteID int64) {
 	p := dr.reg.Get(peer)
+	// Tier 1: WebRTC direct (NAT-traversing). Attempted only when both peers
+	// advertise support and direct P2P is enabled.
+	if dr.triedWebRTC(p) {
+		if dr.serveWebRTC(w, r, peer, remoteID) {
+			return
+		}
+	}
 	if p == nil || p.Client == nil {
 		if dr.hub != nil {
 			dr.hub.ServeRemoteAudio(w, r, peer, remoteID)
@@ -150,6 +187,7 @@ func (dr *directResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "peer offline", http.StatusServiceUnavailable)
 		return
 	}
+	// Tier 2: yamux TCP direct path (existing) — works on LAN / routable peers.
 	baseURL := p.BaseURL
 	if baseURL == "" {
 		baseURL = "http://" + peer
@@ -165,6 +203,7 @@ func (dr *directResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Reques
 	}
 	resp, err := p.Client.Do(req)
 	if err != nil {
+		// Tier 3: hub relay fallback.
 		if dr.hub != nil {
 			dr.hub.ServeRemoteAudio(w, r, peer, remoteID)
 			return
@@ -180,6 +219,7 @@ func (dr *directResolver) ServeRemoteAudio(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+	log.Printf("fed audio %s/%d transport=direct", peer, remoteID)
 }
 
 // NewResolverFor returns the Resolver appropriate to the manager's role. The hub
@@ -189,7 +229,7 @@ func NewResolverFor(m *Manager) Resolver {
 		return &hubResolver{relay: m.Relay}
 	}
 	if m.Role == "peer" {
-		return &directResolver{reg: m.Registry, hub: &memberResolver{m: m}}
+		return &directResolver{reg: m.Registry, hub: &memberResolver{m: m}, webrtc: m.WebRTC}
 	}
 	return &memberResolver{m: m}
 }

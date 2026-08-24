@@ -242,7 +242,7 @@ func TestFederationSettingsValidationAndRoundTrip(t *testing.T) {
 		t.Fatal("enabled member without hub address should fail")
 	}
 
-	want := FederationSettings{Enabled: true, Role: "hub", Listen: ":9443", Token: "secret", PeerID: "peer"}
+	want := FederationSettings{Enabled: true, Role: "hub", Listen: ":9443", Token: "secret", PeerID: "peer", DirectP2P: true}
 	if err := SaveFederationSettings(db, want); err != nil {
 		t.Fatalf("save federation: %v", err)
 	}
@@ -250,14 +250,14 @@ func TestFederationSettingsValidationAndRoundTrip(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("load federation: ok=%v err=%v", ok, err)
 	}
-	if got != want {
+	if !FederationSettingsEqual(got, want) {
 		t.Fatalf("federation settings = %#v, want %#v", got, want)
 	}
 }
 
 func TestFederationSettingsAcceptsPeerRole(t *testing.T) {
 	db := mustOpenMem(t)
-	want := FederationSettings{Enabled: true, Role: "peer", Listen: ":9443", Token: "secret", PeerID: "peer-a"}
+	want := FederationSettings{Enabled: true, Role: "peer", Listen: ":9443", Token: "secret", PeerID: "peer-a", DirectP2P: true}
 	if err := SaveFederationSettings(db, want); err != nil {
 		t.Fatalf("save peer federation: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestFederationSettingsAcceptsPeerRole(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("load federation: ok=%v err=%v", ok, err)
 	}
-	if got != want {
+	if !FederationSettingsEqual(got, want) {
 		t.Fatalf("peer federation settings = %#v, want %#v", got, want)
 	}
 }
@@ -280,7 +280,7 @@ func TestDisabledFederationComparisonIgnoresOperationalFields(t *testing.T) {
 
 func TestDisabledFederationSavePreservesOperationalFields(t *testing.T) {
 	db := mustOpenMem(t)
-	want := FederationSettings{Enabled: false, Token: "secret", PeerID: "peer", HubAddr: "hub", Listen: ":9443"}
+	want := FederationSettings{Enabled: false, Token: "secret", PeerID: "peer", HubAddr: "hub", Listen: ":9443", DirectP2P: true}
 	if err := SaveFederationSettings(db, want); err != nil {
 		t.Fatalf("save federation: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestDisabledFederationSavePreservesOperationalFields(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("load federation: ok=%v err=%v", ok, err)
 	}
-	if got != want {
+	if !FederationSettingsEqual(got, want) {
 		t.Fatalf("disabled federation settings = %#v, want %#v", got, want)
 	}
 }

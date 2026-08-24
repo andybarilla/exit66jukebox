@@ -4,6 +4,7 @@ import { createStore } from './store.svelte.js';
 // createStore reads localStorage for the saved display name; stub it (node env).
 beforeEach(() => {
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
+  global.fetch = vi.fn();
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -36,6 +37,24 @@ describe('cast-active state', () => {
   it('exposes muteLocalOnCast, defaulting true before config loads', () => {
     const s = createStore();
     expect(s.muteLocalOnCast).toBe(true);
+  });
+});
+
+describe('config state', () => {
+  it('parses security mode entry-flow config', async () => {
+    fetch.mockImplementation((url) => {
+      if (url === '/api/config') return Promise.resolve({ ok: true, json: () => Promise.resolve({ security_mode: 'household_profiles', guest_access: false, requires_profile: true, requires_login: false, signup_enabled: false, needs_bootstrap: false, authenticated: false }) });
+      if (url === '/api/auth/me') return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    });
+    const s = createStore();
+
+    await s.bootstrap();
+
+    expect(s.config.securityMode).toBe('household_profiles');
+    expect(s.config.requiresProfile).toBe(true);
+    expect(s.config.requiresLogin).toBe(false);
+    expect(s.config.guestAccess).toBe(false);
   });
 });
 

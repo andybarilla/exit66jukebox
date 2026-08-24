@@ -38,7 +38,17 @@ export function createStore() {
   // Runtime config + cast state. config loads once on init; muteLocalOnCast
   // defaults true so a cast that starts before config resolves still mutes.
   // castActive is lifted out of CastPanel so App can mute the local <audio>.
-  let config = $state({ muteLocalOnCast: true, fedPeers: [], guestAccess: false, signupEnabled: false, needsBootstrap: false, authenticated: false });
+  let config = $state({
+    muteLocalOnCast: true,
+    fedPeers: [],
+    securityMode: 'full_login',
+    guestAccess: false,
+    requiresProfile: false,
+    requiresLogin: true,
+    signupEnabled: false,
+    needsBootstrap: false,
+    authenticated: false,
+  });
   let castActive = $state(false);
 
   // Auth state. me is the current user ({id,email,display_name,is_admin}) or null.
@@ -297,7 +307,10 @@ export function createStore() {
           config = {
             muteLocalOnCast: typeof c.mute_local_on_cast === 'boolean' ? c.mute_local_on_cast : config.muteLocalOnCast,
             fedPeers: Array.isArray(c.fed_peers) ? c.fed_peers : [],
+            securityMode: c.security_mode || 'full_login',
             guestAccess: !!c.guest_access,
+            requiresProfile: !!c.requires_profile,
+            requiresLogin: !!c.requires_login,
             signupEnabled: !!c.signup_enabled,
             needsBootstrap: !!c.needs_bootstrap,
             authenticated: !!c.authenticated,

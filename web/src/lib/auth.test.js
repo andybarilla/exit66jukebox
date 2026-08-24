@@ -15,6 +15,9 @@ import {
   listUsers,
   verifyEmail,
   createEmailVerification,
+  listProfiles,
+  createProfile,
+  selectProfile,
 } from './auth.js';
 
 beforeEach(() => { global.fetch = vi.fn(); });
@@ -195,5 +198,28 @@ describe('auth api', () => {
     expect(users).toEqual([{ id: 1, email: 'a@b.com', mfa_enabled: true, email_verified: true }]);
     const [url] = fetch.mock.calls[0];
     expect(url).toBe('/api/admin/users');
+  });
+
+  it('lists passwordless profiles', async () => {
+    fetch.mockReturnValue(jsonResp([{ id: 1, display_name: 'Casey' }]));
+    const profiles = await listProfiles();
+    expect(fetch.mock.calls[0][0]).toBe('/api/auth/profiles');
+    expect(profiles[0].display_name).toBe('Casey');
+  });
+
+  it('creates a passwordless profile', async () => {
+    fetch.mockReturnValue(jsonResp({ id: 2, display_name: 'Blair' }));
+    await createProfile('Blair');
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/profiles');
+    expect(JSON.parse(options.body)).toEqual({ display_name: 'Blair' });
+  });
+
+  it('selects a passwordless profile', async () => {
+    fetch.mockReturnValue(jsonResp({ id: 2, display_name: 'Blair', is_passwordless_profile: true }));
+    await selectProfile(2);
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/profiles/select');
+    expect(JSON.parse(options.body)).toEqual({ id: 2 });
   });
 });

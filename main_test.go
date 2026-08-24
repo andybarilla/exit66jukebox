@@ -99,7 +99,7 @@ func TestStartupLibraryRootsSeedFlagsThenUseEnabledDBRoots(t *testing.T) {
 func TestFederationSettingsPreferDBOverEnv(t *testing.T) {
 	db, _ := store.Open(":memory:")
 	defer db.Close()
-	dbSettings := store.FederationSettings{Enabled: true, Role: "hub", Listen: ":9443", Token: "db-token", PeerID: "db-peer"}
+	dbSettings := store.FederationSettings{Enabled: true, Role: "hub", Listen: ":9443", Token: "db-token", PeerID: "db-peer", DirectP2P: true}
 	if err := store.SaveFederationSettings(db, dbSettings); err != nil {
 		t.Fatalf("save federation settings: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestFederationSettingsPreferDBOverEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("federation settings: %v", err)
 	}
-	if got != dbSettings {
+	if !store.FederationSettingsEqual(got, dbSettings) {
 		t.Fatalf("federation settings = %#v, want %#v", got, dbSettings)
 	}
 }
