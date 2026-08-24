@@ -359,11 +359,24 @@
   {#if s.isPhone && s.lineupOpen}
     <div style="position:absolute; inset:0; z-index:75; display:flex; flex-direction:column; justify-content:flex-end;">
       <div role="button" tabindex="-1" aria-label="Close" onclick={() => s.closeLineup()} onkeydown={keyActivate(() => s.closeLineup())} style="position:absolute; inset:0; background:rgba(6,6,11,0.72); backdrop-filter:blur(6px);"></div>
-      <div style="position:relative; height:74vh; background:var(--bg-surface); background-image:var(--scanline); border-top:1.5px solid var(--neon-magenta); border-radius:var(--radius-lg) var(--radius-lg) 0 0; padding:18px; box-shadow:var(--shadow-xl); display:flex; box-sizing:border-box;">
+      <div style="position:relative; height:74vh; background:var(--bg-surface); background-image:var(--scanline); border-top:1.5px solid var(--neon-magenta); border-radius:var(--radius-lg) var(--radius-lg) 0 0; padding:18px; box-shadow:var(--shadow-xl); display:flex; flex-direction:column; gap:14px; box-sizing:border-box;">
+        <!-- The desktop picker lives in the player bar, which a phone does not
+             render. Without it here the top-bar chip is the only stream control
+             on a phone, and it only toggles between one shared stream and the
+             personal one — no way to reach a second shared stream. -->
+        <StreamPicker streams={s.sharedStreams} current={s.stream} personalId={PERSONAL}
+          canManage={s.isAdmin || s.config.securityMode === 'open'}
+          atCap={s.sharedStreams.length >= MAX_SHARED_STREAMS}
+          onSelect={(id) => s.setStream(id)}
+          onCreate={(name) => s.createStream(name)}
+          onRename={(id, name) => s.renameStream(id, name)}
+          onDelete={(id) => s.deleteStream(id)} />
+        <div style="flex:1; min-height:0; display:flex;">
         <Lineup streamLabel={streamLabel} listeners={s.listeners} shuffle={s.shuffle}
           onToggleShuffle={(v) => s.toggleShuffle(v)} np={np} npPct={npPct}
           queue={s.queue} isPhone={true} canControl={canControl} onClose={() => s.closeLineup()} onRemove={(q) => s.removeFromQueue(q)}
           onOpenAlbum={(item) => s.openAlbum({ id: item.albumId, name: item.albumName, artistName: item.artistName })} />
+        </div>
       </div>
     </div>
   {/if}
