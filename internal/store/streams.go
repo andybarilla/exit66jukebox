@@ -15,6 +15,12 @@ const (
 	KindPrivate = "private"
 )
 
+// PersonalStreamID is the one private stream every listener currently shares
+// (#128 owns making it per-listener). It is provisioned at boot, which is what
+// lets every stream route reject an id it does not recognise instead of
+// creating one.
+const PersonalStreamID = "me"
+
 // MaxSharedStreams caps how many shared streams can exist at once, house
 // included. Each one owns a broadcast pipeline and (once it has a listener) an
 // ffmpeg process, so the limit is a resource bound, not a policy.
@@ -29,9 +35,9 @@ var (
 )
 
 // EnsurePrivateStream creates the stream row as private if it does not exist.
-// This is the only implicit-create path: it can never produce a shared stream,
-// which is what keeps the kind-based authorization gate from being bypassed by
-// inventing a stream URL.
+// It is boot-time provisioning for PersonalStreamID and is not reachable from
+// any route: since #132 a request naming an unknown stream is refused, so no
+// id a caller invents reaches a create path at all.
 func EnsurePrivateStream(db *sql.DB, id string) error {
 	_, err := db.Exec(
 		`INSERT INTO stream(id, name, kind) VALUES(?,'',?)

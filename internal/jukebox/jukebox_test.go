@@ -187,3 +187,18 @@ func TestStopStationStopsRefill(t *testing.T) {
 		t.Fatalf("expected drained queue to stay empty after stop, got %d", n)
 	}
 }
+
+// Attaching a station must not bring a stream into being (#132). The foreign
+// key on station.stream_id is what makes the unknown id an error here.
+func TestStartStationOnUnknownStreamCreatesNothing(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	jb := New(db, Config{HistoryWindow: 5})
+
+	if err := jb.StartStation("ghost", "Rock", 3, 10); err == nil {
+		t.Fatal("StartStation on an unknown stream: want error, got nil")
+	}
+	if _, ok, _ := store.GetStream(db, "ghost"); ok {
+		t.Fatal("StartStation created the stream row")
+	}
+}

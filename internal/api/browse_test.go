@@ -103,11 +103,11 @@ func TestQueueItemsEnriched(t *testing.T) {
 	srv.db.QueryRow(`SELECT id FROM track WHERE title = 'Money'`).Scan(&moneyID)
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(moneyID, 10)}}
-	req := httptest.NewRequest(http.MethodPost, "/api/streams/sess/requests", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/requests", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	srv.Handler().ServeHTTP(httptest.NewRecorder(), req)
 
-	rec := get(t, srv, "/api/streams/sess")
+	rec := get(t, srv, "/api/streams/me")
 	body := rec.Body.String()
 	if !strings.Contains(body, `"code":"B1"`) || !strings.Contains(body, `"album_name":"Arrival"`) {
 		t.Fatalf("queue item not enriched: %s", body)
@@ -142,13 +142,13 @@ func TestNextTrackEnriched(t *testing.T) {
 	srv.db.QueryRow(`SELECT id FROM track WHERE title = 'Money'`).Scan(&moneyID)
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(moneyID, 10)}}
-	req := httptest.NewRequest(http.MethodPost, "/api/streams/sess/requests", strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/requests", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	srv.Handler().ServeHTTP(httptest.NewRecorder(), req)
 
 	// The /next payload backs now-playing; it must carry the slot code/tone/names.
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/streams/sess/next", nil))
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/streams/me/next", nil))
 	body := rec.Body.String()
 	if !strings.Contains(body, `"code":"B1"`) || !strings.Contains(body, `"tone":"magenta"`) {
 		t.Fatalf("next track not enriched: %s", body)
