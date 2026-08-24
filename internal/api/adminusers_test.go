@@ -500,3 +500,75 @@ func TestListUsersIncludesMFAEnabled(t *testing.T) {
 		t.Fatalf("enabled MFA user not marked enabled")
 	}
 }
+
+// TestAdminLinkEndpointsRefuseWithoutPublicOrigin covers the three admin-facing
+// link endpoints on a wildcard bind, where the link would otherwise come back
+// pointing at the admin's own loopback and be pasted to someone it can't reach.
+func TestAdminLinkEndpointsRefuseWithoutPublicOrigin(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetListenAddr("0.0.0.0:8066")
+	userID, err := store.CreateUser(db, "remote@example.com", "Remote", "h", false, false)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	_, cookie := adminSessionWithEmail(t, db, "admin@b.com")
+	idPath := "/api/admin/users/" + strconv.FormatInt(userID, 10)
+	cases := []struct{ name, path, body string }{
+		{"invite", "/api/admin/invites", `{"email":"x@y.com","is_admin":false}`},
+		{"password reset", idPath + "/password-reset", ""},
+		{"email verification", idPath + "/email-verification", ""},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s: want 503, got %d (%s)", tc.name, rec.Code, rec.Body)
+			continue
+		}
+		if !strings.Contains(rec.Body.String(), "EXIT66_PUBLIC_ORIGIN") {
+			t.Errorf("%s: error should name the missing setting: %s", tc.name, rec.Body)
+		}
+	}
+	if invs, _ := store.ListInvites(db); len(invs) != 0 {
+		t.Errorf("refused invite should not be stored, got %d", len(invs))
+	}
+}
+
+// TestAdminLinkEndpointsUsePublicOriginOnWildcardBind is the other half: the
+// same wildcard bind mints links once the origin is configured.
+func TestAdminLinkEndpointsUsePublicOriginOnWildcardBind(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetListenAddr("0.0.0.0:8066")
+	s.SetPublicOrigin("https://jukebox.example.com")
+	userID, err := store.CreateUser(db, "remote@example.com", "Remote", "h", false, false)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	_, cookie := adminSessionWithEmail(t, db, "admin@b.com")
+	idPath := "/api/admin/users/" + strconv.FormatInt(userID, 10)
+	cases := []struct{ name, path, body, wantPrefix string }{
+		{"invite", "/api/admin/invites", `{"email":"x@y.com","is_admin":false}`, "https://jukebox.example.com/invite/"},
+		{"password reset", idPath + "/password-reset", "", "https://jukebox.example.com/reset-password/"},
+		{"email verification", idPath + "/email-verification", "", "https://jukebox.example.com/verify/"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: want 200, got %d (%s)", tc.name, rec.Code, rec.Body)
+			continue
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Errorf("%s: decode: %v", tc.name, err)
+			continue
+		}
+		if !strings.HasPrefix(body["link"], tc.wantPrefix) {
+			t.Errorf("%s: link = %q, want prefix %q", tc.name, body["link"], tc.wantPrefix)
+		}
+	}
+}
