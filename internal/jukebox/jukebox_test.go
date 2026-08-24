@@ -2,6 +2,7 @@ package jukebox
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
@@ -185,5 +186,26 @@ func TestStopStationStopsRefill(t *testing.T) {
 	n, _ := store.QueueLen(db, "s")
 	if n != 0 {
 		t.Fatalf("expected drained queue to stay empty after stop, got %d", n)
+	}
+}
+
+// Attaching a station must not bring a stream into being. The foreign key on
+// station.stream_id is what refuses the unknown id, so assert on the constraint
+// itself: any other failure would pass an err != nil check while leaving the
+// stream free to be created.
+func TestStartStationOnUnknownStreamCreatesNothing(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	jb := New(db, Config{HistoryWindow: 5})
+
+	err := jb.StartStation("ghost", "Rock", 3, 10)
+	if err == nil {
+		t.Fatal("StartStation on an unknown stream: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "FOREIGN KEY constraint failed") {
+		t.Fatalf("want a foreign key violation, got %v", err)
+	}
+	if _, ok, _ := store.GetStream(db, "ghost"); ok {
+		t.Fatal("StartStation created the stream row")
 	}
 }

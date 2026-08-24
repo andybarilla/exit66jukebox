@@ -206,19 +206,15 @@ func TestInventedStreamIDNeverBecomesShared(t *testing.T) {
 	user := userSession(t, srv, "bob@example.com")
 	tid := insertTrack(t, srv, "Song")
 
-	// The request surface still creates the personal stream on first touch, but
-	// only ever as private.
+	// The request surface used to create the invented id as a private stream;
+	// since #132 it creates nothing at all and refuses the request.
 	rec := postForm(srv, "/api/streams/bobs-invented-stream/requests",
 		"kind=track&id="+itoa(tid), user)
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusNotFound {
 		t.Fatalf("request status %d body %s", rec.Code, rec.Body.String())
 	}
-	st, ok, err := store.GetStream(srv.db, "bobs-invented-stream")
-	if err != nil || !ok {
-		t.Fatalf("get invented stream: ok=%v err=%v", ok, err)
-	}
-	if st.Kind != store.KindPrivate {
-		t.Fatalf("invented id kind: want private, got %q", st.Kind)
+	if _, ok, err := store.GetStream(srv.db, "bobs-invented-stream"); ok || err != nil {
+		t.Fatalf("invented id produced a stream row: ok=%v err=%v", ok, err)
 	}
 	shared, err := store.ListStreams(srv.db, store.KindShared)
 	if err != nil {

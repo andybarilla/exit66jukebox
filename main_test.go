@@ -187,3 +187,16 @@ func eq(a, b []string) bool {
 	}
 	return true
 }
+
+// Boot is the personal stream's only origin. The behavioural test in
+// internal/api provisions the row itself, so it stays green if this call is
+// dropped; only grepping main.go holds the wiring in place.
+func TestMainProvisionsPersonalStreamAtBoot(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	if !strings.Contains(string(source), "store.EnsurePrivateStream(db, store.PersonalStreamID)") {
+		t.Fatal("main.go should provision the personal stream at boot")
+	}
+}

@@ -72,9 +72,9 @@ func TestEnsureSharedStreamBypassesCap(t *testing.T) {
 	}
 }
 
-// EnsurePrivateStream is the only implicit-create path left, and it can never
-// produce a shared stream — that is what makes the kind-based auth gate
-// unbypassable by inventing a URL.
+// EnsurePrivateStream is boot provisioning, not a route, and it can never
+// produce a shared stream — so even if a future caller hands it an id from a
+// request, the kind-based auth gate stays unbypassable.
 func TestEnsurePrivateStreamNeverCreatesShared(t *testing.T) {
 	db := openTestDB(t)
 	if err := EnsurePrivateStream(db, "bobs-invented-stream"); err != nil {
