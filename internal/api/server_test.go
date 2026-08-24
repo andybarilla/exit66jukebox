@@ -268,6 +268,9 @@ func TestPublicBaseURLMapsWildcardListenHost(t *testing.T) {
 		{"[::1]:8066", "http://[::1]:8066"},
 		{"jukebox.lan:8066", "http://jukebox.lan:8066"},
 		{"jukebox.lan", "http://jukebox.lan:80"},
+		// A bracketed literal with no port: the brackets must not be doubled
+		// when the default port is appended.
+		{"[::1]", "http://[::1]:80"},
 	}
 	for _, tc := range cases {
 		s := &Server{}

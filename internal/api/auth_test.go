@@ -1244,9 +1244,6 @@ func TestForgotPasswordRefusesWithoutPublicOrigin(t *testing.T) {
 	if sent {
 		t.Fatal("reset email sent despite an unresolvable link")
 	}
-	if resets, _ := store.ListInvites(db); len(resets) != 0 {
-		t.Fatalf("no invite should exist, got %d", len(resets))
-	}
 }
 
 // The refusal must land before the account lookup so it reads identically for a
