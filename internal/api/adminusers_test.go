@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -570,5 +571,23 @@ func TestAdminLinkEndpointsUsePublicOriginOnWildcardBind(t *testing.T) {
 		if !strings.HasPrefix(body["link"], tc.wantPrefix) {
 			t.Errorf("%s: link = %q, want prefix %q", tc.name, body["link"], tc.wantPrefix)
 		}
+	}
+}
+
+// TestPublicOriginDocumentedInREADME keeps the 503 and the docs on the same
+// variable name. The message tells the operator to set something they then have
+// to look up, so a rename here that misses the README leaves them with a name
+// that appears nowhere they can read about it.
+func TestPublicOriginDocumentedInREADME(t *testing.T) {
+	name, _, ok := strings.Cut(strings.TrimPrefix(publicOriginRequired, "set "), ":")
+	if !ok || !strings.HasPrefix(name, "EXIT66_") {
+		t.Fatalf("cannot read a variable name out of %q", publicOriginRequired)
+	}
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatalf("read README: %v", err)
+	}
+	if !strings.Contains(string(readme), name) {
+		t.Fatalf("README does not mention %s, the variable the 503 tells operators to set", name)
 	}
 }
