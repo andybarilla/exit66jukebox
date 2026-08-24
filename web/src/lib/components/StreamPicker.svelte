@@ -55,8 +55,11 @@
 <div style="display:flex; flex-direction:column; gap:8px;">
   <span style={label}>Stream</span>
 
+  <!-- Capped height with its own scroll: the picker sits in the fixed player
+       bar, and at the stream cap an unbounded list would grow the bar and
+       squeeze the body. -->
   <div role="listbox" aria-label="Shared streams"
-       style="display:flex; flex-direction:column; border:1px solid var(--border-strong); border-radius:var(--radius-sm); overflow:hidden;">
+       style="display:flex; flex-direction:column; border:1px solid var(--border-strong); border-radius:var(--radius-sm); overflow-y:auto; max-height:96px;">
     {#each streams as st (st.id)}
       {#if renamingId === st.id}
         <!-- svelte-ignore a11y_autofocus -->

@@ -326,7 +326,11 @@ export function createStore() {
 
     // The shared streams a listener can tune into, house first. The personal
     // stream is deliberately not in here — the client pins it separately.
-    get sharedStreams() { return sharedStreams; },
+    // Listener counts come from the live per-stream state rather than the
+    // list response, which is only refetched when the set of streams changes.
+    get sharedStreams() {
+      return sharedStreams.map((st) => ({ ...st, listeners: listeners[st.id] ?? st.listeners ?? 0 }));
+    },
     get isSharedStream() { return stream !== PERSONAL; },
     get streamName() {
       if (stream === PERSONAL) return 'Personal';
