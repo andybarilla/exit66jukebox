@@ -218,7 +218,6 @@ func errorContains(err error, sub string) bool {
 	return err != nil && strings.Contains(err.Error(), sub)
 }
 
-
 // Known vector: md5("api_keyabcmethodauth.getSessiontokenxyzsecret123"), i.e.
 // params sorted by name, concatenated as name+value, secret appended.
 func TestSignParamsKnownVector(t *testing.T) {
