@@ -35,8 +35,11 @@
   const onResetPath = $derived(currentPath.startsWith('/reset-password/'));
   const onVerifyPath = $derived(currentPath.startsWith('/verify/'));
   const onAdminPath = $derived(currentPath === '/admin');
+  // !bootstrapToken: a recovery link must not dead-end on an empty profile
+  // picker. Unreachable through the API, but an operator with sqlite3 can leave
+  // an instance in household_profiles with zero users.
   const needsProfileSelection = $derived(
-    s.config.requiresProfile && !onAdminPath && !s.me?.is_passwordless_profile
+    s.config.requiresProfile && !onAdminPath && !bootstrapToken && !s.me?.is_passwordless_profile
   );
   const needsAccountLogin = $derived(
     s.config.requiresLogin && (!s.me || s.me?.is_passwordless_profile)

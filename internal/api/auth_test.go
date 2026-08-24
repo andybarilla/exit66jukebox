@@ -394,7 +394,11 @@ func TestSignupBootstrapConcurrentRaceCreatesOneAdmin(t *testing.T) {
 	s.SetBootstrapToken("boot-token")
 	const attempts = 12
 	var wg sync.WaitGroup
-	statuses := make(chan int, attempts)
+	type result struct {
+		code int
+		body string
+	}
+	statuses := make(chan result, attempts)
 	for i := 0; i < attempts; i++ {
 		wg.Add(1)
 		go func(i int) {
@@ -402,20 +406,24 @@ func TestSignupBootstrapConcurrentRaceCreatesOneAdmin(t *testing.T) {
 			body := `{"email":"` + string(rune('a'+i)) + `@b.com","display_name":"A","password":"pw123456","bootstrap_token":"boot-token"}`
 			rec := httptest.NewRecorder()
 			s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
-			statuses <- rec.Code
+			statuses <- result{rec.Code, rec.Body.String()}
 		}(i)
 	}
 	wg.Wait()
 	close(statuses)
 
 	winners := 0
-	for status := range statuses {
-		if status == http.StatusOK {
+	for res := range statuses {
+		if res.code == http.StatusOK {
 			winners++
 			continue
 		}
-		if status != http.StatusConflict && status != http.StatusForbidden {
-			t.Fatalf("unexpected race status: %d", status)
+		// Every loser held a genuinely valid token, so it must be told the
+		// bootstrap was claimed. A 403 "valid bootstrap token required" here
+		// means the winner disarmed the token in the window between this
+		// request's CountUsers and its token check.
+		if res.code != http.StatusConflict || !strings.Contains(res.body, "bootstrap already claimed") {
+			t.Fatalf("loser got %d %s, want 409 bootstrap already claimed", res.code, res.body)
 		}
 	}
 	users, err := store.ListUsers(db)
@@ -1186,8 +1194,8 @@ func TestSignupBootstrapDisarmsTokenAfterFirstAdmin(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("bootstrap signup: want 200, got %d (%s)", rec.Code, rec.Body)
 	}
-	if s.acceptsBootstrapToken("boot-token") {
-		t.Fatal("token should be disarmed once the first admin exists")
+	if got := s.bootstrapTokenStatus("boot-token"); got != bootstrapClaimed {
+		t.Fatalf("token status after bootstrap = %v, want bootstrapClaimed", got)
 	}
 
 	users, err := store.ListUsers(db)
@@ -1200,10 +1208,17 @@ func TestSignupBootstrapDisarmsTokenAfterFirstAdmin(t *testing.T) {
 		}
 	}
 
+	// Zero users again, so signup takes the bootstrap branch — but the claimed
+	// flag must still refuse, and must say "claimed" rather than telling the
+	// holder of the real token that it is invalid. This is the deterministic
+	// form of what a concurrency loser sees.
 	rec = httptest.NewRecorder()
 	body = strings.NewReader(`{"email":"attacker@example.com","display_name":"X","password":"password123","bootstrap_token":"boot-token"}`)
 	s.signup(rec, httptest.NewRequest(http.MethodPost, "/api/auth/signup", body))
-	if rec.Code != http.StatusForbidden {
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "bootstrap already claimed") {
 		t.Fatalf("stale token re-armed bootstrap: got %d (%s)", rec.Code, rec.Body)
+	}
+	if users, err := store.ListUsers(db); err != nil || len(users) != 0 {
+		t.Fatalf("claimed bootstrap created an account: users=%+v err=%v", users, err)
 	}
 }

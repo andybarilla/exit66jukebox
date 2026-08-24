@@ -235,12 +235,15 @@ func TestPublicHandlerAppliesBrowserAuthAroundRawHandler(t *testing.T) {
 
 func TestPublicBaseURLMapsWildcardListenHost(t *testing.T) {
 	cases := []struct{ addr, want string }{
+		// "" is the zero value for a Server that never had SetListenAddr called;
+		// the rest are forms net.Listen actually accepts.
 		{"", "http://127.0.0.1"},
 		{":8066", "http://127.0.0.1:8066"},
 		{"127.0.0.1:8066", "http://127.0.0.1:8066"},
 		{"0.0.0.0:8066", "http://127.0.0.1:8066"},
 		{"[::]:8066", "http://127.0.0.1:8066"},
-		{"::", "http://127.0.0.1"},
+		{"[::1]:8066", "http://[::1]:8066"},
+		{"jukebox.lan:8066", "http://jukebox.lan:8066"},
 		{"jukebox.lan", "http://jukebox.lan:80"},
 	}
 	for _, tc := range cases {
@@ -273,7 +276,10 @@ func TestSetBootstrapTokenReturnsOpenableURL(t *testing.T) {
 	if parsed.Query().Get("bootstrap_token") != "tok en/+" {
 		t.Fatalf("token not round-tripped through %q", got)
 	}
-	if !s.acceptsBootstrapToken("tok en/+") {
-		t.Fatal("SetBootstrapToken should arm the token it returns a URL for")
+	if got := s.bootstrapTokenStatus("tok en/+"); got != bootstrapValid {
+		t.Fatalf("SetBootstrapToken should arm the token it returns a URL for, got %v", got)
+	}
+	if got := s.bootstrapTokenStatus("wrong"); got != bootstrapInvalid {
+		t.Fatalf("wrong token status = %v, want bootstrapInvalid", got)
 	}
 }

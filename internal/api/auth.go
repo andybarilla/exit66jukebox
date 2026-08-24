@@ -260,9 +260,18 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bootstrap := n == 0
-	if bootstrap && !s.acceptsBootstrapToken(strings.TrimSpace(req.BootstrapToken)) {
-		writeErr(w, http.StatusForbidden, "valid bootstrap token required")
-		return
+	if bootstrap {
+		// A caller that read an empty table can still lose the bootstrap to a
+		// concurrent winner, or find every account deleted under a claimed
+		// bootstrap. Both mean "already claimed", not "your token is wrong".
+		switch s.bootstrapTokenStatus(strings.TrimSpace(req.BootstrapToken)) {
+		case bootstrapClaimed:
+			writeErr(w, http.StatusConflict, "bootstrap already claimed")
+			return
+		case bootstrapInvalid:
+			writeErr(w, http.StatusForbidden, "valid bootstrap token required")
+			return
+		}
 	}
 	if !bootstrap && store.SecurityModeSetting(s.db) != store.SecurityModeFullLogin {
 		writeErr(w, http.StatusForbidden, "signup is available only in full_login mode")
@@ -310,7 +319,7 @@ func (s *Server) createSignupAccount(w http.ResponseWriter, r *http.Request, ema
 		writeErr(w, http.StatusConflict, "email already registered")
 		return
 	}
-	s.clearBootstrapToken()
+	s.markBootstrapClaimed()
 	if err := s.setSessionCookie(w, r, uid); err != nil {
 		writeErr(w, http.StatusInternalServerError, "session error")
 		return

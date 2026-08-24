@@ -36,7 +36,7 @@ describe('App security mode routing', () => {
 
   test('blocks normal sessions in household profile mode on non-admin routes', () => {
     expect(source).toMatch(
-      /const\s+needsProfileSelection\s*=\s*\$derived\(\s*s\.config\.requiresProfile\s*&&\s*!onAdminPath\s*&&\s*!s\.me\?\.is_passwordless_profile\s*\)/
+      /const\s+needsProfileSelection\s*=\s*\$derived\(\s*s\.config\.requiresProfile\s*&&\s*!onAdminPath\s*&&\s*!bootstrapToken\s*&&\s*!s\.me\?\.is_passwordless_profile\s*\)/
     );
     expect(source).toContain('{:else if needsProfileSelection}');
   });
@@ -89,7 +89,9 @@ describe('App first-admin bootstrap link', () => {
     expect(source).toMatch(/if\s*\(bootstrapToken\)\s*showSignup\s*=\s*showAuth\s*=\s*true/);
   });
 
-  test('passes the token and bootstrap state into Signup', () => {
-    expect(source).toMatch(/<Signup\s+\{bootstrapToken\}\s+needsBootstrap=\{s\.config\.needsBootstrap\}/);
+  test('a bootstrap token also outranks the profile picker', () => {
+    expect(source).toMatch(
+      /const\s+needsProfileSelection\s*=\s*\$derived\([^)]*!bootstrapToken[^)]*\)/s
+    );
   });
 });
