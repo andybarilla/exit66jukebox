@@ -13,15 +13,21 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
-// personalStreamID names the private stream these tests exercise. It is the one
-// global row every listener currently shares (#128); production code has no
-// need of the literal, so it lives here rather than adding another hardcoded
-// site alongside main.go's boot-time ensure.
-const personalStreamID = "me"
-
 func userSession(t *testing.T, srv *Server, email string) *http.Cookie {
 	t.Helper()
-	uid, err := store.CreateUser(srv.db, email, "User", "h", false)
+	_, cookie := userSessionWithID(t, srv, email)
+	return cookie
+}
+
+// userSessionWithID also returns the user id, which tests need whenever they
+// have to name that user's personal stream: the id is derived from it.
+func userSessionWithID(t *testing.T, srv *Server, email string) (int64, *http.Cookie) {
+	t.Helper()
+	// verified is passed explicitly: CreateUser's variadic defaults it to TRUE
+	// (users.go:46), which is easy to read the wrong way round. true is what
+	// these fixtures have always got, and it is inert here — the session is
+	// created directly rather than through login.
+	uid, err := store.CreateUser(srv.db, email, "User", "h", false, true)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -29,7 +35,7 @@ func userSession(t *testing.T, srv *Server, email string) *http.Cookie {
 	if err := store.CreateSession(srv.db, auth.HashToken(raw), uid, 4_000_000_000); err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	return &http.Cookie{Name: sessionCookie, Value: raw}
+	return uid, &http.Cookie{Name: sessionCookie, Value: raw}
 }
 
 func insertTrack(t *testing.T, srv *Server, title string) int64 {
@@ -352,22 +358,26 @@ func TestCreateStreamRejectsEmptyName(t *testing.T) {
 	}
 }
 
-// A private stream is nobody's to rename or destroy. The queue controls behind
-// requireAdminShared deliberately fall through for private streams so a guest
-// can drive their own queue, but rename and delete are not queue controls:
-// falling through there let any authenticated non-admin wipe a private
-// stream's queue rows, its station, and the row itself. The personal stream is
-// still one global row shared by every listener (#128), so that is everyone's
-// queue and station, destroyed by any logged-in user.
+// A private stream is nobody's to rename or destroy — its owner's included.
+// The queue controls behind requireAdminShared deliberately fall through for
+// private streams so a listener can drive their own queue, but rename and
+// delete are not queue controls: falling through there let any authenticated
+// non-admin wipe a private stream's queue rows, its station, and the row.
+//
+// Since #128 the only private stream a request can reach is the caller's own,
+// via the alias, so that is what this drives. A stream belonging to somebody
+// else is refused earlier and is covered by
+// TestPersonalStreamNotAddressableByDerivedID.
 func TestNonAdminCannotRenameOrDeleteAPrivateStream(t *testing.T) {
 	srv, _ := newTestServer(t)
-	user := userSession(t, srv, "bob@example.com")
+	uid, user := userSessionWithID(t, srv, "bob@example.com")
+	mine := store.PersonalStreamID(uid)
 	tid := insertTrack(t, srv, "Song")
-	if err := store.Enqueue(srv.db, personalStreamID, tid, "Bob"); err != nil {
-		t.Fatalf("enqueue: %v", err)
+	if rec := postForm(srv, "/api/streams/me/requests", "kind=track&id="+itoa(tid), user); rec.Code != http.StatusOK {
+		t.Fatalf("request: %d %s", rec.Code, rec.Body)
 	}
 	if err := store.UpsertStation(srv.db, store.Station{
-		StreamID: personalStreamID, Genre: "rock", Threshold: 3, Batch: 10,
+		StreamID: mine, Genre: "rock", Threshold: 3, Batch: 10,
 	}); err != nil {
 		t.Fatalf("station: %v", err)
 	}
@@ -376,38 +386,43 @@ func TestNonAdminCannotRenameOrDeleteAPrivateStream(t *testing.T) {
 		{http.MethodDelete, ""},
 		{http.MethodPatch, `{"name":"mine now"}`},
 	} {
-		rec := do(srv, tc.method, "/api/streams/"+personalStreamID, tc.body, user)
+		rec := do(srv, tc.method, "/api/streams/me", tc.body, user)
 		if rec.Code != http.StatusNotFound {
-			t.Fatalf("non-admin %s on a private stream: want 404, got %d body %s",
+			t.Fatalf("non-admin %s on their own private stream: want 404, got %d body %s",
 				tc.method, rec.Code, rec.Body.String())
 		}
 	}
 
-	if _, ok, _ := store.GetStream(srv.db, personalStreamID); !ok {
+	if _, ok, _ := store.GetStream(srv.db, mine); !ok {
 		t.Fatal("the private stream row was destroyed")
 	}
-	ids, err := store.QueueTrackIDs(srv.db, personalStreamID)
+	ids, err := store.QueueTrackIDs(srv.db, mine)
 	if err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	if len(ids) != 1 {
 		t.Fatalf("private stream queue rows destroyed: %v", ids)
 	}
-	if _, ok := store.GetStation(srv.db, personalStreamID); !ok {
+	if _, ok := store.GetStation(srv.db, mine); !ok {
 		t.Fatal("the private stream's station was destroyed")
 	}
 }
 
 // An admin has no business there either: rename and delete are shared-stream
-// operations, so a private stream is simply not a valid target.
+// operations, so a private stream is simply not a valid target. Admin rights
+// do not turn the alias into a deletable stream.
 func TestAdminCannotDeleteAPrivateStream(t *testing.T) {
 	srv, _ := newTestServer(t)
-	admin := adminSession(t, srv.db)
-	rec := do(srv, http.MethodDelete, "/api/streams/"+personalStreamID, "", admin)
+	adminID, admin := adminSessionWithEmail(t, srv.db, "admin@example.com")
+	tid := insertTrack(t, srv, "Song")
+	if rec := postForm(srv, "/api/streams/me/requests", "kind=track&id="+itoa(tid), admin); rec.Code != http.StatusOK {
+		t.Fatalf("provision: %d %s", rec.Code, rec.Body)
+	}
+	rec := do(srv, http.MethodDelete, "/api/streams/me", "", admin)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("admin DELETE on a private stream: want 404, got %d body %s", rec.Code, rec.Body.String())
 	}
-	if _, ok, _ := store.GetStream(srv.db, personalStreamID); !ok {
+	if _, ok, _ := store.GetStream(srv.db, store.PersonalStreamID(adminID)); !ok {
 		t.Fatal("the private stream row was destroyed")
 	}
 }

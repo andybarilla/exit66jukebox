@@ -132,3 +132,29 @@ describe('album linkage from now-playing and queue', () => {
     expect(store.queue[0].albumId).toBeUndefined();
   });
 });
+
+describe('personal stream availability (#128)', () => {
+  it('assumes there is none until config says otherwise', () => {
+    const s = createStore();
+    expect(s.hasPersonalStream).toBe(false);
+  });
+
+  it('reflects personal_stream from /api/config', async () => {
+    const s = createStore();
+    global.fetch = vi.fn(async (url) => {
+      if (String(url).startsWith('/api/config')) {
+        return { ok: true, json: async () => ({ personal_stream: true, security_mode: 'full_login' }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    await s.bootstrap();
+    expect(s.hasPersonalStream).toBe(true);
+  });
+
+  it('toggleStream does not switch to a personal stream that does not exist', () => {
+    const s = createStore();
+    const before = s.stream;
+    s.toggleStream();
+    expect(s.stream).toBe(before);
+  });
+});

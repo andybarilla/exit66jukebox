@@ -122,12 +122,6 @@ func main() {
 	if err := store.EnsureSharedStream(db, houseID, "House"); err != nil {
 		log.Fatalf("ensure house stream: %v", err)
 	}
-	// One global row shared by every listener for now. No route creates a
-	// stream, so this is the personal stream's only origin — dropping it 404s
-	// first use.
-	if err := store.EnsurePrivateStream(db, store.PersonalStreamID); err != nil {
-		log.Fatalf("ensure personal stream: %v", err)
-	}
 	silence := broadcast.GenerateSilence(1)
 	if silence == nil {
 		log.Print("warning: MP3 silence generation failed (is ffmpeg installed?); shared streams will send nothing while idle")

@@ -1,6 +1,9 @@
 package store
 
-import "database/sql"
+import (
+	"database/sql"
+	"errors"
+)
 
 // currentLibraryVersion is bumped whenever the indexing rules change in a way
 // that stored columns can't re-derive, forcing a one-time full re-scan. v1:
@@ -26,6 +29,9 @@ func columnExists(db *sql.DB, table, col string) (bool, error) {
 // changes are applied here.
 func migrate(db *sql.DB) error {
 	if err := migrateEmailVerificationSchema(db); err != nil {
+		return err
+	}
+	if err := dropLegacyPersonalStream(db); err != nil {
 		return err
 	}
 	has, err := columnExists(db, "track", "added_at")
@@ -366,4 +372,41 @@ func backfillSortKeys(db *sql.DB, table string) error {
 		}
 	}
 	return nil
+}
+
+// legacyPersonalStreamID was the single private stream row every listener
+// shared before personal streams became per-user (#128). Its queue was common
+// to everybody, so there is no user to migrate it to: any track in it may have
+// been queued by anyone, and handing the lot to one account would be as wrong
+// as leaving it readable by all of them.
+const legacyPersonalStreamID = "me"
+
+// dropLegacyPersonalStream removes that shared row and the queue and station
+// rows hanging off it. Per-user ids live in their own namespace, so this can
+// never match one. It is idempotent: on an instance that never had the row, or
+// on a second run, every statement matches nothing.
+func dropLegacyPersonalStream(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Only the private row: an operator who created a *shared* stream and named
+	// its id "me" owns a real stream, and dropping it would be data loss.
+	var kind string
+	err = tx.QueryRow(`SELECT kind FROM stream WHERE id=?`, legacyPersonalStreamID).Scan(&kind)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if kind != KindPrivate {
+		return nil
+	}
+	if err := deleteStreamTx(tx, legacyPersonalStreamID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

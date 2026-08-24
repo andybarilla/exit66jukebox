@@ -15,6 +15,7 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	u, authed := s.currentUser(r)
 	mode := store.SecurityModeSetting(s.db)
 	isPasswordlessProfile := authed && u.IsPasswordlessProfile
+	_, hasPersonalStream := s.callerPersonalStream(r)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mute_local_on_cast": s.muteLocalOnCast,
 		"fed_peers":          peers,
@@ -27,6 +28,10 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 		"signup_enabled":     mode == store.SecurityModeFullLogin && store.SignupEnabled(s.db),
 		"needs_bootstrap":    countUsersZero(s.db),
 		"max_shared_streams": store.MaxSharedStreams,
+		// Whether this caller has a personal stream at all: false in the two
+		// open modes, where there is no user to key one on, so the client hides
+		// the Personal control rather than calling a route that 404s.
+		"personal_stream": hasPersonalStream,
 	})
 }
 

@@ -188,15 +188,23 @@ func eq(a, b []string) bool {
 	return true
 }
 
-// Boot is the personal stream's only origin. The behavioural test in
-// internal/api provisions the row itself, so it stays green if this call is
-// dropped; only grepping main.go holds the wiring in place.
-func TestMainProvisionsPersonalStreamAtBoot(t *testing.T) {
+// Boot must NOT provision a personal stream any more (#128). A personal stream
+// id is derived from a user, and boot knows no users, so the only row boot
+// could create is the one global row every listener shared — the bug itself.
+// Provisioning moved to first use, in resolvePersonalStream.
+//
+// This guard is the inverse of the one it replaces, and it is still a source
+// grep because the behavioural cost of reintroducing the call is invisible:
+// an EnsurePrivateStream here would leave every test green while re-creating a
+// shared row that no route can reach. First-use provisioning itself is covered
+// behaviourally by TestPersonalStreamProvisionedOnFirstUse in internal/api,
+// which fails if the ensure call is dropped.
+func TestMainDoesNotProvisionAPersonalStreamAtBoot(t *testing.T) {
 	source, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatalf("read main.go: %v", err)
 	}
-	if !strings.Contains(string(source), "store.EnsurePrivateStream(db, store.PersonalStreamID)") {
-		t.Fatal("main.go should provision the personal stream at boot")
+	if strings.Contains(string(source), "EnsurePrivateStream") {
+		t.Fatal("main.go must not provision a personal stream at boot: the id is per-user and boot has no user")
 	}
 }

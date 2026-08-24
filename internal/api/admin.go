@@ -75,9 +75,10 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 //
 // allowPrivate says what a private stream means for this particular operation.
 // The queue controls let it through ungated, because there it is a listener
-// driving their own queue. Rename and delete reject it: destroying a stream is
-// not that, and the personal stream is still one global row shared by every
-// listener (#128), so it would be everyone's queue and station.
+// driving their own queue — and since #128 the only private stream that can
+// reach this gate is the caller's own, resolvePersonalStream having refused
+// every other route into one. Rename and delete reject it: destroying a stream
+// is not a queue control, and a personal stream has no owner-facing delete.
 func (s *Server) streamGate(next http.HandlerFunc, allowPrivate bool) http.HandlerFunc {
 	gated := s.requireAdmin(next)
 	return func(w http.ResponseWriter, r *http.Request) {

@@ -1,4 +1,9 @@
-const SESSION = 'me'; // single private stream id for v1; replaced by real session later
+// PERSONAL is an alias, not a stream id: the server resolves it to the caller's
+// own personal stream and provisions one on first use (#128). The client never
+// learns or chooses a personal stream id, and supplying one directly is refused.
+// Whether a personal stream exists at all is reported by /api/config as
+// personal_stream — it does not in the two open security modes.
+const SESSION = 'me';
 
 // listPage fetches one page of a browse list, returning the rows plus the
 // unpaged total from X-Total-Count (falling back to the page length when the

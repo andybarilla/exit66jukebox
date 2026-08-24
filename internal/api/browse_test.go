@@ -20,10 +20,21 @@ func seedAPILibrary(t *testing.T, srv *Server) {
 	store.UpsertTrack(srv.db, model.Track{Path: "/m/mn.mp3", Title: "Money", TrackNo: 1}, "ABBA", "", "Arrival")
 }
 
+// get issues an anonymous GET. Routes that need a session take a cookie
+// explicitly; see getAs.
 func get(t *testing.T, srv *Server, path string) *httptest.ResponseRecorder {
 	t.Helper()
+	return getAs(t, srv, path, nil)
+}
+
+func getAs(t *testing.T, srv *Server, path string, cookie *http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET %s: status %d", path, rec.Code)
 	}
@@ -98,6 +109,7 @@ func TestAlbumTracksEndpoint(t *testing.T) {
 
 func TestQueueItemsEnriched(t *testing.T) {
 	srv, _ := newTestServer(t)
+	user := userSession(t, srv, "bob@example.com")
 	seedAPILibrary(t, srv)
 	var moneyID int64
 	srv.db.QueryRow(`SELECT id FROM track WHERE title = 'Money'`).Scan(&moneyID)
@@ -105,9 +117,10 @@ func TestQueueItemsEnriched(t *testing.T) {
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(moneyID, 10)}}
 	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/requests", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(user)
 	srv.Handler().ServeHTTP(httptest.NewRecorder(), req)
 
-	rec := get(t, srv, "/api/streams/me")
+	rec := getAs(t, srv, "/api/streams/me", user)
 	body := rec.Body.String()
 	if !strings.Contains(body, `"code":"B1"`) || !strings.Contains(body, `"album_name":"Arrival"`) {
 		t.Fatalf("queue item not enriched: %s", body)
@@ -137,6 +150,7 @@ func TestDiscoverEnriched(t *testing.T) {
 
 func TestNextTrackEnriched(t *testing.T) {
 	srv, _ := newTestServer(t)
+	user := userSession(t, srv, "bob@example.com")
 	seedAPILibrary(t, srv)
 	var moneyID int64
 	srv.db.QueryRow(`SELECT id FROM track WHERE title = 'Money'`).Scan(&moneyID)
@@ -144,11 +158,14 @@ func TestNextTrackEnriched(t *testing.T) {
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(moneyID, 10)}}
 	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/requests", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(user)
 	srv.Handler().ServeHTTP(httptest.NewRecorder(), req)
 
 	// The /next payload backs now-playing; it must carry the slot code/tone/names.
+	next := httptest.NewRequest(http.MethodPost, "/api/streams/me/next", nil)
+	next.AddCookie(user)
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/streams/me/next", nil))
+	srv.Handler().ServeHTTP(rec, next)
 	body := rec.Body.String()
 	if !strings.Contains(body, `"code":"B1"`) || !strings.Contains(body, `"tone":"magenta"`) {
 		t.Fatalf("next track not enriched: %s", body)

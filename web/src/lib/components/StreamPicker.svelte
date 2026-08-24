@@ -115,7 +115,11 @@
     {/if}
   {/if}
 
-  <!-- The personal stream is pinned here, deliberately outside the list above. -->
-  <button onclick={() => onSelect?.(personalId)}
-          style="{rowStyle(current === personalId)} border:1px solid var(--border-strong); border-radius:var(--radius-sm);">Personal</button>
+  <!-- The personal stream is pinned here, deliberately outside the list above.
+       personalId is null in the open security modes, where no personal stream
+       exists to select (#128), so the control is not rendered at all. -->
+  {#if personalId}
+    <button onclick={() => onSelect?.(personalId)}
+            style="{rowStyle(current === personalId)} border:1px solid var(--border-strong); border-radius:var(--radius-sm);">Personal</button>
+  {/if}
 </div>

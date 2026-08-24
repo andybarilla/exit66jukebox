@@ -48,14 +48,16 @@ func TestStationStartGetStopEndpoints(t *testing.T) {
 	for _, p := range []string{"/m/1.mp3", "/m/2.mp3", "/m/3.mp3"} {
 		store.UpsertTrack(srv.db, model.Track{Path: p, Title: p, Genre: "Rock"}, "B", "", "X")
 	}
-	// The station routes reject an unknown stream id rather than creating one.
-	if err := store.EnsurePrivateStream(srv.db, "s"); err != nil {
-		t.Fatalf("ensure stream: %v", err)
-	}
+	// A station on the caller's own personal stream: the alias resolves to it
+	// and provisions it, so no test-only stream row is needed. A private
+	// stream belonging to anyone else is not addressable at all (#128).
+	uid, user := userSessionWithID(t, srv, "bob@example.com")
+	mine := store.PersonalStreamID(uid)
 
 	// Start
 	body := strings.NewReader(`{"genre":"Rock"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/streams/s/station", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/station", body)
+	req.AddCookie(user)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -64,7 +66,8 @@ func TestStationStartGetStopEndpoints(t *testing.T) {
 	}
 
 	// Get
-	req2 := httptest.NewRequest(http.MethodGet, "/api/streams/s/station", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/api/streams/me/station", nil)
+	req2.AddCookie(user)
 	rec2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK || !strings.Contains(rec2.Body.String(), "Rock") {
@@ -72,19 +75,20 @@ func TestStationStartGetStopEndpoints(t *testing.T) {
 	}
 
 	// Queue should have been filled immediately.
-	n, _ := store.QueueLen(srv.db, "s")
+	n, _ := store.QueueLen(srv.db, mine)
 	if n == 0 {
 		t.Fatalf("expected immediate fill, queue empty")
 	}
 
 	// Stop
-	req3 := httptest.NewRequest(http.MethodDelete, "/api/streams/s/station", nil)
+	req3 := httptest.NewRequest(http.MethodDelete, "/api/streams/me/station", nil)
+	req3.AddCookie(user)
 	rec3 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec3, req3)
 	if rec3.Code != http.StatusOK {
 		t.Fatalf("stop status: %d", rec3.Code)
 	}
-	if _, ok := store.GetStation(srv.db, "s"); ok {
+	if _, ok := store.GetStation(srv.db, mine); ok {
 		t.Fatalf("expected station removed after stop")
 	}
 }

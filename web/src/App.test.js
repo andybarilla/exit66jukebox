@@ -64,8 +64,8 @@ describe('App security mode routing', () => {
   });
 
   // Queue controls follow the server's gate, which keys on the stream's kind:
-  // admins on any shared stream, anyone in open mode on a shared stream, and
-  // anyone on their own personal stream. The id "house" must not appear in it —
+  // admins on any shared stream, anyone in open mode on a shared stream, and a
+  // user on their own personal stream. The id "house" must not appear in it —
   // that was the client half of the bug #22 fixed.
   test('queue controls follow stream kind, not a hardcoded house id', () => {
     expect(source).toMatch(/import\s+\{[^}]*nextShared[^}]*\}\s+from\s+'\.\/lib\/api\.js'/s);

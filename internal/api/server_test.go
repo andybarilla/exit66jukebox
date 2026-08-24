@@ -32,13 +32,11 @@ func newTestServer(t *testing.T) (*Server, *sql.DB) {
 	// browser-facing links resolve with no public origin configured. Tests that
 	// exercise the refusal set a non-loopback address themselves.
 	s.SetListenAddr("127.0.0.1:8066")
-	// Mirror boot: the always-on house stream and the personal stream row both
-	// exist before any request arrives.
+	// Mirror boot: the always-on house stream exists before any request
+	// arrives. Personal streams deliberately do not — they are provisioned on
+	// a user's first use, so a test that wants one asks for it as that user.
 	if err := store.EnsureSharedStream(db, "house", "House"); err != nil {
 		t.Fatalf("ensure house: %v", err)
-	}
-	if err := store.EnsurePrivateStream(db, store.PersonalStreamID); err != nil {
-		t.Fatalf("ensure personal: %v", err)
 	}
 	return s, db
 }
@@ -104,20 +102,24 @@ func TestClientRoutesServeUIIndex(t *testing.T) {
 
 func TestRequestRecordsRequesterAndStreamReturnsIt(t *testing.T) {
 	srv, _ := newTestServer(t)
+	user := userSession(t, srv, "bob@example.com")
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}, "by": {"Mira"}}
 	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/requests",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(user)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("request status %d", rec.Code)
 	}
 
+	read := httptest.NewRequest(http.MethodGet, "/api/streams/me", nil)
+	read.AddCookie(user)
 	rec2 := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/streams/me", nil))
+	srv.Handler().ServeHTTP(rec2, read)
 	if !strings.Contains(rec2.Body.String(), `"requested_by":"Mira"`) {
 		t.Fatalf("stream body missing requester: %s", rec2.Body.String())
 	}
@@ -164,8 +166,11 @@ func TestGetStreamNowPlayingNullWhenIdle(t *testing.T) {
 
 func TestGetStreamNowPlayingNullForUntrackedStream(t *testing.T) {
 	srv, _ := newTestServer(t)
+	user := userSession(t, srv, "bob@example.com")
+	req := httptest.NewRequest(http.MethodGet, "/api/streams/me", nil)
+	req.AddCookie(user)
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/streams/me", nil))
+	srv.Handler().ServeHTTP(rec, req)
 	if !strings.Contains(rec.Body.String(), `"now_playing":null`) {
 		t.Fatalf("expected now_playing:null for untracked stream, got %s", rec.Body.String())
 	}
@@ -173,12 +178,14 @@ func TestGetStreamNowPlayingNullForUntrackedStream(t *testing.T) {
 
 func TestRequestThenNextRoundTrip(t *testing.T) {
 	srv, _ := newTestServer(t)
+	user := userSession(t, srv, "bob@example.com")
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}}
 	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/requests",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(user)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -186,6 +193,7 @@ func TestRequestThenNextRoundTrip(t *testing.T) {
 	}
 
 	req2 := httptest.NewRequest(http.MethodPost, "/api/streams/me/next", nil)
+	req2.AddCookie(user)
 	rec2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {
@@ -198,12 +206,14 @@ func TestRequestThenNextRoundTrip(t *testing.T) {
 
 func TestGetNextDoesNotAdvanceQueue(t *testing.T) {
 	srv, _ := newTestServer(t)
+	user := userSession(t, srv, "bob@example.com")
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}}
 	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/requests",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(user)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -211,6 +221,7 @@ func TestGetNextDoesNotAdvanceQueue(t *testing.T) {
 	}
 
 	getNext := httptest.NewRequest(http.MethodGet, "/api/streams/me/next", nil)
+	getNext.AddCookie(user)
 	getNextRec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(getNextRec, getNext)
 	if getNextRec.Code == http.StatusOK {
@@ -218,6 +229,7 @@ func TestGetNextDoesNotAdvanceQueue(t *testing.T) {
 	}
 
 	postNext := httptest.NewRequest(http.MethodPost, "/api/streams/me/next", nil)
+	postNext.AddCookie(user)
 	postNextRec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(postNextRec, postNext)
 	if postNextRec.Code != http.StatusOK {

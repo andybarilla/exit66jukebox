@@ -115,3 +115,18 @@ test('creating a stream submits the trimmed name', async () => {
   await Promise.resolve();
   expect(created).toEqual(['Garage']);
 });
+
+// #128: in the open security modes there is no personal stream, so the app
+// passes personalId={null} and the pinned control must not be rendered at all
+// — offering a control whose route 404s is worse than not offering it.
+test('the pinned Personal control is absent when there is no personal stream', () => {
+  render({ personalId: null });
+  const labels = [...host.querySelectorAll('button')].map((el) => el.textContent.trim());
+  expect(labels).not.toContain('Personal');
+});
+
+test('the pinned Personal control is present when there is one', () => {
+  render({ personalId: 'me' });
+  const labels = [...host.querySelectorAll('button')].map((el) => el.textContent.trim());
+  expect(labels).toContain('Personal');
+});

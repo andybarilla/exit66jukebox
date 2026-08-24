@@ -17,7 +17,9 @@ export function createStore() {
   let tab = $state('albums');
   let query = $state('');
   // stream is the id currently tuned in: any shared stream, or PERSONAL for the
-  // pinned personal one. sharedStreams mirrors GET /api/streams.
+  // pinned personal one. PERSONAL is an alias the server resolves per caller,
+  // and it is only offered when config.personalStream says one exists.
+  // sharedStreams mirrors GET /api/streams.
   let stream = $state(HOUSE);
   let sharedStreams = $state([{ id: HOUSE, name: 'House', house: true, listeners: 0 }]);
   let isPhone = $state(false);
@@ -54,6 +56,9 @@ export function createStore() {
     needsBootstrap: false,
     authenticated: false,
     maxSharedStreams: 0,
+    // Assume none until /api/config says otherwise, so the Personal control
+    // never flashes in on a mode that has no personal stream.
+    personalStream: false,
   });
   let castActive = $state(false);
 
@@ -392,6 +397,7 @@ export function createStore() {
             needsBootstrap: !!c.needs_bootstrap,
             authenticated: !!c.authenticated,
             maxSharedStreams: Number(c.max_shared_streams) || 0,
+            personalStream: !!c.personal_stream,
           };
         })
         .catch(() => {});
@@ -411,7 +417,11 @@ export function createStore() {
       await reloadActive();        // first page of the active (albums) tab
       startScanPolling();
       await loadStreams();
-      await Promise.all([refreshQueue(stream), refreshQueue(PERSONAL)]);
+      // The personal queue is only fetched where there is one: in the open
+      // modes that route 404s, and prefetching it would just log an error.
+      const queuesToLoad = [refreshQueue(stream)];
+      if (config.personalStream && stream !== PERSONAL) queuesToLoad.push(refreshQueue(PERSONAL));
+      await Promise.all(queuesToLoad);
       discoverGenres().then((g) => { discoverGenreList = Array.isArray(g) ? g : []; }).catch(() => {});
       subscribeToStream(stream);
     },
@@ -434,9 +444,18 @@ export function createStore() {
         pushToast('cyan', 'Stream', `Tuned in to ${name} — everyone on it hears this.`);
       }
     },
+    // hasPersonalStream mirrors the server: false in the two open security
+    // modes, where a request may carry no user and so there is nobody to key a
+    // personal stream on. The Personal control is hidden rather than offered
+    // and refused.
+    get hasPersonalStream() { return config.personalStream; },
     // toggleStream flips between the personal stream and the last shared one
-    // (house when there wasn't one), which is what the compact chip does.
-    toggleStream() { this.setStream(stream === PERSONAL ? lastShared : PERSONAL); },
+    // (house when there wasn't one), which is what the compact chip does. A
+    // no-op where there is no personal stream to flip to.
+    toggleStream() {
+      if (stream !== PERSONAL && !config.personalStream) return;
+      this.setStream(stream === PERSONAL ? lastShared : PERSONAL);
+    },
 
     loadStreams() { return loadStreams(); },
 
