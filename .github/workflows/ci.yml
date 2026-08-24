@@ -16,6 +16,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Check gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: latest
