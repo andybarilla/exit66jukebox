@@ -56,7 +56,9 @@ arrives on. So with this unset on a default install, all of these fail with
 
 - creating an invite (including just reading back the link — this does not need SMTP)
 - admin-triggered password reset and email verification
-- self-service signup, refused before the account row is written
+- self-service signup, refused before the account row is written. Signup also
+  needs SMTP, and is checked against that *first* — if it fails with
+  `verification email is not configured` instead, setting this will not fix it
 - forgot-password
 
 The first-admin bootstrap URL is exempt: it is logged locally, so a wildcard
