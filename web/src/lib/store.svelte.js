@@ -254,8 +254,9 @@ export function createStore() {
     }
   }
 
-  // Queue items are {track:{...enriched...}, requested_by} for /me; the house
-  // SSE/queue may send a bare enriched track. Both carry backend code/tone/names.
+  // Queue items are {track:{...enriched...}, requested_by} for the personal
+  // stream; a shared stream's SSE/queue may send a bare enriched track. Both
+  // carry backend code/tone/names.
   function normalizeQueued(item) {
     const t = item.track || item;
     return {

@@ -914,7 +914,8 @@ func (s *Server) inviteAccept(w http.ResponseWriter, r *http.Request) {
 // access is enabled. It deliberately does NOT trust the peer address: behind a
 // same-host reverse proxy every request arrives from 127.0.0.1, so a loopback
 // bypass would open the whole API to the internet. Cookie-less internal callers
-// (the ffmpeg house source) and Sonos use signed URLs instead — see signedOK.
+// (each shared stream's ffmpeg source) and Sonos use signed URLs instead — see
+// signedOK.
 func (s *Server) mediaAllowed(r *http.Request) bool {
 	return s.browserAccessAllowed(r)
 }
@@ -974,8 +975,8 @@ func (s *Server) sharedStreamRouteRequiresAdmin(method, path string) bool {
 }
 
 // signedOK reports whether the request carries a path-scoped signed token valid
-// for its own URL path (the Sonos cast and the ffmpeg house source both fetch
-// with no cookie). A forged or wrong-path token fails VerifyPath.
+// for its own URL path (the Sonos cast and every shared stream's ffmpeg source
+// fetch with no cookie). A forged or wrong-path token fails VerifyPath.
 func (s *Server) signedOK(r *http.Request) bool {
 	sig := r.URL.Query().Get("sig")
 	return sig != "" && auth.VerifyPath(s.signingSecret, sig, r.URL.Path, time.Now().Unix())
@@ -984,8 +985,8 @@ func (s *Server) signedOK(r *http.Request) bool {
 // RequireAuthMiddleware gates the public listener's API routes. Anything not
 // under /api/ (the static SPA shell, and /stream/ which self-guards) passes
 // through; open auth/config endpoints pass; otherwise the request needs a valid
-// session, the guest toggle, or a valid signed token for its path (the ffmpeg
-// house source fetches /api/tracks/{id}/audio this way). This is the production
+// session, the guest toggle, or a valid signed token for its path (a shared
+// stream's ffmpeg source fetches /api/tracks/{id}/audio this way). This is the production
 // gate; it wraps ONLY the public http.Server, never the federation MemberHandler.
 func (s *Server) RequireAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

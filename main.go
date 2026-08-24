@@ -144,7 +144,7 @@ func main() {
 	enqueue := func(trackID, playedAt int64) error {
 		return store.EnqueueScrobble(db, activeScrobbleServices(cfg.Services.ListenBrainzEnabled(), lfm), trackID, playedAt)
 	}
-	// The shared stream feeds ffmpeg the instance's own audio endpoint so remote
+	// A shared stream feeds ffmpeg the instance's own audio endpoint so remote
 	// tracks resolve through the same local/remote branch as browser playback.
 	_, selfPort, _ := net.SplitHostPort(cfg.Addr)
 	builder := &streamBuilder{

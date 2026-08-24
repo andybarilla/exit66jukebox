@@ -191,8 +191,8 @@ export async function requestTo(streamId, id, { kind = 'track', by = 'You' } = {
   return r.json();
 }
 
-// removeRequest/clearQueue/setShuffle are admin-gated on the house stream and
-// open on a guest's "me" stream; the session cookie authenticates server-side.
+// removeRequest/clearQueue/setShuffle are admin-gated on every shared stream
+// and open on a guest's own stream; the session cookie authenticates server-side.
 export async function removeRequest(streamId, trackId) {
   const r = await fetch(`/api/streams/${streamId}/requests/${trackId}`, { method: 'DELETE' });
   return r.json();

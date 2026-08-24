@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// streamAudio fans the shared stream's continuous MP3 feed to this listener.
+// streamAudio fans a shared stream's continuous MP3 feed to this listener.
 // Handles GET /stream/<id>.mp3 (the standard mux doesn't support suffix wildcards).
 func (s *Server) streamAudio(w http.ResponseWriter, r *http.Request) {
 	seg := strings.TrimPrefix(r.URL.Path, "/stream/")
