@@ -2,14 +2,6 @@ package store
 
 import "database/sql"
 
-// EnsureStream creates the stream row if absent.
-func EnsureStream(db *sql.DB, id, name, kind string) error {
-	_, err := db.Exec(
-		`INSERT INTO stream(id, name, kind) VALUES(?,?,?)
-		 ON CONFLICT(id) DO NOTHING`, id, name, kind)
-	return err
-}
-
 // InQueue reports whether a track is already queued in the stream.
 func InQueue(db *sql.DB, streamID string, trackID int64) (bool, error) {
 	var n int

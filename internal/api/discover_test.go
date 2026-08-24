@@ -48,6 +48,10 @@ func TestStationStartGetStopEndpoints(t *testing.T) {
 	for _, p := range []string{"/m/1.mp3", "/m/2.mp3", "/m/3.mp3"} {
 		store.UpsertTrack(srv.db, model.Track{Path: p, Title: p, Genre: "Rock"}, "B", "", "X")
 	}
+	// The station routes reject an unknown stream id rather than creating one.
+	if err := store.EnsurePrivateStream(srv.db, "s"); err != nil {
+		t.Fatalf("ensure stream: %v", err)
+	}
 
 	// Start
 	body := strings.NewReader(`{"genre":"Rock"}`)

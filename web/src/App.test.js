@@ -63,15 +63,20 @@ describe('App security mode routing', () => {
     expect(adminLoginBranch).toBeLessThan(accountLoginBranch);
   });
 
-  test('opens house queue controls only in open mode for non-admin sessions', () => {
-    expect(source).toMatch(/import\s+\{[^}]*nextHouse[^}]*\}\s+from\s+'\.\/lib\/api\.js'/s);
-    expect(source).toMatch(/if\s*\(s\.stream\s*===\s*'house'\)\s*nextHouse\(\)/);
+  // Queue controls follow the server's gate, which keys on the stream's kind:
+  // admins on any shared stream, anyone in open mode on a shared stream, and
+  // anyone on their own personal stream. The id "house" must not appear in it —
+  // that was the client half of the bug #22 fixed.
+  test('queue controls follow stream kind, not a hardcoded house id', () => {
+    expect(source).toMatch(/import\s+\{[^}]*nextShared[^}]*\}\s+from\s+'\.\/lib\/api\.js'/s);
+    expect(source).toMatch(/if\s*\(s\.isSharedStream\)\s*nextShared\(s\.stream\)/);
     expect(source).toMatch(
-      /const\s+canControlHouseQueue\s*=\s*\$derived\(\s*s\.isAdmin\s*\|\|\s*\(\s*s\.config\.securityMode\s*===\s*'open'\s*&&\s*s\.stream\s*===\s*'house'\s*\)\s*\)/
+      /const\s+canControlSharedQueue\s*=\s*\$derived\(\s*s\.isSharedStream\s*&&\s*\(\s*s\.isAdmin\s*\|\|\s*s\.config\.securityMode\s*===\s*'open'\s*\)\s*\)/
     );
     expect(source).toMatch(
-      /const\s+canControl\s*=\s*\$derived\(\s*canControlHouseQueue\s*\|\|\s*s\.stream\s*===\s*'me'\s*\)/
+      /const\s+canControl\s*=\s*\$derived\(\s*canControlSharedQueue\s*\|\|\s*!s\.isSharedStream\s*\)/
     );
+    expect(source).not.toMatch(/canControl[^\n]*'house'/);
     expect(source).not.toMatch(/open_admin_locked[^\n]*canControl/);
   });
 });

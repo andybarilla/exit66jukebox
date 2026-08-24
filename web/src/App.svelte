@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { createStore } from './lib/store.svelte.js';
-  import { audioURL, houseStreamURL, nextHouse, nextTrack } from './lib/api.js';
+  import { audioURL, streamAudioURL, nextShared, nextTrack, PERSONAL } from './lib/api.js';
   import { fmt, keyActivate } from './lib/format.js';
   import TopBar from './lib/components/TopBar.svelte';
   import Tabs from './lib/components/Tabs.svelte';
@@ -20,6 +20,7 @@
   import PasswordReset from './lib/components/PasswordReset.svelte';
   import VerifyEmail from './lib/components/VerifyEmail.svelte';
   import AdminPanel from './lib/components/AdminPanel.svelte';
+  import StreamPicker from './lib/components/StreamPicker.svelte';
   import ProfilePicker from './lib/components/ProfilePicker.svelte';
 
   const s = createStore();
@@ -51,14 +52,19 @@
   const dur = $derived(np?.duration || 0);
   const cur = $derived(Math.min(s.progress, dur || s.progress));
   const npPct = $derived((dur ? Math.min(100, (cur / dur) * 100) : 0) + '%');
-  const streamLabel = $derived(s.stream === 'house' ? 'House' : 'Personal');
+  const streamLabel = $derived(s.streamName);
+  // The picker renders on both the desktop player bar and the phone lineup
+  // sheet; these are shared by both rather than recomputed at each.
+  const canManageStreams = $derived(s.canManageStreams);
+  const atStreamCap = $derived(s.atSharedStreamCap);
   const chip = $derived(`${streamLabel} · ${s.listeners}`);
-  // Queue controls show for admins on any stream, for open-mode house guests,
-  // and for any guest on their own personal stream (which the server never gates).
-  const canControlHouseQueue = $derived(
-    s.isAdmin || (s.config.securityMode === 'open' && s.stream === 'house')
+  // Queue controls show for admins on any shared stream, for open-mode guests on
+  // any shared stream, and for any guest on their own personal stream (which the
+  // server never gates). The server gates on stream kind, so this mirrors it.
+  const canControlSharedQueue = $derived(
+    s.isSharedStream && (s.isAdmin || s.config.securityMode === 'open')
   );
-  const canControl = $derived(canControlHouseQueue || s.stream === 'me');
+  const canControl = $derived(canControlSharedQueue || !s.isSharedStream);
 
   // Attempt playback and let the audio element's play/pause events drive the
   // `playing` flag. A blocked autoplay rejects without firing 'pause', so the
@@ -76,17 +82,17 @@
     try {
       const r = await nextTrack(); // POST /api/streams/me/next (pops server-side)
       if (r && r.ok && r.track) {
-        s.setNowPlaying('me', normalize(r.track));
-        s.setProgress('me', 0);
+        s.setNowPlaying(PERSONAL, normalize(r.track));
+        s.setProgress(PERSONAL, 0);
         audio.src = audioURL(r.track.id);
         if (playing) tryPlay();
       } else {
-        s.setNowPlaying('me', null);
+        s.setNowPlaying(PERSONAL, null);
         playing = false;
       }
       // The pop removed the track server-side; personal has no SSE, so refresh
       // the queue ourselves to keep "up next" in sync.
-      s.refreshQueue('me');
+      s.refreshQueue(PERSONAL);
     } finally {
       advancing = false;
     }
@@ -98,8 +104,10 @@
 
   function applyStreamAudio() {
     if (!audio) return;
-    if (s.stream === 'house') {
-      audio.src = houseStreamURL();
+    if (s.isSharedStream) {
+      // Every shared stream is a server-side continuous feed; only the personal
+      // stream advances itself through the local <audio> element.
+      audio.src = streamAudioURL(s.stream);
       if (playing) tryPlay();
     } else if (!s.nowPlaying) {
       advancePersonal();
@@ -116,15 +124,15 @@
     if (audio.paused) { playing = true; tryPlay(); } else audio.pause();
   }
   function onNext() {
-    if (s.stream === 'me') advancePersonal();
-    if (s.stream === 'house') nextHouse();
-    // house: next is server-driven; SSE will update now-playing.
+    // A shared stream's next is server-driven; SSE brings the new now-playing.
+    if (s.isSharedStream) nextShared(s.stream);
+    else advancePersonal();
   }
-  function onPrev() { s.setProgress(s.stream, 0); if (audio && s.stream === 'me') audio.currentTime = 0; }
+  function onPrev() { s.setProgress(s.stream, 0); if (audio && !s.isSharedStream) audio.currentTime = 0; }
   function onSeek(frac) {
     const t = Math.round(frac * dur);
     s.setProgress(s.stream, t);
-    if (audio && s.stream === 'me') audio.currentTime = t;
+    if (audio && !s.isSharedStream) audio.currentTime = t;
   }
 
   // Called after login/signup/invite: adopt the user, run heavy loads (start is
@@ -167,14 +175,14 @@
     // 1s tick: personal reads exact audio time; house approximates.
     tickTimer = setInterval(() => {
       if (!playing || !s.nowPlaying) return;
-      if (s.stream === 'me' && audio && !audio.paused) {
-        s.setProgress('me', audio.currentTime);
+      if (!s.isSharedStream && audio && !audio.paused) {
+        s.setProgress(PERSONAL, audio.currentTime);
       } else {
         s.setProgress(s.stream, s.progress + 1);
       }
     }, 1000);
     if (audio) {
-      audio.addEventListener('ended', () => { if (s.stream === 'me') advancePersonal(); });
+      audio.addEventListener('ended', () => { if (!s.isSharedStream) advancePersonal(); });
       // Reflect the element's real state so the transport never lies about
       // whether sound is coming out (autoplay block, stall, manual pause).
       audio.addEventListener('play', () => { playing = true; });
@@ -209,7 +217,7 @@
   // kick playback off itself. (House is server-driven and needs no nudge — the
   // hub pops the queue on its own.)
   $effect(() => {
-    if (s.stream === 'me' && !s.nowPlaying && s.queue.length > 0) {
+    if (!s.isSharedStream && !s.nowPlaying && s.queue.length > 0) {
       playing = true; // queuing into an idle stream is an intent to play
       advancePersonal();
     }
@@ -325,11 +333,13 @@
           onVolume={(v) => { volume = v; if (audio) audio.volume = v / 100; }} />
       </div>
       <div style="width:220px; flex:none; border-top:1px solid var(--border-strong); border-left:1px solid var(--border-default); background:var(--bg-surface-raised); background-image:var(--scanline); display:flex; flex-direction:column; justify-content:center; gap:8px; padding:0 18px; box-sizing:border-box;">
-        <span style="font-family:var(--font-mono); font-size:9px; letter-spacing:0.22em; text-transform:uppercase; color:var(--text-faint);">Stream</span>
-        <div style="display:inline-flex; border:1px solid var(--border-strong); border-radius:var(--radius-sm); overflow:hidden; width:fit-content;">
-          <button onclick={() => s.setStream('house')} style="padding:5px 12px; border:none; cursor:pointer; font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; background:{s.stream === 'house' ? 'var(--neon-cyan)' : 'transparent'}; color:{s.stream === 'house' ? 'var(--text-on-accent)' : 'var(--text-muted)'};">House</button>
-          <button onclick={() => s.setStream('me')} style="padding:5px 12px; border:none; cursor:pointer; font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; background:{s.stream === 'me' ? 'var(--neon-cyan)' : 'transparent'}; color:{s.stream === 'me' ? 'var(--text-on-accent)' : 'var(--text-muted)'};">Personal</button>
-        </div>
+        <StreamPicker streams={s.sharedStreams} current={s.stream} personalId={PERSONAL}
+          canManage={canManageStreams}
+          atCap={atStreamCap}
+          onSelect={(id) => s.setStream(id)}
+          onCreate={(name) => s.createStream(name)}
+          onRename={(id, name) => s.renameStream(id, name)}
+          onDelete={(id) => s.deleteStream(id)} />
         <span style="display:inline-flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:10px; letter-spacing:0.1em; color:var(--text-faint);"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{s.listeners} TUNED IN</span>
       </div>
     </div>
@@ -350,11 +360,24 @@
   {#if s.isPhone && s.lineupOpen}
     <div style="position:absolute; inset:0; z-index:75; display:flex; flex-direction:column; justify-content:flex-end;">
       <div role="button" tabindex="-1" aria-label="Close" onclick={() => s.closeLineup()} onkeydown={keyActivate(() => s.closeLineup())} style="position:absolute; inset:0; background:rgba(6,6,11,0.72); backdrop-filter:blur(6px);"></div>
-      <div style="position:relative; height:74vh; background:var(--bg-surface); background-image:var(--scanline); border-top:1.5px solid var(--neon-magenta); border-radius:var(--radius-lg) var(--radius-lg) 0 0; padding:18px; box-shadow:var(--shadow-xl); display:flex; box-sizing:border-box;">
+      <div style="position:relative; height:74vh; background:var(--bg-surface); background-image:var(--scanline); border-top:1.5px solid var(--neon-magenta); border-radius:var(--radius-lg) var(--radius-lg) 0 0; padding:18px; box-shadow:var(--shadow-xl); display:flex; flex-direction:column; gap:14px; box-sizing:border-box;">
+        <!-- The desktop picker lives in the player bar, which a phone does not
+             render. Without it here the top-bar chip is the only stream control
+             on a phone, and it only toggles between one shared stream and the
+             personal one — no way to reach a second shared stream. -->
+        <StreamPicker streams={s.sharedStreams} current={s.stream} personalId={PERSONAL}
+          canManage={canManageStreams}
+          atCap={atStreamCap}
+          onSelect={(id) => s.setStream(id)}
+          onCreate={(name) => s.createStream(name)}
+          onRename={(id, name) => s.renameStream(id, name)}
+          onDelete={(id) => s.deleteStream(id)} />
+        <div style="flex:1; min-height:0; display:flex;">
         <Lineup streamLabel={streamLabel} listeners={s.listeners} shuffle={s.shuffle}
           onToggleShuffle={(v) => s.toggleShuffle(v)} np={np} npPct={npPct}
           queue={s.queue} isPhone={true} canControl={canControl} onClose={() => s.closeLineup()} onRemove={(q) => s.removeFromQueue(q)}
           onOpenAlbum={(item) => s.openAlbum({ id: item.albumId, name: item.albumName, artistName: item.artistName })} />
+        </div>
       </div>
     </div>
   {/if}

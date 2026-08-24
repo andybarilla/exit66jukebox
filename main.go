@@ -119,32 +119,24 @@ func main() {
 	// Always-on "house" shared stream: one continuous MP3 feed driven by the
 	// shared queue, that any browser/Sonos can tune into.
 	const houseID = "house"
-	if err := jb.EnsureStream(houseID, "shared"); err != nil {
+	if err := store.EnsureSharedStream(db, houseID, "House"); err != nil {
 		log.Fatalf("ensure house stream: %v", err)
 	}
-	houseBus := events.NewBus()
+	// The personal stream is still one global row shared by every listener
+	// (#128). Creating it here means the privileged per-stream routes can reject
+	// unknown ids outright instead of creating whatever id they are handed.
+	if err := store.EnsurePrivateStream(db, "me"); err != nil {
+		log.Fatalf("ensure personal stream: %v", err)
+	}
 	silence := broadcast.GenerateSilence(1)
 	if silence == nil {
-		log.Print("warning: MP3 silence generation failed (is ffmpeg installed?); the house stream will send nothing while idle")
+		log.Print("warning: MP3 silence generation failed (is ffmpeg installed?); shared streams will send nothing while idle")
 	}
 
-	// next pops the house queue and publishes now-playing; returns the loopback
-	// audio URL for the broadcaster. Called repeatedly in the hub's single goroutine.
-	// Publishes a null now-playing once when the stream transitions from playing
-	// to idle (empty queue).
-	//
-	// houseNP is the single house current-track + start-time holder: it seeds a
-	// client connecting mid-track (#28) and is the same holder the scrobble seam
-	// reads from. The broadcast Source is real-time-paced, so houseNP's offset ≈
-	// the just-finished track's play time. On each pop (and the play→idle
-	// transition) settle() evaluates that finished track against the scrobble
-	// threshold and enqueues it for every enabled service when it qualifies. Any
-	// network work (now-playing) is fire-and-forget so it never stalls playback.
-	houseNP := api.NewNowPlaying()
 	// Root context cancelled on SIGINT/SIGTERM. Threaded through every long-lived
-	// goroutine (scrobble drainer, now-playing fan-out, house hub) so Ctrl-C stops
-	// them cleanly. stop() is called at shutdown to restore default signal handling
-	// so a second signal force-exits instead of hanging.
+	// goroutine (scrobble drainer, now-playing fan-out, every stream hub) so
+	// Ctrl-C stops them cleanly. stop() is called at shutdown to restore default
+	// signal handling so a second signal force-exits instead of hanging.
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	// Services are resolved per call, not captured once: Last.fm can self-disable
@@ -152,72 +144,16 @@ func main() {
 	enqueue := func(trackID, playedAt int64) error {
 		return store.EnqueueScrobble(db, activeScrobbleServices(cfg.Services.ListenBrainzEnabled(), lfm), trackID, playedAt)
 	}
-	settle := func() {
-		prev, offset, ok := houseNP.Current()
-		if !ok {
-			return
-		}
-		end := time.Now()
-		start := end.Add(-time.Duration(offset) * time.Second)
-		if _, err := scrobble.Finish(prev.ID, prev.Duration, start, end, enqueue); err != nil {
-			log.Printf("scrobble: enqueue track %d: %v", prev.ID, err)
-		}
-	}
-	// The shared stream feeds ffmpeg the instance's own audio endpoint so remote
+	// A shared stream feeds ffmpeg the instance's own audio endpoint so remote
 	// tracks resolve through the same local/remote branch as browser playback.
 	_, selfPort, _ := net.SplitHostPort(cfg.Addr)
-	selfBaseURL := "http://127.0.0.1:" + selfPort
-
-	playing := false
-	next := func() (string, bool) {
-		tr, ok := jb.Next(houseID)
-		if !ok {
-			if playing {
-				playing = false
-				settle()
-				houseNP.Clear()
-				houseBus.Publish(events.Event{Type: "now-playing", Data: nil})
-			}
-			return "", false
-		}
-		if _, _, found := store.GetTrack(db, tr.ID); !found {
-			return "", false
-		}
-		// A new track is starting: settle the one that just finished, then make
-		// this the current house track in the shared holder.
-		settle()
-		playing = true
-		houseNP.Set(tr)
-		// Now-playing is fire-and-forget — never queued, never retried — and fans
-		// out to every enabled service (ListenBrainz, Last.fm).
-		if len(nowPlayers) > 0 {
-			id := tr.ID
-			go func() {
-				m, ok, err := store.ScrobbleMetadata(db, id)
-				if err != nil || !ok {
-					return
-				}
-				meta := external.ListenMeta{ArtistName: m.ArtistName, TrackName: m.TrackName, ReleaseName: m.ReleaseName}
-				for _, np := range nowPlayers {
-					_ = np.NowPlaying(rootCtx, meta)
-				}
-			}()
-		}
-		if enriched, err := store.EnrichTracks(db, []model.Track{tr}); err == nil && len(enriched) > 0 {
-			houseBus.Publish(events.Event{Type: "now-playing", Data: enriched[0]})
-		} else {
-			houseBus.Publish(events.Event{Type: "now-playing", Data: tr})
-		}
-		// The pop removed this track from the queue; tell listeners so their
-		// "up next" view doesn't keep showing the now-playing track.
-		houseBus.Publish(events.Event{Type: "queue-changed", Data: houseID})
-		// The ffmpeg house source fetches this URL with no session cookie. Auth no
-		// longer trusts loopback (a same-host reverse proxy would make every request
-		// look local), so the URL carries a path-scoped signed token instead.
-		src := broadcast.SourceInput(selfBaseURL, tr.ID)
-		sig := auth.SignPath(signingSecret, fmt.Sprintf("/api/tracks/%d/audio", tr.ID),
-			time.Now().Add(2*time.Hour).Unix())
-		return src + "?sig=" + sig, true
+	builder := &streamBuilder{
+		db: db, jb: jb, ctx: rootCtx,
+		silence:       silence,
+		selfBaseURL:   "http://127.0.0.1:" + selfPort,
+		signingSecret: signingSecret,
+		nowPlayers:    nowPlayers,
+		enqueue:       enqueue,
 	}
 
 	// Single background drainer delivers queued scrobbles. ctx-aware so #23's
@@ -226,13 +162,15 @@ func main() {
 		go scrobble.NewDrainer(db, submitters, 50).Run(rootCtx)
 	}
 
-	houseHub := broadcast.NewHub(broadcast.FFmpegSource{}, next, silence)
+	// house is the one stream built eagerly: it plays whether or not anyone is
+	// tuned in, is never torn down, and is the only stream that scrobbles.
+	housePipe := builder.build(houseID, true)
 	// hubDone closes once Run returns, after its in-flight play() unwinds and the
 	// ffmpeg child is killed via rc.Close(). main waits on it before exiting.
 	hubDone := make(chan struct{})
 	go func() {
 		defer close(hubDone)
-		houseHub.Run(rootCtx)
+		housePipe.Hub.Run(rootCtx)
 	}()
 
 	uiFS, err := web.FS()
@@ -269,7 +207,10 @@ func main() {
 		})
 		log.Print("SMTP invite email enabled")
 	}
-	srv.RegisterStream(houseID, houseHub, houseBus, houseNP)
+	srv.RegisterStream(houseID, housePipe.Hub, housePipe.Bus, housePipe.NP)
+	// Every other shared stream gets the same pipeline on demand, started when a
+	// listener first tunes in and torn down once nobody is.
+	srv.SetStreamFactory(rootCtx, func(id string) *api.StreamPipeline { return builder.build(id, false) })
 	srv.SetScanProgress(scanProgress)
 	srv.SetActiveFederation(fedSettings)
 
@@ -370,10 +311,17 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("server shutdown: %v", err)
 	}
-	// Wait for the hub goroutine to unwind (killing the ffmpeg child) before
-	// exiting, but never hang on it past the bounded timeout.
+	// Wait for the house hub goroutine to unwind (killing its ffmpeg child)
+	// before exiting, but never hang on it past the bounded timeout.
 	if !waitForClose(hubDone, 5*time.Second) {
-		log.Print("hub did not stop in time; exiting anyway")
+		log.Print("house hub did not stop in time; exiting anyway")
+	}
+	// The lazily-started shared streams own ffmpeg children too, and their
+	// goroutines belong to the server rather than to main. Without this they are
+	// orphaned at exit — invisible with one stream, which is why it only shows up
+	// now that there can be several.
+	if !srv.WaitForPipelines(5 * time.Second) {
+		log.Print("shared stream pipelines did not stop in time; exiting anyway")
 	}
 }
 
@@ -538,4 +486,123 @@ func runLastfmAuth(args []string) {
 		log.Fatalf("persist session: %v", err)
 	}
 	fmt.Printf("Last.fm authorized as %s.\n", username)
+}
+
+// streamBuilder constructs a shared stream's broadcast pipeline. Every shared
+// stream gets the same playback loop; only house also carries the scrobble
+// settle seam and the now-playing fan-out to external services, and only house
+// runs with no listener connected.
+type streamBuilder struct {
+	db            *sql.DB
+	jb            *jukebox.Jukebox
+	ctx           context.Context
+	silence       []byte
+	selfBaseURL   string
+	signingSecret []byte
+	nowPlayers    []nowPlayer
+	enqueue       func(trackID, playedAt int64) error
+	// src overrides the encoder. Nil means ffmpeg; tests substitute a fake so
+	// the playback loop can be driven without spawning a process.
+	src broadcast.Source
+}
+
+// build wires one stream's bus, now-playing holder and hub. isHouse turns on
+// the scrobble settle seam (which enqueues a finished track
+// for every enabled service) and the fire-and-forget now-playing notification.
+// Every other shared stream plays without producing any listen at all.
+//
+// The hub returned is NOT started; the caller owns its goroutine and context,
+// which is what makes teardown a matter of cancelling that context.
+func (b *streamBuilder) build(streamID string, isHouse bool) *api.StreamPipeline {
+	bus := events.NewBus()
+	// np is the stream's current-track + start-time holder: it seeds a client
+	// connecting mid-track (#28), and on house it is also what the scrobble seam
+	// reads. The broadcast Source is real-time-paced, so np's offset ≈ the
+	// just-finished track's play time.
+	np := api.NewNowPlaying()
+
+	// settle evaluates the track that just finished against the scrobble
+	// threshold and enqueues it when it qualifies. Off for every stream but
+	// house, so playback elsewhere enqueues nothing.
+	settle := func() {
+		if !isHouse {
+			return
+		}
+		prev, offset, ok := np.Current()
+		if !ok {
+			return
+		}
+		end := time.Now()
+		start := end.Add(-time.Duration(offset) * time.Second)
+		if _, err := scrobble.Finish(prev.ID, prev.Duration, start, end, b.enqueue); err != nil {
+			log.Printf("scrobble: enqueue track %d: %v", prev.ID, err)
+		}
+	}
+
+	// next pops this stream's queue and publishes now-playing; it returns the
+	// loopback audio URL for the broadcaster. Called repeatedly in the hub's
+	// single goroutine, so `playing` needs no lock. Publishes a null now-playing
+	// once when the stream transitions from playing to idle (empty queue).
+	playing := false
+	next := func() (string, bool) {
+		tr, ok := b.jb.Next(streamID)
+		if !ok {
+			if playing {
+				playing = false
+				settle()
+				np.Clear()
+				bus.Publish(events.Event{Type: "now-playing", Data: nil})
+			}
+			return "", false
+		}
+		if _, _, found := store.GetTrack(b.db, tr.ID); !found {
+			return "", false
+		}
+		// A new track is starting: settle the one that just finished, then make
+		// this the stream's current track.
+		settle()
+		playing = true
+		np.Set(tr)
+		// Now-playing is fire-and-forget — never queued, never retried — and fans
+		// out to every enabled service (ListenBrainz, Last.fm). House only: an
+		// external service should not be told a side stream's track is playing.
+		if isHouse && len(b.nowPlayers) > 0 {
+			id := tr.ID
+			go func() {
+				m, ok, err := store.ScrobbleMetadata(b.db, id)
+				if err != nil || !ok {
+					return
+				}
+				meta := external.ListenMeta{ArtistName: m.ArtistName, TrackName: m.TrackName, ReleaseName: m.ReleaseName}
+				for _, p := range b.nowPlayers {
+					_ = p.NowPlaying(b.ctx, meta)
+				}
+			}()
+		}
+		if enriched, err := store.EnrichTracks(b.db, []model.Track{tr}); err == nil && len(enriched) > 0 {
+			bus.Publish(events.Event{Type: "now-playing", Data: enriched[0]})
+		} else {
+			bus.Publish(events.Event{Type: "now-playing", Data: tr})
+		}
+		// The pop removed this track from the queue; tell listeners so their
+		// "up next" view doesn't keep showing the now-playing track.
+		bus.Publish(events.Event{Type: "queue-changed", Data: streamID})
+		// The ffmpeg source fetches this URL with no session cookie. Auth no
+		// longer trusts loopback (a same-host reverse proxy would make every request
+		// look local), so the URL carries a path-scoped signed token instead.
+		src := broadcast.SourceInput(b.selfBaseURL, tr.ID)
+		sig := auth.SignPath(b.signingSecret, fmt.Sprintf("/api/tracks/%d/audio", tr.ID),
+			time.Now().Add(2*time.Hour).Unix())
+		return src + "?sig=" + sig, true
+	}
+
+	var src broadcast.Source = broadcast.FFmpegSource{}
+	if b.src != nil {
+		src = b.src
+	}
+	hub := broadcast.NewHub(src, next, b.silence)
+	// Everything but house waits for a listener before pulling a track, so a
+	// shared stream nobody has tuned into spawns no ffmpeg.
+	hub.RequireListener = !isHouse
+	return &api.StreamPipeline{Hub: hub, Bus: bus, NP: np}
 }

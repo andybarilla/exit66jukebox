@@ -914,7 +914,8 @@ func (s *Server) inviteAccept(w http.ResponseWriter, r *http.Request) {
 // access is enabled. It deliberately does NOT trust the peer address: behind a
 // same-host reverse proxy every request arrives from 127.0.0.1, so a loopback
 // bypass would open the whole API to the internet. Cookie-less internal callers
-// (the ffmpeg house source) and Sonos use signed URLs instead — see signedOK.
+// (each shared stream's ffmpeg source) and Sonos use signed URLs instead — see
+// signedOK.
 func (s *Server) mediaAllowed(r *http.Request) bool {
 	return s.browserAccessAllowed(r)
 }
@@ -924,15 +925,18 @@ func (s *Server) adminRouteAllowed(r *http.Request) bool {
 	if !hasUser || !user.IsAdmin {
 		return false
 	}
-	return routeRequiresAdmin(r.Method, r.URL.Path)
+	return s.routeRequiresAdmin(r.Method, r.URL.Path)
 }
 
-func routeRequiresAdmin(method, path string) bool {
+func (s *Server) routeRequiresAdmin(method, path string) bool {
 	if strings.HasPrefix(path, "/api/admin/") {
 		return true
 	}
-	if sharedHouseStreamRouteRequiresAdmin(method, path) {
+	if s.sharedStreamRouteRequiresAdmin(method, path) {
 		return true
+	}
+	if path == "/api/streams" {
+		return method == http.MethodPost
 	}
 	switch path {
 	case "/api/sonos/cast", "/api/sonos/stop", "/api/sonos/volume", "/api/enrich":
@@ -942,12 +946,22 @@ func routeRequiresAdmin(method, path string) bool {
 	}
 }
 
-func sharedHouseStreamRouteRequiresAdmin(method, path string) bool {
-	const houseStreamPrefix = "/api/streams/" + sharedStreamID + "/"
-	if !strings.HasPrefix(path, houseStreamPrefix) {
+// sharedStreamRouteRequiresAdmin reports whether the path is a privileged
+// control on a stream that is shared. It reads the stream's kind, so it covers
+// every shared stream rather than only house; the handler-side gate
+// (requireAdminShared) still does the real enforcement.
+func (s *Server) sharedStreamRouteRequiresAdmin(method, path string) bool {
+	rest, ok := strings.CutPrefix(path, "/api/streams/")
+	if !ok {
 		return false
 	}
-	suffix := strings.TrimPrefix(path, houseStreamPrefix)
+	id, suffix, hasSuffix := strings.Cut(rest, "/")
+	if id == "" || !s.isSharedStream(id) {
+		return false
+	}
+	if !hasSuffix { // /api/streams/{id}: rename and delete are privileged
+		return method == http.MethodPatch || method == http.MethodDelete
+	}
 	switch suffix {
 	case "next", "shuffle":
 		return method == http.MethodPost
@@ -961,8 +975,8 @@ func sharedHouseStreamRouteRequiresAdmin(method, path string) bool {
 }
 
 // signedOK reports whether the request carries a path-scoped signed token valid
-// for its own URL path (the Sonos cast and the ffmpeg house source both fetch
-// with no cookie). A forged or wrong-path token fails VerifyPath.
+// for its own URL path (the Sonos cast and every shared stream's ffmpeg source
+// fetch with no cookie). A forged or wrong-path token fails VerifyPath.
 func (s *Server) signedOK(r *http.Request) bool {
 	sig := r.URL.Query().Get("sig")
 	return sig != "" && auth.VerifyPath(s.signingSecret, sig, r.URL.Path, time.Now().Unix())
@@ -971,8 +985,8 @@ func (s *Server) signedOK(r *http.Request) bool {
 // RequireAuthMiddleware gates the public listener's API routes. Anything not
 // under /api/ (the static SPA shell, and /stream/ which self-guards) passes
 // through; open auth/config endpoints pass; otherwise the request needs a valid
-// session, the guest toggle, or a valid signed token for its path (the ffmpeg
-// house source fetches /api/tracks/{id}/audio this way). This is the production
+// session, the guest toggle, or a valid signed token for its path (a shared
+// stream's ffmpeg source fetches /api/tracks/{id}/audio this way). This is the production
 // gate; it wraps ONLY the public http.Server, never the federation MemberHandler.
 func (s *Server) RequireAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

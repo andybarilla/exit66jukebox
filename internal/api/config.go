@@ -26,6 +26,7 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 		"requires_login":     mode == store.SecurityModeFullLogin && (!authed || isPasswordlessProfile),
 		"signup_enabled":     mode == store.SecurityModeFullLogin && store.SignupEnabled(s.db),
 		"needs_bootstrap":    countUsersZero(s.db),
+		"max_shared_streams": store.MaxSharedStreams,
 	})
 }
 

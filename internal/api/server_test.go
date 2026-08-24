@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/andybarilla/exit66jukebox/internal/broadcast"
+	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/model"
 	"github.com/andybarilla/exit66jukebox/internal/store"
@@ -25,7 +27,23 @@ func newTestServer(t *testing.T) (*Server, *sql.DB) {
 	jb := jukebox.New(db, jukebox.Config{HistoryWindow: 5})
 	s := NewServer(db, jb, nil)
 	s.SetSigningSecret([]byte("test-secret"))
+	// Mirror boot: the always-on house stream and the personal stream row both
+	// exist before any request arrives.
+	if err := store.EnsureSharedStream(db, "house", "House"); err != nil {
+		t.Fatalf("ensure house: %v", err)
+	}
+	if err := store.EnsurePrivateStream(db, "me"); err != nil {
+		t.Fatalf("ensure personal: %v", err)
+	}
 	return s, db
+}
+
+// registerTestPipeline attaches a hub/bus/now-playing set to a shared stream,
+// standing in for the pipeline main builds at boot.
+func registerTestPipeline(t *testing.T, s *Server, id string, np *NowPlaying) {
+	t.Helper()
+	hub := broadcast.NewHub(nil, func() (string, bool) { return "", false }, nil)
+	s.RegisterStream(id, hub, events.NewBus(), np)
 }
 
 func TestArtistsEndpointReturnsJSON(t *testing.T) {
@@ -109,7 +127,7 @@ func TestGetStreamNowPlayingWhenPlaying(t *testing.T) {
 	np := NewNowPlaying()
 	tr, _, _ := store.GetTrack(srv.db, id)
 	np.Set(tr)
-	srv.nowPlaying["house"] = np
+	registerTestPipeline(t, srv, "house", np)
 
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/streams/house", nil))
@@ -130,7 +148,7 @@ func TestGetStreamNowPlayingWhenPlaying(t *testing.T) {
 
 func TestGetStreamNowPlayingNullWhenIdle(t *testing.T) {
 	srv, _ := newTestServer(t)
-	srv.nowPlaying["house"] = NewNowPlaying() // tracker present but idle
+	registerTestPipeline(t, srv, "house", NewNowPlaying()) // pipeline present but idle
 
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/streams/house", nil))

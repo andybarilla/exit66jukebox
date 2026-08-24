@@ -23,6 +23,15 @@ func NewNowPlaying() *NowPlaying {
 	return &NowPlaying{now: time.Now}
 }
 
+// SetClock replaces the clock the playback offset is measured against. It
+// exists so a test can drive the offset — and therefore the scrobble
+// threshold, which is a function of it — without waiting in real time.
+func (np *NowPlaying) SetClock(now func() time.Time) {
+	np.mu.Lock()
+	defer np.mu.Unlock()
+	np.now = now
+}
+
 // Set records the track as now playing, starting its offset clock from now.
 func (np *NowPlaying) Set(tr model.Track) {
 	np.mu.Lock()

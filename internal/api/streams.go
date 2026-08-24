@@ -6,14 +6,14 @@ import (
 
 	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
+	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
+// getStream reports a stream's queue and live state. It is a read: an unknown
+// id reports an empty stream rather than creating a row, so a GET can no longer
+// be used to mint streams.
 func (s *Server) getStream(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := s.jb.EnsureStream(id, "private"); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	q, err := s.jb.Queue(id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -22,22 +22,28 @@ func (s *Server) getStream(w http.ResponseWriter, r *http.Request) {
 	if q == nil {
 		q = []jukebox.QueuedTrack{}
 	}
+	name, kind := "", store.KindPrivate
+	if st, ok, err := store.GetStream(s.db, id); err == nil && ok {
+		name, kind = st.Name, st.Kind
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":          id,
+		"name":        name,
+		"kind":        kind,
 		"queue":       q,
 		"listeners":   s.listenerCount(id),
 		"now_playing": s.nowPlayingPayload(id),
 	})
 }
 
-// nowPlayingPayload returns {track, offset_seconds} for a tracked shared stream
-// that's playing, or nil (JSON null) when idle or untracked (e.g. /me).
+// nowPlayingPayload returns {track, offset_seconds} for a shared stream with a
+// running pipeline, or nil (JSON null) when idle, private, or not yet started.
 func (s *Server) nowPlayingPayload(streamID string) any {
-	np, ok := s.nowPlaying[streamID]
-	if !ok {
+	p, ok := s.pipeline(streamID)
+	if !ok || p.NP == nil {
 		return nil
 	}
-	tr, offset, playing := np.Current()
+	tr, offset, playing := p.NP.Current()
 	if !playing {
 		return nil
 	}
@@ -49,10 +55,6 @@ func (s *Server) nowPlayingPayload(streamID string) any {
 
 func (s *Server) nextTrack(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := s.jb.EnsureStream(id, "private"); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	tr, ok := s.jb.Next(id)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false})
@@ -64,7 +66,10 @@ func (s *Server) nextTrack(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) request(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := s.jb.EnsureStream(id, "private"); err != nil {
+	// The personal stream is still created on first touch (#22 leaves its
+	// keying alone, see #128). The kind is pinned to private, so no id invented
+	// here can ever become a shared stream and reach the admin-gated controls.
+	if err := store.EnsurePrivateStream(s.db, id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -136,8 +141,8 @@ func (s *Server) clearRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) publishQueueChanged(streamID string) {
-	if bus, ok := s.buses[streamID]; ok {
-		bus.Publish(events.Event{Type: "queue-changed", Data: streamID})
+	if p, ok := s.pipeline(streamID); ok {
+		p.Bus.Publish(events.Event{Type: "queue-changed", Data: streamID})
 	}
 }
 

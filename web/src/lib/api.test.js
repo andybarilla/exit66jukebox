@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import {
   listTracks, listAlbums, listArtists, discoverRecommended,
-  getSonosVolume, setSonosVolume, addManualSonos, nextHouse, nextTrack, getConfig,
+  getSonosVolume, setSonosVolume, addManualSonos, nextShared, nextTrack, getConfig, HOUSE,
   removeRequest, setShuffle, castSonos,
 } from './api.js';
 
@@ -87,9 +87,9 @@ describe('sonos volume + manual ip', () => {
     await expect(addManualSonos('8.8.8.8')).rejects.toThrow();
   });
 
-  it('nextHouse POSTs to advance the house stream', async () => {
+  it('nextShared POSTs to advance the named stream', async () => {
     global.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
-    await nextHouse();
+    await nextShared(HOUSE);
     expect(global.fetch.mock.calls[0]).toEqual(['/api/streams/house/next', { method: 'POST' }]);
   });
 

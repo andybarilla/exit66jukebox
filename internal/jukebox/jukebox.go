@@ -56,11 +56,6 @@ func New(db *sql.DB, cfg Config) *Jukebox {
 	return &Jukebox{db: db, cfg: cfg, shuffle: make(map[string]bool)}
 }
 
-// EnsureStream creates the stream if it does not yet exist.
-func (j *Jukebox) EnsureStream(id, kind string) error {
-	return store.EnsureStream(j.db, id, "", kind)
-}
-
 // SetShuffle sets the per-stream shuffle flag (affects what Next pops).
 func (j *Jukebox) SetShuffle(streamID string, on bool) {
 	j.mu.Lock()
@@ -125,7 +120,7 @@ func (j *Jukebox) Next(streamID string) (model.Track, bool) {
 // queue. An empty queue never drains (Next is never called), so the initial
 // fill is what gets playback going.
 func (j *Jukebox) StartStation(streamID, genre string, threshold, batch int) error {
-	if err := j.EnsureStream(streamID, "private"); err != nil {
+	if err := store.EnsurePrivateStream(j.db, streamID); err != nil {
 		return err
 	}
 	if err := store.UpsertStation(j.db, store.Station{
