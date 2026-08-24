@@ -151,6 +151,33 @@ describe('personal stream availability (#128)', () => {
     expect(s.hasPersonalStream).toBe(true);
   });
 
+  // The regression this guards: config is fetched at mount, when the visitor is
+  // logged out and personal_stream is false. Login runs start(), not
+  // bootstrap(), so without a re-read the Personal control stays hidden until
+  // the user reloads the page — in full_login, the primary mode.
+  it('re-reads config in start(), so logging in reveals the personal stream', async () => {
+    const s = createStore();
+    let authed = false;
+    const headers = { get: () => null };
+    // start() ends by opening the SSE subscription; node has no EventSource.
+    vi.stubGlobal('EventSource', class { close() {} });
+    global.fetch = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.startsWith('/api/config')) {
+        return { ok: true, headers, json: async () => ({ personal_stream: authed, security_mode: 'full_login' }) };
+      }
+      if (u.startsWith('/api/scan')) return { ok: true, headers, json: async () => ({ running: false }) };
+      return { ok: true, headers, json: async () => ([]) };
+    });
+
+    await s.bootstrap();                 // mount, logged out
+    expect(s.hasPersonalStream).toBe(false);
+
+    authed = true;                       // the user logs in
+    await s.start();
+    expect(s.hasPersonalStream).toBe(true);
+  });
+
   it('toggleStream does not switch to a personal stream that does not exist', () => {
     const s = createStore();
     const before = s.stream;

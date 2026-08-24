@@ -246,6 +246,31 @@ export function createStore() {
     });
   }
 
+  // loadConfig reads /api/config. Some of what it carries is per-caller rather
+  // than per-instance — personal_stream is false for a logged-out visitor and
+  // true for the same visitor once they log in — so it is re-read whenever the
+  // caller may have changed, not only at mount.
+  async function loadConfig() {
+    await getConfig()
+      .then((c) => {
+        if (!c) return;
+        config = {
+          muteLocalOnCast: typeof c.mute_local_on_cast === 'boolean' ? c.mute_local_on_cast : config.muteLocalOnCast,
+          fedPeers: Array.isArray(c.fed_peers) ? c.fed_peers : [],
+          securityMode: c.security_mode || 'full_login',
+          guestAccess: !!c.guest_access,
+          requiresProfile: !!c.requires_profile,
+          requiresLogin: !!c.requires_login,
+          signupEnabled: !!c.signup_enabled,
+          needsBootstrap: !!c.needs_bootstrap,
+          authenticated: !!c.authenticated,
+          maxSharedStreams: Number(c.max_shared_streams) || 0,
+          personalStream: !!c.personal_stream,
+        };
+      })
+      .catch(() => {});
+  }
+
   async function refreshQueue(s) {
     const r = await getQueue(s);
     queues[s] = (r.queue || []).map(normalizeQueued);
@@ -383,31 +408,21 @@ export function createStore() {
     // whether the user has access. Heavy data loads live in start(), gated on
     // access being granted, so they never 401 for a logged-out guest.
     async bootstrap() {
-      await getConfig()
-        .then((c) => {
-          if (!c) return;
-          config = {
-            muteLocalOnCast: typeof c.mute_local_on_cast === 'boolean' ? c.mute_local_on_cast : config.muteLocalOnCast,
-            fedPeers: Array.isArray(c.fed_peers) ? c.fed_peers : [],
-            securityMode: c.security_mode || 'full_login',
-            guestAccess: !!c.guest_access,
-            requiresProfile: !!c.requires_profile,
-            requiresLogin: !!c.requires_login,
-            signupEnabled: !!c.signup_enabled,
-            needsBootstrap: !!c.needs_bootstrap,
-            authenticated: !!c.authenticated,
-            maxSharedStreams: Number(c.max_shared_streams) || 0,
-            personalStream: !!c.personal_stream,
-          };
-        })
-        .catch(() => {});
+      await loadConfig();
       fetchMe().then((u) => { me = u; }).catch(() => {}).finally(() => { authChecked = true; });
     },
+    // refreshConfig re-reads /api/config on demand. See loadConfig.
+    refreshConfig() { return loadConfig(); },
     // start runs the heavy loads once access is granted. Guarded so calling it
     // again (e.g. after login) is a no-op.
     async start() {
       if (_started) return;
       _started = true;
+      // Re-read config before the heavy loads. start() is the single funnel
+      // every login path reaches, and the payload fetched at mount was for a
+      // logged-out visitor: personal_stream would still be false for a user who
+      // has just logged in, hiding the Personal control until a manual reload.
+      await loadConfig();
       // Seed scan state before the initial load so a scan that finishes *during*
       // the first fetch is still seen as a true→false transition by the first
       // poll, triggering the reload that pulls in the last tracks.

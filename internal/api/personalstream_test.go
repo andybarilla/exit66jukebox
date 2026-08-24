@@ -257,3 +257,25 @@ func TestConfigReportsPersonalStreamAvailability(t *testing.T) {
 		}
 	}
 }
+
+// The continuous-MP3 route parses the id out of the path itself rather than
+// through a {id} wildcard, so it is the one stream-addressing surface not
+// behind resolvePersonalStream. It must still not serve a personal stream:
+// only a shared stream gets a pipeline, and without one there is nothing to
+// attach to. Asserted rather than assumed, because the resolver does not cover
+// this route and a future lazy-start change could quietly make it do so.
+func TestPersonalStreamIsNotServedAsContinuousAudio(t *testing.T) {
+	srv, _ := newTestServer(t)
+	uid, user := userSessionWithID(t, srv, "bob@example.com")
+	tid := insertTrack(t, srv, "Song")
+	// Provision it and give it a queued track, so a pipeline would have
+	// something to play if one were ever started.
+	if rec := postForm(srv, "/api/streams/me/requests", "kind=track&id="+itoa(tid), user); rec.Code != http.StatusOK {
+		t.Fatalf("provision: %d %s", rec.Code, rec.Body)
+	}
+
+	rec := do(srv, http.MethodGet, "/stream/"+store.PersonalStreamID(uid)+".mp3", "", user)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("a personal stream was served as continuous audio: %d", rec.Code)
+	}
+}
