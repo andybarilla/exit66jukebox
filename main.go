@@ -122,11 +122,9 @@ func main() {
 	if err := store.EnsureSharedStream(db, houseID, "House"); err != nil {
 		log.Fatalf("ensure house stream: %v", err)
 	}
-	// The personal stream is still one global row shared by every listener
-	// (#128). Provisioning it here is what lets every per-stream route reject an
-	// unknown id outright instead of creating whatever id it is handed: since
-	// #132 no route creates a stream, so this is the personal stream's only
-	// origin, on a fresh database and on every boot after.
+	// One global row shared by every listener for now. No route creates a
+	// stream, so this is the personal stream's only origin — dropping it 404s
+	// first use.
 	if err := store.EnsurePrivateStream(db, store.PersonalStreamID); err != nil {
 		log.Fatalf("ensure personal stream: %v", err)
 	}

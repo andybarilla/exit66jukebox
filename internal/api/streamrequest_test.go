@@ -2,13 +2,12 @@ package api
 
 import (
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
-// streamIDs returns every stream id in the table, so a test can assert the set
-// is unchanged rather than only that one particular row is absent.
 func streamIDs(t *testing.T, srv *Server) []string {
 	t.Helper()
 	all, err := store.ListStreams(srv.db, "")
@@ -22,21 +21,9 @@ func streamIDs(t *testing.T, srv *Server) []string {
 	return ids
 }
 
-func sameIDs(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-// The hole this issue closes: the request surface was the last route that
-// created the stream row it was handed, so any authenticated listener could
-// mint unbounded private streams by choosing URLs.
+// Every request kind must refuse an id with no row, and the stream table must
+// come out unchanged. TestInventedStreamIDNeverBecomesShared covers the other
+// axis: that an invented id cannot acquire the shared kind.
 func TestRequestToUnknownStreamCreatesNothing(t *testing.T) {
 	srv, _ := newTestServer(t)
 	user := userSession(t, srv, "bob@example.com")
@@ -44,24 +31,20 @@ func TestRequestToUnknownStreamCreatesNothing(t *testing.T) {
 	before := streamIDs(t, srv)
 
 	for _, kind := range []string{"track", "album", "artist"} {
-		rec := postForm(srv, "/api/streams/bobs-invented-stream/requests",
+		rec := postForm(srv, "/api/streams/no-such-stream/requests",
 			"kind="+kind+"&id="+itoa(tid), user)
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("kind=%s: want 404, got %d body %s", kind, rec.Code, rec.Body.String())
 		}
 	}
-	if _, ok, _ := store.GetStream(srv.db, "bobs-invented-stream"); ok {
-		t.Fatal("a request to an invented id created the stream row")
-	}
-	if after := streamIDs(t, srv); !sameIDs(before, after) {
+	if after := streamIDs(t, srv); !slices.Equal(before, after) {
 		t.Fatalf("stream table changed: before %v, after %v", before, after)
 	}
 }
 
-// The personal stream is what the implicit create was covering, so its
-// first-use path is the thing most likely to break silently. Provisioning it
-// is what main.go does at boot; with no row, the request is refused like any
-// other unknown id, and once provisioned it takes requests.
+// Boot provisioning is the personal stream's only origin, so first use is what
+// the implicit create used to cover. TestMainProvisionsPersonalStreamAtBoot is
+// what holds the boot call itself in place.
 func TestPersonalStreamWorksFromFirstUse(t *testing.T) {
 	srv, db := newTestServer(t)
 	user := userSession(t, srv, "bob@example.com")
@@ -76,7 +59,6 @@ func TestPersonalStreamWorksFromFirstUse(t *testing.T) {
 		t.Fatalf("unprovisioned personal stream: want 404, got %d", rec.Code)
 	}
 
-	// Exactly what boot does.
 	if err := store.EnsurePrivateStream(db, store.PersonalStreamID); err != nil {
 		t.Fatalf("provision personal stream: %v", err)
 	}
@@ -91,8 +73,6 @@ func TestPersonalStreamWorksFromFirstUse(t *testing.T) {
 	}
 }
 
-// The house stream is provisioned at boot and is unaffected by the request
-// surface no longer creating rows.
 func TestHouseStreamTakesRequests(t *testing.T) {
 	srv, _ := newTestServer(t)
 	admin := adminSession(t, srv.db)

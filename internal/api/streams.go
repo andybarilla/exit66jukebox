@@ -66,11 +66,8 @@ func (s *Server) nextTrack(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) request(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	// A request names a stream, it does not create one. This was the last route
-	// that created the row it was handed, which let any listener mint unbounded
-	// private streams by choosing URLs (#132). Streams now come into existence
-	// only where something asks for one: boot provisioning for house and the
-	// personal stream, and POST /api/streams for a shared one.
+	// A request names a stream, it does not create one: creating on touch let
+	// any listener mint unbounded private streams by choosing URLs.
 	if _, ok, err := store.GetStream(s.db, id); err != nil {
 		writeErr(w, http.StatusInternalServerError, "db error")
 		return
