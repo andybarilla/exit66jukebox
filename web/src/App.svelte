@@ -24,9 +24,6 @@
   import ProfilePicker from './lib/components/ProfilePicker.svelte';
 
   const s = createStore();
-  // Mirrors store.MaxSharedStreams: the picker hides "new stream" at the cap
-  // rather than offering a button whose only outcome is a 409.
-  const MAX_SHARED_STREAMS = 4;
   let audio;
   let playing = $state(true);
   let volume = $state(68);
@@ -56,6 +53,10 @@
   const cur = $derived(Math.min(s.progress, dur || s.progress));
   const npPct = $derived((dur ? Math.min(100, (cur / dur) * 100) : 0) + '%');
   const streamLabel = $derived(s.streamName);
+  // The picker renders on both the desktop player bar and the phone lineup
+  // sheet; these are shared by both rather than recomputed at each.
+  const canManageStreams = $derived(s.canManageStreams);
+  const atStreamCap = $derived(s.atSharedStreamCap);
   const chip = $derived(`${streamLabel} · ${s.listeners}`);
   // Queue controls show for admins on any shared stream, for open-mode guests on
   // any shared stream, and for any guest on their own personal stream (which the
@@ -333,8 +334,8 @@
       </div>
       <div style="width:220px; flex:none; border-top:1px solid var(--border-strong); border-left:1px solid var(--border-default); background:var(--bg-surface-raised); background-image:var(--scanline); display:flex; flex-direction:column; justify-content:center; gap:8px; padding:0 18px; box-sizing:border-box;">
         <StreamPicker streams={s.sharedStreams} current={s.stream} personalId={PERSONAL}
-          canManage={s.isAdmin || s.config.securityMode === 'open'}
-          atCap={s.sharedStreams.length >= MAX_SHARED_STREAMS}
+          canManage={canManageStreams}
+          atCap={atStreamCap}
           onSelect={(id) => s.setStream(id)}
           onCreate={(name) => s.createStream(name)}
           onRename={(id, name) => s.renameStream(id, name)}
@@ -365,8 +366,8 @@
              on a phone, and it only toggles between one shared stream and the
              personal one — no way to reach a second shared stream. -->
         <StreamPicker streams={s.sharedStreams} current={s.stream} personalId={PERSONAL}
-          canManage={s.isAdmin || s.config.securityMode === 'open'}
-          atCap={s.sharedStreams.length >= MAX_SHARED_STREAMS}
+          canManage={canManageStreams}
+          atCap={atStreamCap}
           onSelect={(id) => s.setStream(id)}
           onCreate={(name) => s.createStream(name)}
           onRename={(id, name) => s.renameStream(id, name)}

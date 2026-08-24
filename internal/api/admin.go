@@ -8,8 +8,10 @@ import (
 )
 
 // houseStreamID is the always-on shared stream: created at boot, the only cast
-// target, and the only stream whose playback is scrobbled. It cannot be renamed
-// away or deleted. Matches the houseID const in main.go.
+// target, and the only stream whose playback is scrobbled. It cannot be
+// deleted. Its display name IS editable like any other shared stream's
+// (criterion 2) — nothing derives behaviour from the name, only from this id.
+// Matches the houseID const in main.go.
 const houseStreamID = "house"
 
 // currentUser resolves the request's session cookie to a user. ok is false for
@@ -62,16 +64,21 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requireAdminShared gates next whenever the request targets a stream whose
-// kind is shared, read from the store — not by comparing the id to a constant,
-// which left every id but house completely ungated. Private streams (a guest's
-// own queue) pass through untouched.
+// streamGate resolves the route's stream once and applies the admin gate when
+// its kind is shared, read from the store — not by comparing the id to a
+// constant, which left every id but house completely ungated.
 //
-// An unknown id is rejected here rather than falling through, because the
-// handlers behind this gate used to implicit-create the stream they were
-// handed: the gate would decide against a row that did not exist yet, and a
-// caller could reach a privileged handler simply by inventing a URL.
-func (s *Server) requireAdminShared(next http.HandlerFunc) http.HandlerFunc {
+// An unknown id is rejected rather than passed through, because the handlers
+// behind this gate used to implicit-create the stream they were handed: the
+// gate would decide against a row that did not exist yet, and a caller could
+// reach a privileged handler simply by inventing a URL.
+//
+// allowPrivate says what a private stream means for this particular operation.
+// The queue controls let it through ungated, because there it is a listener
+// driving their own queue. Rename and delete reject it: destroying a stream is
+// not that, and the personal stream is still one global row shared by every
+// listener (#128), so it would be everyone's queue and station.
+func (s *Server) streamGate(next http.HandlerFunc, allowPrivate bool) http.HandlerFunc {
 	gated := s.requireAdmin(next)
 	return func(w http.ResponseWriter, r *http.Request) {
 		st, ok, err := store.GetStream(s.db, r.PathValue("id"))
@@ -84,6 +91,10 @@ func (s *Server) requireAdminShared(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if st.Kind != store.KindShared {
+			if !allowPrivate {
+				writeErr(w, http.StatusNotFound, "no such shared stream")
+				return
+			}
 			next(w, r)
 			return
 		}
@@ -93,6 +104,18 @@ func (s *Server) requireAdminShared(next http.HandlerFunc) http.HandlerFunc {
 		}
 		gated(w, r)
 	}
+}
+
+// requireAdminShared gates the per-stream queue controls: admin-only on a
+// shared stream, left open on a listener's own private stream.
+func (s *Server) requireAdminShared(next http.HandlerFunc) http.HandlerFunc {
+	return s.streamGate(next, true)
+}
+
+// requireAdminOnSharedOnly gates the operations that are meaningless on a
+// private stream — rename and delete — so neither can fall through ungated.
+func (s *Server) requireAdminOnSharedOnly(next http.HandlerFunc) http.HandlerFunc {
+	return s.streamGate(next, false)
 }
 
 // requireAdminOrOpen is requireAdminShared's gate without a stream to read it

@@ -1,7 +1,7 @@
 <script>
   import {
     listSonos, castSonos, stopSonos, getSonosVolume, setSonosVolume,
-    addManualSonos, nextHouse,
+    addManualSonos, nextShared, HOUSE,
   } from '../api.js';
   import IconCast from './icons/IconCast.svelte';
   import IconNext from './icons/IconNext.svelte';
@@ -76,7 +76,9 @@
   }
 
   async function next() {
-    try { await nextHouse(); onToast('cyan', 'Skipped', 'Advanced the house queue.'); }
+    // Casting stays locked to the house stream (#130), so this Next is not
+    // stream-relative like the main transport's.
+    try { await nextShared(HOUSE); onToast('cyan', 'Skipped', 'Advanced the house queue.'); }
     catch (_) { onToast('amber', 'Skip failed', 'Could not advance the house queue.'); }
   }
 

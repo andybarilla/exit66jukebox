@@ -13,6 +13,12 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
+// personalStreamID names the private stream these tests exercise. It is the one
+// global row every listener currently shares (#128); production code has no
+// need of the literal, so it lives here rather than adding another hardcoded
+// site alongside main.go's boot-time ensure.
+const personalStreamID = "me"
+
 func userSession(t *testing.T, srv *Server, email string) *http.Cookie {
 	t.Helper()
 	uid, err := store.CreateUser(srv.db, email, "User", "h", false)
@@ -347,5 +353,107 @@ func TestCreateStreamRejectsEmptyName(t *testing.T) {
 	admin := adminSession(t, srv.db)
 	if rec := do(srv, http.MethodPost, "/api/streams", `{"name":"   "}`, admin); rec.Code != http.StatusBadRequest {
 		t.Fatalf("want 400 for a blank name, got %d", rec.Code)
+	}
+}
+
+// A private stream is nobody's to rename or destroy. The queue controls behind
+// requireAdminShared deliberately fall through for private streams so a guest
+// can drive their own queue, but rename and delete are not queue controls:
+// falling through there let any authenticated non-admin wipe a private
+// stream's queue rows, its station, and the row itself. The personal stream is
+// still one global row shared by every listener (#128), so that is everyone's
+// queue and station, destroyed by any logged-in user.
+func TestNonAdminCannotRenameOrDeleteAPrivateStream(t *testing.T) {
+	srv, _ := newTestServer(t)
+	user := userSession(t, srv, "bob@example.com")
+	tid := insertTrack(t, srv, "Song")
+	if err := store.Enqueue(srv.db, personalStreamID, tid, "Bob"); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if err := store.UpsertStation(srv.db, store.Station{
+		StreamID: personalStreamID, Genre: "rock", Threshold: 3, Batch: 10,
+	}); err != nil {
+		t.Fatalf("station: %v", err)
+	}
+
+	for _, tc := range []struct{ method, body string }{
+		{http.MethodDelete, ""},
+		{http.MethodPatch, `{"name":"mine now"}`},
+	} {
+		rec := do(srv, tc.method, "/api/streams/"+personalStreamID, tc.body, user)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("non-admin %s on a private stream: want 404, got %d body %s",
+				tc.method, rec.Code, rec.Body.String())
+		}
+	}
+
+	if _, ok, _ := store.GetStream(srv.db, personalStreamID); !ok {
+		t.Fatal("the private stream row was destroyed")
+	}
+	ids, err := store.QueueTrackIDs(srv.db, personalStreamID)
+	if err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	if len(ids) != 1 {
+		t.Fatalf("private stream queue rows destroyed: %v", ids)
+	}
+	if _, ok := store.GetStation(srv.db, personalStreamID); !ok {
+		t.Fatal("the private stream's station was destroyed")
+	}
+}
+
+// An admin has no business there either: rename and delete are shared-stream
+// operations, so a private stream is simply not a valid target.
+func TestAdminCannotDeleteAPrivateStream(t *testing.T) {
+	srv, _ := newTestServer(t)
+	admin := adminSession(t, srv.db)
+	rec := do(srv, http.MethodDelete, "/api/streams/"+personalStreamID, "", admin)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("admin DELETE on a private stream: want 404, got %d body %s", rec.Code, rec.Body.String())
+	}
+	if _, ok, _ := store.GetStream(srv.db, personalStreamID); !ok {
+		t.Fatal("the private stream row was destroyed")
+	}
+}
+
+// house is undeletable but not unrenameable: only its id is load-bearing, so
+// the label is editable like any other shared stream's.
+func TestHouseStreamCanBeRenamed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	admin := adminSession(t, srv.db)
+	if rec := do(srv, http.MethodPatch, "/api/streams/house", `{"name":"The Big Room"}`, admin); rec.Code != http.StatusOK {
+		t.Fatalf("rename house: want 200, got %d body %s", rec.Code, rec.Body.String())
+	}
+	st, ok, err := store.GetStream(srv.db, "house")
+	if err != nil || !ok {
+		t.Fatalf("get house: ok=%v err=%v", ok, err)
+	}
+	if st.ID != "house" {
+		t.Fatalf("house id changed to %q", st.ID)
+	}
+	if st.Name != "The Big Room" {
+		t.Fatalf("house name: want The Big Room, got %q", st.Name)
+	}
+}
+
+// The client hides its "new stream" affordance at the cap, so the limit has to
+// reach it from the one place that enforces it. Serving it via /api/config
+// means changing store.MaxSharedStreams cannot silently leave the UI offering a
+// button whose only outcome is a 409.
+func TestConfigCarriesTheSharedStreamCap(t *testing.T) {
+	srv, _ := newTestServer(t)
+	rec := do(srv, http.MethodGet, "/api/config", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("config status %d", rec.Code)
+	}
+	var cfg struct {
+		MaxSharedStreams int `json:"max_shared_streams"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.MaxSharedStreams != store.MaxSharedStreams {
+		t.Fatalf("config max_shared_streams = %d, want store.MaxSharedStreams = %d",
+			cfg.MaxSharedStreams, store.MaxSharedStreams)
 	}
 }

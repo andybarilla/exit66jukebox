@@ -311,10 +311,17 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("server shutdown: %v", err)
 	}
-	// Wait for the hub goroutine to unwind (killing the ffmpeg child) before
-	// exiting, but never hang on it past the bounded timeout.
+	// Wait for the house hub goroutine to unwind (killing its ffmpeg child)
+	// before exiting, but never hang on it past the bounded timeout.
 	if !waitForClose(hubDone, 5*time.Second) {
-		log.Print("hub did not stop in time; exiting anyway")
+		log.Print("house hub did not stop in time; exiting anyway")
+	}
+	// The lazily-started shared streams own ffmpeg children too, and their
+	// goroutines belong to the server rather than to main. Without this they are
+	// orphaned at exit — invisible with one stream, which is why it only shows up
+	// now that there can be several.
+	if !srv.WaitForPipelines(5 * time.Second) {
+		log.Print("shared stream pipelines did not stop in time; exiting anyway")
 	}
 }
 

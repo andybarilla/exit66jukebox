@@ -134,9 +134,6 @@ export async function nextShared(streamId) {
   return r.json();
 }
 
-// nextHouse advances the house queue specifically. Casting stays locked to the
-// house stream (#130), so the cast surface's Next is not stream-relative.
-export const nextHouse = () => nextShared(HOUSE);
 
 export async function discoverRediscover(genre = '') {
   const r = await fetch(`/api/discover/rediscover?genre=${encodeURIComponent(genre)}`);

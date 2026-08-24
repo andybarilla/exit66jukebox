@@ -57,6 +57,13 @@ func (b *Bus) SubscriberCount() int {
 	return len(b.subs)
 }
 
+// Closed reports whether the bus has been shut down.
+func (b *Bus) Closed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.closed
+}
+
 // Close drops every subscriber and marks the bus dead, so SSE handlers return
 // instead of hanging when their stream is deleted. Idempotent, and safe
 // alongside each subscriber's own cancel func.

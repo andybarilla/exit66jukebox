@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ func withFactory(t *testing.T, srv *Server, built *int) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	srv.SetStreamIdleTimeouts(30*time.Millisecond, 5*time.Millisecond)
+	srv.setStreamIdleTimeouts(30*time.Millisecond, 5*time.Millisecond)
 	srv.SetStreamFactory(ctx, func(id string) *StreamPipeline {
 		*built++
 		hub := broadcast.NewHub(silentSource{}, func() (string, bool) { return "", false }, []byte("s"))
@@ -217,4 +218,136 @@ func eventually(within time.Duration, cond func() bool) bool {
 		time.Sleep(2 * time.Millisecond)
 	}
 	return cond()
+}
+
+// L1: a lazily-started pipeline's hub goroutine owns an ffmpeg child, which is
+// only killed when Run unwinds. If main exits without waiting for it, those
+// children are orphaned — invisible with one stream, and exactly what happens
+// once there are several.
+func TestWaitForPipelinesBlocksUntilLazyHubsUnwind(t *testing.T) {
+	srv, _ := newTestServer(t)
+	built := 0
+	ctx, cancel := context.WithCancel(context.Background())
+	// Long timeouts: this is testing shutdown, not the reaper.
+	srv.setStreamIdleTimeouts(time.Hour, time.Hour)
+	running := make(chan struct{}, 4)
+	srv.SetStreamFactory(ctx, func(id string) *StreamPipeline {
+		built++
+		hub := broadcast.NewHub(blockingSource{running: running}, func() (string, bool) { return "track", true }, nil)
+		return &StreamPipeline{Hub: hub, Bus: events.NewBus(), NP: NewNowPlaying()}
+	})
+	for _, id := range []string{"a", "b"} {
+		if err := store.CreateSharedStream(srv.db, id, id); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+		if _, ok := srv.ensurePipeline(id); !ok {
+			t.Fatalf("no pipeline for %s", id)
+		}
+	}
+	// Both hubs are inside play(), holding their "encoder" open.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-running:
+		case <-time.After(2 * time.Second):
+			t.Fatal("pipelines never started playing")
+		}
+	}
+
+	if srv.WaitForPipelines(50 * time.Millisecond) {
+		t.Fatal("WaitForPipelines returned true while both hubs were still running")
+	}
+	cancel()
+	if !srv.WaitForPipelines(5 * time.Second) {
+		t.Fatal("lazy pipelines did not unwind after the root context was cancelled")
+	}
+}
+
+// blockingSource stands in for an ffmpeg child: it keeps producing audio
+// indefinitely, a chunk at a time, until the hub closes it. Like the real
+// encoder it never ends on its own, so the only way play() returns is the
+// context check between reads — which is what shutdown relies on.
+type blockingSource struct{ running chan struct{} }
+
+func (b blockingSource) Open(string) (io.ReadCloser, error) {
+	b.running <- struct{}{}
+	return &blockingReader{}, nil
+}
+
+type blockingReader struct{ closed atomic.Bool }
+
+func (r *blockingReader) Read(p []byte) (int, error) {
+	if r.closed.Load() {
+		return 0, io.EOF
+	}
+	time.Sleep(time.Millisecond) // pace it like a real-time encoder
+	p[0] = 'x'
+	return 1, nil
+}
+
+func (r *blockingReader) Close() error { r.closed.Store(true); return nil }
+
+// L2: a listener arriving as the reaper tears the stream down must get a fresh
+// pipeline, not the dead one's already-closed channel. Otherwise the request
+// succeeds with a 200 and then immediately EOFs, which to a browser is a stream
+// that connects and plays nothing.
+func TestConnectDuringTeardownGetsAFreshPipeline(t *testing.T) {
+	srv, _ := newTestServer(t)
+	built := 0
+	withFactory(t, srv, &built)
+	if err := store.CreateSharedStream(srv.db, "kitchen", "Kitchen"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Hand out the pipeline, then tear it down underneath the caller — the exact
+	// interleaving the reaper produces.
+	stale, ok := srv.ensurePipeline("kitchen")
+	if !ok {
+		t.Fatal("no pipeline")
+	}
+	srv.stopPipeline("kitchen")
+
+	fresh, ok := srv.ensurePipeline("kitchen")
+	if !ok {
+		t.Fatal("no pipeline after teardown")
+	}
+	if fresh == stale {
+		t.Fatal("ensurePipeline handed back the torn-down pipeline")
+	}
+	if fresh.Hub.Closed() {
+		t.Fatal("ensurePipeline handed back a closed hub")
+	}
+
+	// And the listener actually receives audio rather than an instant EOF.
+	ch, cancel := fresh.Hub.Listen()
+	defer cancel()
+	select {
+	case _, open := <-ch:
+		if !open {
+			t.Fatal("listener got a closed channel from a fresh pipeline")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fresh pipeline delivered nothing")
+	}
+}
+
+// The HTTP path must survive the same interleaving: /stream/{id}.mp3 arriving
+// against a pipeline that is being reaped has to serve audio, not an empty 200.
+func TestStreamAudioSurvivesATeardownRace(t *testing.T) {
+	srv, _ := newTestServer(t)
+	built := 0
+	withFactory(t, srv, &built)
+	if err := store.CreateSharedStream(srv.db, "kitchen", "Kitchen"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Warm a pipeline, then kill it so the handler's first lookup finds a corpse.
+	if _, ok := srv.ensurePipeline("kitchen"); !ok {
+		t.Fatal("no pipeline")
+	}
+	srv.stopPipeline("kitchen")
+
+	stop := tuneIn(t, srv, "kitchen")
+	defer stop()
+	if n := srv.listenerCount("kitchen"); n == 0 {
+		t.Fatal("listener did not attach to a live pipeline after a teardown")
+	}
 }

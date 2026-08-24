@@ -71,6 +71,15 @@ func (h *Hub) Listen() (<-chan []byte, func()) {
 	return ch, cancel
 }
 
+// Closed reports whether the hub has been shut down. A closed hub hands out
+// only already-closed listener channels, so a caller holding one must fetch a
+// live hub rather than serve from it.
+func (h *Hub) Closed() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.closed
+}
+
 // Close drops every listener and marks the hub dead, so handlers blocked on a
 // listener channel return rather than hanging when the stream is deleted.
 // Idempotent, and safe alongside each listener's own cancel func.

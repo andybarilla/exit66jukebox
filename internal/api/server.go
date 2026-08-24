@@ -40,14 +40,17 @@ type Server struct {
 	newPipe   func(id string) *StreamPipeline
 	idleTTL   time.Duration
 	idleCheck time.Duration
-	enrich       *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
-	recommend    *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
-	scanMu       sync.Mutex
-	scan         *scan.Progress // nil until SetScanProgress (no library); endpoint 503 while nil
-	scanWorkers  int
-	fedResolver  fed.Resolver    // nil unless federation is configured
-	fedPeers     func() []string // returns online peer ids; nil when federation off
-	activeFed    store.FederationSettings
+	// pipeWG tracks the goroutines of lazily-started pipelines so shutdown can
+	// wait for their ffmpeg children to be killed. See WaitForPipelines.
+	pipeWG      sync.WaitGroup
+	enrich      *enrich.Runner    // nil until SetEnrichRunner; endpoints 503 while nil
+	recommend   *recommend.Runner // nil until SetRecommendRunner; endpoint returns [] while nil
+	scanMu      sync.Mutex
+	scan        *scan.Progress // nil until SetScanProgress (no library); endpoint 503 while nil
+	scanWorkers int
+	fedResolver fed.Resolver    // nil unless federation is configured
+	fedPeers    func() []string // returns online peer ids; nil when federation off
+	activeFed   store.FederationSettings
 
 	// muteLocalOnCast is exposed via GET /api/config so the frontend can mute the
 	// local <audio> while a Sonos cast is active. Sourced from config (env for now).
@@ -225,8 +228,11 @@ func (s *Server) Handler() http.Handler {
 	// escape hatch), because every one of them creates or destroys a shared stream.
 	mux.HandleFunc("GET /api/streams", s.listStreams)
 	mux.HandleFunc("POST /api/streams", s.requireAdminOrOpen(s.createStream))
-	mux.HandleFunc("PATCH /api/streams/{id}", s.requireAdminShared(s.renameStream))
-	mux.HandleFunc("DELETE /api/streams/{id}", s.requireAdminShared(s.deleteStream))
+	// Rename and delete take the shared-only gate: requireAdminShared lets a
+	// private stream through ungated so a listener can drive their own queue,
+	// and that must not extend to destroying a stream.
+	mux.HandleFunc("PATCH /api/streams/{id}", s.requireAdminOnSharedOnly(s.renameStream))
+	mux.HandleFunc("DELETE /api/streams/{id}", s.requireAdminOnSharedOnly(s.deleteStream))
 	mux.HandleFunc("GET /api/streams/{id}", s.getStream)
 	// next/remove/clear/shuffle mutate the queue. requireAdminShared gates them on
 	// the stream's kind, so every shared stream is admin-only; each guest's private

@@ -53,6 +53,7 @@ export function createStore() {
     signupEnabled: false,
     needsBootstrap: false,
     authenticated: false,
+    maxSharedStreams: 0,
   });
   let castActive = $state(false);
 
@@ -333,6 +334,13 @@ export function createStore() {
       return sharedStreams.map((st) => ({ ...st, listeners: listeners[st.id] ?? st.listeners ?? 0 }));
     },
     get isSharedStream() { return stream !== PERSONAL; },
+    // atSharedStreamCap mirrors the server's store-side limit, served via
+    // /api/config so the constant lives in one place.
+    get atSharedStreamCap() {
+      return config.maxSharedStreams > 0 && sharedStreams.length >= config.maxSharedStreams;
+    },
+    // canManageStreams matches the server gate on create/rename/delete.
+    get canManageStreams() { return this.isAdmin || config.securityMode === 'open'; },
     get streamName() {
       if (stream === PERSONAL) return 'Personal';
       return sharedStreams.find((st) => st.id === stream)?.name || 'Stream';
@@ -383,6 +391,7 @@ export function createStore() {
             signupEnabled: !!c.signup_enabled,
             needsBootstrap: !!c.needs_bootstrap,
             authenticated: !!c.authenticated,
+            maxSharedStreams: Number(c.max_shared_streams) || 0,
           };
         })
         .catch(() => {});

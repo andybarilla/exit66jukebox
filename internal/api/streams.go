@@ -69,7 +69,7 @@ func (s *Server) request(w http.ResponseWriter, r *http.Request) {
 	// The personal stream is still created on first touch (#22 leaves its
 	// keying alone, see #128). The kind is pinned to private, so no id invented
 	// here can ever become a shared stream and reach the admin-gated controls.
-	if err := s.jb.EnsurePrivateStream(id); err != nil {
+	if err := store.EnsurePrivateStream(s.db, id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -29,6 +29,12 @@ type StreamPipeline struct {
 	cancel     context.CancelFunc
 }
 
+// dead reports whether this pipeline has been torn down. stopPipeline closes
+// both fan-outs, so either being closed means the pipeline can no longer serve.
+func (p *StreamPipeline) dead() bool {
+	return p.Hub.Closed() || p.Bus.Closed()
+}
+
 // SetStreamFactory attaches the builder that constructs a shared stream's
 // pipeline on first use, and the context that bounds every pipeline it makes
 // (cancelled at shutdown). Left unset in tests and in any build with no
@@ -40,10 +46,11 @@ func (s *Server) SetStreamFactory(ctx context.Context, build func(id string) *St
 	s.newPipe = build
 }
 
-// SetStreamIdleTimeouts overrides how long a lazily-started shared stream may
+// setStreamIdleTimeouts overrides how long a lazily-started shared stream may
 // sit with nobody tuned in before its pipeline (and its ffmpeg child) is torn
-// down, and how often that is checked.
-func (s *Server) SetStreamIdleTimeouts(ttl, check time.Duration) {
+// down, and how often that is checked. Unexported: only this package's tests
+// need it, and production runs on the defaults above.
+func (s *Server) setStreamIdleTimeouts(ttl, check time.Duration) {
 	s.pipesMu.Lock()
 	defer s.pipesMu.Unlock()
 	s.idleTTL, s.idleCheck = ttl, check
@@ -72,7 +79,7 @@ func (s *Server) pipeline(id string) (*StreamPipeline, bool) {
 // listener connects to the audio feed or subscribes to the event stream, so a
 // shared stream nobody has tuned into costs nothing.
 func (s *Server) ensurePipeline(id string) (*StreamPipeline, bool) {
-	if p, ok := s.pipeline(id); ok {
+	if p, ok := s.pipeline(id); ok && !p.dead() {
 		return p, true
 	}
 	// Read the stream row outside the lock: the store call can block, and the
@@ -82,9 +89,15 @@ func (s *Server) ensurePipeline(id string) (*StreamPipeline, bool) {
 	}
 
 	s.pipesMu.Lock()
+	// A pipeline the reaper (or a delete) has already closed is a corpse: it
+	// hands out pre-closed channels, so a listener attaching to it would get a
+	// 200 that immediately EOFs. Replace it rather than serve from it.
 	if p, ok := s.pipes[id]; ok {
-		s.pipesMu.Unlock()
-		return p, true
+		if !p.dead() {
+			s.pipesMu.Unlock()
+			return p, true
+		}
+		delete(s.pipes, id)
 	}
 	if s.newPipe == nil {
 		s.pipesMu.Unlock()
@@ -105,9 +118,33 @@ func (s *Server) ensurePipeline(id string) (*StreamPipeline, bool) {
 	ttl, check := s.idleTTL, s.idleCheck
 	s.pipesMu.Unlock()
 
-	go p.Hub.Run(ctx)
-	go s.reapWhenIdle(ctx, id, p, ttl, check)
+	// Tracked so shutdown can wait for the hub to unwind: that is what kills its
+	// ffmpeg child, and main would otherwise exit and orphan it.
+	s.pipeWG.Add(2)
+	go func() { defer s.pipeWG.Done(); p.Hub.Run(ctx) }()
+	go func() { defer s.pipeWG.Done(); s.reapWhenIdle(ctx, id, p, ttl, check) }()
 	return p, true
+}
+
+// attach hands back a live pipeline together with a fan-out registration made
+// on it, retrying if the pipeline is torn down in the window between the lookup
+// and the registration. Without the retry a listener arriving as the reaper
+// fires registers on a corpse and is handed an already-closed channel, which
+// reads as a stream that connects and then plays nothing.
+//
+// register must return false when it registered on a closed fan-out, having
+// released whatever it took.
+func (s *Server) attach(id string, register func(*StreamPipeline) bool) bool {
+	for attempt := 0; attempt < 3; attempt++ {
+		p, ok := s.ensurePipeline(id)
+		if !ok {
+			return false
+		}
+		if register(p) {
+			return true
+		}
+	}
+	return false
 }
 
 // stopPipeline tears a stream's pipeline down: subscribers are told the stream
@@ -160,6 +197,24 @@ func (s *Server) reapWhenIdle(ctx context.Context, id string, p *StreamPipeline,
 				return
 			}
 		}
+	}
+}
+
+// WaitForPipelines blocks until every lazily-started shared-stream pipeline has
+// unwound — each hub's in-flight play() returning is what closes its ffmpeg
+// child — or until timeout elapses, reporting whether they all finished. The
+// house pipeline is main's own goroutine and is waited on separately.
+func (s *Server) WaitForPipelines(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		s.pipeWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
 	}
 }
 
