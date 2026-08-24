@@ -75,7 +75,7 @@ not validated — omitting the scheme silently produces links that do not work.
 | `EXIT66_PUBLIC_ORIGIN` | — | invites, resets, verification, signup — see above |
 | `EXIT66_MFA_KEY` | — | TOTP: enrolment and verification both fail without it. 32 bytes as base64 or hex; the server refuses to start if set and malformed |
 | `EXIT66_MUTE_LOCAL_ON_CAST` | `true` | silence the browser's local audio during a Sonos cast |
-| `EXIT66_SMTP_HOST` | — | sending mail at all; empty disables every outgoing email |
+| `EXIT66_SMTP_HOST` | — | sending mail at all; empty disables every outgoing email. Self-service signup then fails with a *separate* `503 verification email is not configured`, checked before the public origin is. The admin-triggered invite, reset and verification calls still return their link for you to pass on by hand |
 | `EXIT66_SMTP_PORT` | `587` | SMTP |
 | `EXIT66_SMTP_USER` | — | SMTP |
 | `EXIT66_SMTP_PASS` | — | SMTP |
