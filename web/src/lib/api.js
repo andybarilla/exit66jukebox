@@ -48,14 +48,52 @@ export async function scanStatus() {
 }
 
 export const HOUSE = 'house';
+export const PERSONAL = SESSION;
+
+// listStreams returns the shared streams (house included). The personal stream
+// is never in this list; the client pins it separately.
+export async function listStreams() {
+  const r = await fetch('/api/streams');
+  const body = await r.json();
+  return Array.isArray(body) ? body : [];
+}
+
+// createStream makes a named shared stream. Resolves to {ok, stream, error}
+// so the caller can surface the cap 409 by its message rather than guessing.
+export async function createStream(name) {
+  const r = await fetch('/api/streams', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  const body = await r.json().catch(() => ({}));
+  return r.ok ? { ok: true, stream: body } : { ok: false, error: body.error || 'could not create the stream' };
+}
+
+export async function renameStream(streamId, name) {
+  const r = await fetch(`/api/streams/${streamId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  const body = await r.json().catch(() => ({}));
+  return r.ok ? { ok: true } : { ok: false, error: body.error || 'could not rename the stream' };
+}
+
+export async function deleteStream(streamId) {
+  const r = await fetch(`/api/streams/${streamId}`, { method: 'DELETE' });
+  const body = await r.json().catch(() => ({}));
+  return r.ok ? { ok: true } : { ok: false, error: body.error || 'could not delete the stream' };
+}
 
 export async function getQueue(streamId) {
   const r = await fetch(`/api/streams/${streamId}`);
   return r.json(); // { id, queue: [...] }
 }
 
-export function houseStreamURL() {
-  return `/stream/${HOUSE}.mp3`;
+// streamAudioURL is the continuous MP3 feed for a shared stream.
+export function streamAudioURL(streamId) {
+  return `/stream/${streamId}.mp3`;
 }
 
 export function coverURL(trackId) {
@@ -90,11 +128,15 @@ export async function addManualSonos(ip) {
   if (!r.ok) throw new Error('not a Sonos device');
   return r.json(); // { name, ip }
 }
-// nextHouse advances the shared house queue (the Sonos cast surface's Next).
-export async function nextHouse() {
-  const r = await fetch(`/api/streams/${HOUSE}/next`, { method: 'POST' });
+// nextShared advances a shared stream's queue (the transport's Next button).
+export async function nextShared(streamId) {
+  const r = await fetch(`/api/streams/${streamId}/next`, { method: 'POST' });
   return r.json();
 }
+
+// nextHouse advances the house queue specifically. Casting stays locked to the
+// house stream (#130), so the cast surface's Next is not stream-relative.
+export const nextHouse = () => nextShared(HOUSE);
 
 export async function discoverRediscover(genre = '') {
   const r = await fetch(`/api/discover/rediscover?genre=${encodeURIComponent(genre)}`);

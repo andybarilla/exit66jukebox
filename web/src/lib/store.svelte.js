@@ -1,6 +1,8 @@
 import {
   listTracks, listAlbums, listArtists, albumTracks, getQueue, requestTo, removeRequest,
-  setShuffle, subscribeEvents, coverURL, albumCoverURL, HOUSE,
+  setShuffle, subscribeEvents, coverURL, albumCoverURL, HOUSE, PERSONAL,
+  listStreams, createStream as apiCreateStream, renameStream as apiRenameStream,
+  deleteStream as apiDeleteStream,
   discoverGenres, discoverRediscover, discoverRecent, discoverRecommended,
   getStation, startStation as apiStartStation, stopStation as apiStopStation,
   scanStatus, getConfig,
@@ -14,11 +16,14 @@ const PAGE_SIZE = 100;
 export function createStore() {
   let tab = $state('albums');
   let query = $state('');
-  let stream = $state('house');           // 'house' (shared) | 'me' (personal)
+  // stream is the id currently tuned in: any shared stream, or PERSONAL for the
+  // pinned personal one. sharedStreams mirrors GET /api/streams.
+  let stream = $state(HOUSE);
+  let sharedStreams = $state([{ id: HOUSE, name: 'House', house: true, listeners: 0 }]);
   let isPhone = $state(false);
   let lineupOpen = $state(false);
   let detailAlbum = $state(null);          // {id,name,artistName,tracks:[...]} | null
-  let shuffle = $state({ house: false, me: false }); // per-stream, mirrors backend
+  let shuffle = $state({}); // per-stream id -> bool, mirrors backend
   let displayName = $state(localStorage.getItem('e66.name') || 'You');
   let toasts = $state([]);
 
@@ -57,11 +62,12 @@ export function createStore() {
   let me = $state(null);
   let authChecked = $state(false);
 
-  // per-stream live state
-  let nowPlaying = $state({ house: null, me: null });
-  let progress = $state({ house: 0, me: 0 });   // seconds
-  let queues = $state({ house: [], me: [] });
-  let listeners = $state({ house: 0, me: 1 });
+  // per-stream live state, keyed by stream id (shared ids are opaque, so these
+  // are plain maps rather than a fixed house/me pair).
+  let nowPlaying = $state({});
+  let progress = $state({});   // seconds
+  let queues = $state({});
+  let listeners = $state({});
 
   // discover state
   let discoverGenreList = $state([]);     // [{genre, count}]
@@ -72,8 +78,10 @@ export function createStore() {
   let discoverStation = $state(null);     // {stream_id, genre, threshold, batch} | null
 
   let _uid = 0;
-  let _esHouse = null;
+  let _es = null;       // SSE for the tuned-in shared stream
+  let _esStream = null; // which stream _es is attached to
   let _started = false;
+  let lastShared = HOUSE; // the shared stream the personal toggle returns to
 
   const pagers = {
     albums: createPager((q, off, lim) => listAlbums(q, off, lim), PAGE_SIZE),
@@ -185,6 +193,53 @@ export function createStore() {
     pollScan();
   }
 
+  // loadStreams refreshes the shared-stream list, keeping house first so the
+  // selector's default is always in the same place. If the stream we are tuned
+  // into has disappeared (deleted by an admin elsewhere), fall back to house.
+  async function loadStreams() {
+    const list = await listStreams().catch(() => null);
+    if (!Array.isArray(list) || list.length === 0) return;
+    sharedStreams = [...list].sort((a, b) => (b.house === true) - (a.house === true));
+    for (const st of sharedStreams) listeners[st.id] = st.listeners || 0;
+    if (stream !== PERSONAL && !sharedStreams.some((st) => st.id === stream)) {
+      stream = HOUSE;
+      lastShared = HOUSE;
+      subscribeToStream(HOUSE);
+      refreshQueue(HOUSE);
+    }
+  }
+
+  function unsubscribeStream() {
+    if (_es) { _es(); _es = null; _esStream = null; }
+  }
+
+  // subscribeToStream points the single SSE connection at the tuned-in shared
+  // stream. Only one is open at a time: an idle shared stream is torn down
+  // server-side once nobody is attached, and holding a subscription on every
+  // stream would keep them all alive.
+  function subscribeToStream(s) {
+    if (s === PERSONAL) { unsubscribeStream(); return; }
+    lastShared = s;
+    if (_esStream === s) return;
+    unsubscribeStream();
+    _esStream = s;
+    _es = subscribeEvents(s, (e) => {
+      if (e.type === 'now-playing') {
+        nowPlaying[s] = e.data ? normalizeNP(e.data) : null;
+        progress[s] = 0;
+      } else if (e.type === 'queue-changed') {
+        refreshQueue(s);
+      } else if (e.type === 'stream-closed') {
+        // The stream was deleted out from under us; drop its state and go home.
+        unsubscribeStream();
+        delete queues[s]; delete nowPlaying[s]; delete progress[s]; delete listeners[s];
+        pushToast('amber', 'Stream closed', 'That stream was removed.');
+        if (stream === s) { stream = HOUSE; lastShared = HOUSE; subscribeToStream(HOUSE); refreshQueue(HOUSE); }
+        loadStreams();
+      }
+    });
+  }
+
   async function refreshQueue(s) {
     const r = await getQueue(s);
     queues[s] = (r.queue || []).map(normalizeQueued);
@@ -246,7 +301,7 @@ export function createStore() {
     get stream() { return stream; },
     get isPhone() { return isPhone; }, set isPhone(v) { isPhone = v; },
     get lineupOpen() { return lineupOpen; }, set lineupOpen(v) { lineupOpen = v; },
-    get shuffle() { return shuffle[stream]; },
+    get shuffle() { return shuffle[stream] === true; },
     get displayName() { return displayName; },
     set displayName(v) { displayName = v; localStorage.setItem('e66.name', v); },
     get toasts() { return toasts; },
@@ -265,12 +320,21 @@ export function createStore() {
     setMe(u) { me = u; },
     async signOut() { await apiLogout(); me = null; },
 
-    // Personal is always "just you": the `me` stream has no broadcast hub, so
-    // the backend reports 0 listeners for it. Never let that 0 surface here.
-    get listeners() { return stream === 'me' ? 1 : (listeners.house || 0); },
-    get queue() { return queues[stream]; },
-    get nowPlaying() { return nowPlaying[stream]; },
-    get progress() { return progress[stream]; },
+    // Personal is always "just you": it has no broadcast hub, so the backend
+    // reports 0 listeners for it. Never let that 0 surface here.
+    get listeners() { return stream === PERSONAL ? 1 : (listeners[stream] || 0); },
+
+    // The shared streams a listener can tune into, house first. The personal
+    // stream is deliberately not in here — the client pins it separately.
+    get sharedStreams() { return sharedStreams; },
+    get isSharedStream() { return stream !== PERSONAL; },
+    get streamName() {
+      if (stream === PERSONAL) return 'Personal';
+      return sharedStreams.find((st) => st.id === stream)?.name || 'Stream';
+    },
+    get queue() { return queues[stream] || []; },
+    get nowPlaying() { return nowPlaying[stream] || null; },
+    get progress() { return progress[stream] || 0; },
 
     // browse views (already filtered server-side; just map to display shape)
     get albumCards() { return view.albums.items.map(mapAlbum); },
@@ -332,20 +396,14 @@ export function createStore() {
       _scanWasRunning = !!(s0 && s0.running);
       await reloadActive();        // first page of the active (albums) tab
       startScanPolling();
-      await Promise.all([refreshQueue('house'), refreshQueue('me')]);
+      await loadStreams();
+      await Promise.all([refreshQueue(stream), refreshQueue(PERSONAL)]);
       discoverGenres().then((g) => { discoverGenreList = Array.isArray(g) ? g : []; }).catch(() => {});
-      _esHouse = subscribeEvents(HOUSE, (e) => {
-        if (e.type === 'now-playing') {
-          nowPlaying.house = e.data ? normalizeNP(e.data) : null;
-          progress.house = 0;
-        } else if (e.type === 'queue-changed') {
-          refreshQueue('house');
-        }
-      });
+      subscribeToStream(stream);
     },
     async init() { await this.bootstrap(); await this.start(); },
     teardown() {
-      if (_esHouse) { _esHouse(); _esHouse = null; }
+      unsubscribeStream();
       if (_scanTimer) { clearTimeout(_scanTimer); _scanTimer = null; }
       if (_searchTimer) { clearTimeout(_searchTimer); _searchTimer = null; }
     },
@@ -353,11 +411,43 @@ export function createStore() {
     setStream(s) {
       if (s === stream) return;
       stream = s;
-      pushToast('cyan', 'Stream', s === 'house'
-        ? 'Tuned in to the house stream — everyone hears this.'
-        : 'Switched to your personal stream.');
+      subscribeToStream(s);
+      refreshQueue(s);
+      if (s === PERSONAL) {
+        pushToast('cyan', 'Stream', 'Switched to your personal stream.');
+      } else {
+        const name = sharedStreams.find((st) => st.id === s)?.name || 'this stream';
+        pushToast('cyan', 'Stream', `Tuned in to ${name} — everyone on it hears this.`);
+      }
     },
-    toggleStream() { this.setStream(stream === 'house' ? 'me' : 'house'); },
+    // toggleStream flips between the personal stream and the last shared one
+    // (house when there wasn't one), which is what the compact chip does.
+    toggleStream() { this.setStream(stream === PERSONAL ? lastShared : PERSONAL); },
+
+    loadStreams() { return loadStreams(); },
+
+    async createStream(name) {
+      const r = await apiCreateStream(name);
+      if (!r.ok) { pushToast('amber', 'Not created', r.error); return null; }
+      await loadStreams();
+      pushToast('success', 'Stream created', `${name} is ready.`);
+      return r.stream?.id || null;
+    },
+    async renameStream(id, name) {
+      const r = await apiRenameStream(id, name);
+      if (!r.ok) { pushToast('amber', 'Not renamed', r.error); return false; }
+      await loadStreams();
+      return true;
+    },
+    async deleteStream(id) {
+      const r = await apiDeleteStream(id);
+      if (!r.ok) { pushToast('amber', 'Not deleted', r.error); return false; }
+      // Tuned into the stream that just went away: fall back to house.
+      if (stream === id) this.setStream(HOUSE);
+      await loadStreams();
+      pushToast('success', 'Stream deleted', 'It is gone and its queue with it.');
+      return true;
+    },
 
     async toggleShuffle(v) {
       shuffle[stream] = typeof v === 'boolean' ? v : !shuffle[stream];
