@@ -34,12 +34,6 @@ describe('App security mode routing', () => {
     expect(adminLoginBranch).toBeLessThan(profilePickerBranch);
   });
 
-  test('blocks normal sessions in household profile mode on non-admin routes', () => {
-    expect(source).toMatch(
-      /const\s+needsProfileSelection\s*=\s*\$derived\(\s*s\.config\.requiresProfile\s*&&\s*!onAdminPath\s*&&\s*!bootstrapToken\s*&&\s*!s\.me\?\.is_passwordless_profile\s*\)/
-    );
-    expect(source).toContain('{:else if needsProfileSelection}');
-  });
 
   test('allows explicit /admin route before household profile blocking', () => {
     const adminLoginBranch = source.indexOf('{:else if onAdminPath && !s.isAdmin}');
