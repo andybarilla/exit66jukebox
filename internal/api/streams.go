@@ -66,11 +66,13 @@ func (s *Server) nextTrack(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) request(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	// The personal stream is still created on first touch (#22 leaves its
-	// keying alone, see #128). The kind is pinned to private, so no id invented
-	// here can ever become a shared stream and reach the admin-gated controls.
-	if err := store.EnsurePrivateStream(s.db, id); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	// A request names a stream, it does not create one: creating on touch let
+	// any listener mint unbounded private streams by choosing URLs.
+	if _, ok, err := store.GetStream(s.db, id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	} else if !ok {
+		writeErr(w, http.StatusNotFound, "no such stream")
 		return
 	}
 	r.ParseForm()

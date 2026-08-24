@@ -119,10 +119,9 @@ func (j *Jukebox) Next(streamID string) (model.Track, bool) {
 // StartStation attaches a genre radio to the stream and immediately fills the
 // queue. An empty queue never drains (Next is never called), so the initial
 // fill is what gets playback going.
+// The stream must already exist; station is foreign-keyed to stream, so an
+// unknown id fails here rather than creating one.
 func (j *Jukebox) StartStation(streamID, genre string, threshold, batch int) error {
-	if err := store.EnsurePrivateStream(j.db, streamID); err != nil {
-		return err
-	}
 	if err := store.UpsertStation(j.db, store.Station{
 		StreamID: streamID, Genre: genre, Threshold: threshold, Batch: batch,
 	}); err != nil {

@@ -37,7 +37,7 @@ func newTestServer(t *testing.T) (*Server, *sql.DB) {
 	if err := store.EnsureSharedStream(db, "house", "House"); err != nil {
 		t.Fatalf("ensure house: %v", err)
 	}
-	if err := store.EnsurePrivateStream(db, "me"); err != nil {
+	if err := store.EnsurePrivateStream(db, store.PersonalStreamID); err != nil {
 		t.Fatalf("ensure personal: %v", err)
 	}
 	return s, db
@@ -107,7 +107,7 @@ func TestRequestRecordsRequesterAndStreamReturnsIt(t *testing.T) {
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}, "by": {"Mira"}}
-	req := httptest.NewRequest(http.MethodPost, "/api/streams/sess/requests",
+	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/requests",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -117,7 +117,7 @@ func TestRequestRecordsRequesterAndStreamReturnsIt(t *testing.T) {
 	}
 
 	rec2 := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/streams/sess", nil))
+	srv.Handler().ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/api/streams/me", nil))
 	if !strings.Contains(rec2.Body.String(), `"requested_by":"Mira"`) {
 		t.Fatalf("stream body missing requester: %s", rec2.Body.String())
 	}
@@ -176,7 +176,7 @@ func TestRequestThenNextRoundTrip(t *testing.T) {
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}}
-	req := httptest.NewRequest(http.MethodPost, "/api/streams/sess/requests",
+	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/requests",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -185,7 +185,7 @@ func TestRequestThenNextRoundTrip(t *testing.T) {
 		t.Fatalf("request status: %d", rec.Code)
 	}
 
-	req2 := httptest.NewRequest(http.MethodPost, "/api/streams/sess/next", nil)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/streams/me/next", nil)
 	rec2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {
@@ -201,7 +201,7 @@ func TestGetNextDoesNotAdvanceQueue(t *testing.T) {
 	id, _ := store.UpsertTrack(srv.db, model.Track{Path: "/m/a.mp3", Title: "Hello"}, "Band", "", "Album")
 
 	form := url.Values{"kind": {"track"}, "id": {strconv.FormatInt(id, 10)}}
-	req := httptest.NewRequest(http.MethodPost, "/api/streams/sess/requests",
+	req := httptest.NewRequest(http.MethodPost, "/api/streams/me/requests",
 		strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -210,14 +210,14 @@ func TestGetNextDoesNotAdvanceQueue(t *testing.T) {
 		t.Fatalf("request status: %d", rec.Code)
 	}
 
-	getNext := httptest.NewRequest(http.MethodGet, "/api/streams/sess/next", nil)
+	getNext := httptest.NewRequest(http.MethodGet, "/api/streams/me/next", nil)
 	getNextRec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(getNextRec, getNext)
 	if getNextRec.Code == http.StatusOK {
 		t.Fatalf("GET next should not advance queue, got status %d and body %s", getNextRec.Code, getNextRec.Body.String())
 	}
 
-	postNext := httptest.NewRequest(http.MethodPost, "/api/streams/sess/next", nil)
+	postNext := httptest.NewRequest(http.MethodPost, "/api/streams/me/next", nil)
 	postNextRec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(postNextRec, postNext)
 	if postNextRec.Code != http.StatusOK {

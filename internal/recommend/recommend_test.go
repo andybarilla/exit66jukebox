@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -127,12 +128,16 @@ func TestRunnerGetTriggersRefreshWhenStaleOnly(t *testing.T) {
 	lb := &fakeLB{recs: []external.RecRecording{{RecordingMBID: "rec-a"}}}
 	r := NewRunner(db, lb, nil)
 
-	now := time.Unix(1000, 0)
-	r.now = func() time.Time { return now }
+	// The background refresh goroutine calls the clock, so it has to be safe to
+	// read from another goroutine while the test advances it.
+	var nowUnixNano atomic.Int64
+	nowUnixNano.Store(time.Unix(1000, 0).UnixNano())
+	r.now = func() time.Time { return time.Unix(0, nowUnixNano.Load()) }
 
 	// First Get: cache is empty/never-refreshed → kicks an async refresh.
 	r.Get()
 	waitFor(t, func() bool { return lb.callCount() == 1 })
+	waitRefreshDone(t, r)
 
 	// Second Get within TTL: no new refresh.
 	r.Get()
@@ -142,7 +147,7 @@ func TestRunnerGetTriggersRefreshWhenStaleOnly(t *testing.T) {
 	}
 
 	// Advance past the TTL: next Get refreshes again.
-	now = now.Add(ttl + time.Second)
+	nowUnixNano.Add(int64(ttl + time.Second))
 	r.Get()
 	waitFor(t, func() bool { return lb.callCount() == 2 })
 }
@@ -157,4 +162,17 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("condition not met within timeout")
+}
+
+// waitRefreshDone blocks until Get's background refresh goroutine has finished.
+// The source's call counter ticks inside gather, before Refresh stamps
+// lastRefresh, so waiting on the counter alone can leave a refresh in flight
+// that then stamps lastRefresh with a time the test has since advanced.
+func waitRefreshDone(t *testing.T, r *Runner) {
+	t.Helper()
+	waitFor(t, func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return !r.refreshing
+	})
 }
