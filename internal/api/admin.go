@@ -7,11 +7,10 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
-// sharedStreamID is the id of the one shared, projected-to-the-room stream. Its
-// privileged controls (skip/remove/clear/shuffle) are admin-gated; every other
-// stream id is a guest's private stream and stays open. Matches the houseID
-// const in main.go.
-const sharedStreamID = "house"
+// houseStreamID is the always-on shared stream: created at boot, the only cast
+// target, and the only stream whose playback is scrobbled. It cannot be renamed
+// away or deleted. Matches the houseID const in main.go.
+const houseStreamID = "house"
 
 // currentUser resolves the request's session cookie to a user. ok is false for
 // anonymous requests (no/invalid/expired cookie).
@@ -63,21 +62,56 @@ func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requireAdminShared gates next only when the request targets the shared house
-// stream. Private streams (a guest's "me") pass through untouched so guests can
-// always drive their own queue.
+// requireAdminShared gates next whenever the request targets a stream whose
+// kind is shared, read from the store — not by comparing the id to a constant,
+// which left every id but house completely ungated. Private streams (a guest's
+// own queue) pass through untouched.
+//
+// An unknown id is rejected here rather than falling through, because the
+// handlers behind this gate used to implicit-create the stream they were
+// handed: the gate would decide against a row that did not exist yet, and a
+// caller could reach a privileged handler simply by inventing a URL.
 func (s *Server) requireAdminShared(next http.HandlerFunc) http.HandlerFunc {
 	gated := s.requireAdmin(next)
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.PathValue("id") != sharedStreamID {
+		st, ok, err := store.GetStream(s.db, r.PathValue("id"))
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "db error")
+			return
+		}
+		if !ok {
+			writeErr(w, http.StatusNotFound, "no such stream")
+			return
+		}
+		if st.Kind != store.KindShared {
 			next(w, r)
 			return
 		}
-		mode := store.SecurityModeSetting(s.db)
-		if mode == store.SecurityModeOpen {
+		if store.SecurityModeSetting(s.db) == store.SecurityModeOpen {
 			next(w, r)
 			return
 		}
 		gated(w, r)
 	}
+}
+
+// requireAdminOrOpen is requireAdminShared's gate without a stream to read it
+// from: used by stream creation, which has no id yet but must be admin-only on
+// the same terms, open-mode escape hatch included.
+func (s *Server) requireAdminOrOpen(next http.HandlerFunc) http.HandlerFunc {
+	gated := s.requireAdmin(next)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if store.SecurityModeSetting(s.db) == store.SecurityModeOpen {
+			next(w, r)
+			return
+		}
+		gated(w, r)
+	}
+}
+
+// isSharedStream reports whether the id names a shared stream. A missing row or
+// a read error is not shared — the safe answer for a lazy-start decision.
+func (s *Server) isSharedStream(id string) bool {
+	st, ok, err := store.GetStream(s.db, id)
+	return err == nil && ok && st.Kind == store.KindShared
 }

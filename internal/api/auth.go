@@ -924,15 +924,18 @@ func (s *Server) adminRouteAllowed(r *http.Request) bool {
 	if !hasUser || !user.IsAdmin {
 		return false
 	}
-	return routeRequiresAdmin(r.Method, r.URL.Path)
+	return s.routeRequiresAdmin(r.Method, r.URL.Path)
 }
 
-func routeRequiresAdmin(method, path string) bool {
+func (s *Server) routeRequiresAdmin(method, path string) bool {
 	if strings.HasPrefix(path, "/api/admin/") {
 		return true
 	}
-	if sharedHouseStreamRouteRequiresAdmin(method, path) {
+	if s.sharedStreamRouteRequiresAdmin(method, path) {
 		return true
+	}
+	if path == "/api/streams" {
+		return method == http.MethodPost
 	}
 	switch path {
 	case "/api/sonos/cast", "/api/sonos/stop", "/api/sonos/volume", "/api/enrich":
@@ -942,12 +945,22 @@ func routeRequiresAdmin(method, path string) bool {
 	}
 }
 
-func sharedHouseStreamRouteRequiresAdmin(method, path string) bool {
-	const houseStreamPrefix = "/api/streams/" + sharedStreamID + "/"
-	if !strings.HasPrefix(path, houseStreamPrefix) {
+// sharedStreamRouteRequiresAdmin reports whether the path is a privileged
+// control on a stream that is shared. It reads the stream's kind, so it covers
+// every shared stream rather than only house; the handler-side gate
+// (requireAdminShared) still does the real enforcement.
+func (s *Server) sharedStreamRouteRequiresAdmin(method, path string) bool {
+	rest, ok := strings.CutPrefix(path, "/api/streams/")
+	if !ok {
 		return false
 	}
-	suffix := strings.TrimPrefix(path, houseStreamPrefix)
+	id, suffix, hasSuffix := strings.Cut(rest, "/")
+	if id == "" || !s.isSharedStream(id) {
+		return false
+	}
+	if !hasSuffix { // /api/streams/{id}: rename and delete are privileged
+		return method == http.MethodPatch || method == http.MethodDelete
+	}
 	switch suffix {
 	case "next", "shuffle":
 		return method == http.MethodPost

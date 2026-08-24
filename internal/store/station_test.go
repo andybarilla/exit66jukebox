@@ -9,7 +9,7 @@ import (
 func TestStationRoundTrip(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()
-	if err := EnsureStream(db, "s", "", "private"); err != nil {
+	if err := EnsurePrivateStream(db, "s"); err != nil {
 		t.Fatalf("ensure stream: %v", err)
 	}
 
@@ -45,7 +45,7 @@ func TestStationRoundTrip(t *testing.T) {
 func TestQueueLen(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()
-	EnsureStream(db, "s", "", "private")
+	EnsurePrivateStream(db, "s")
 	if n, _ := QueueLen(db, "s"); n != 0 {
 		t.Fatalf("expected empty queue len 0, got %d", n)
 	}

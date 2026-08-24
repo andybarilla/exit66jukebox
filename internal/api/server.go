@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
@@ -14,9 +15,7 @@ import (
 	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/auth"
-	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
-	"github.com/andybarilla/exit66jukebox/internal/events"
 	"github.com/andybarilla/exit66jukebox/internal/fed"
 	"github.com/andybarilla/exit66jukebox/internal/jukebox"
 	"github.com/andybarilla/exit66jukebox/internal/recommend"
@@ -32,9 +31,15 @@ type Server struct {
 	ui           fs.FS
 	listenAddr   string // server's own listen addr, for building Sonos-reachable URLs
 	publicOrigin string // trusted browser-facing origin for email links
-	hubs         map[string]*broadcast.Hub
-	buses        map[string]*events.Bus
-	nowPlaying   map[string]*NowPlaying // current-track trackers for shared streams
+	// Shared-stream broadcast pipelines (hub + bus + now-playing), one per
+	// shared stream. house's is registered at boot; the rest are built on first
+	// use by newPipe and reaped once idle. See pipeline.go.
+	pipesMu   sync.Mutex
+	pipes     map[string]*StreamPipeline
+	pipeCtx   context.Context
+	newPipe   func(id string) *StreamPipeline
+	idleTTL   time.Duration
+	idleCheck time.Duration
 	enrich       *enrich.Runner         // nil until SetEnrichRunner; endpoints 503 while nil
 	recommend    *recommend.Runner      // nil until SetRecommendRunner; endpoint returns [] while nil
 	scanMu       sync.Mutex
@@ -90,9 +95,9 @@ type Server struct {
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 	return &Server{
 		db: db, jb: jb, ui: ui,
-		hubs:          make(map[string]*broadcast.Hub),
-		buses:         make(map[string]*events.Bus),
-		nowPlaying:    make(map[string]*NowPlaying),
+		pipes:         make(map[string]*StreamPipeline),
+		idleTTL:       defaultStreamIdleTTL,
+		idleCheck:     defaultStreamIdleCheck,
 		loginAttempts: make(map[string][]int64),
 		sonosIPs:      make(map[string]bool),
 		sonosManual:   make(map[string]string),
@@ -209,36 +214,23 @@ func (s *Server) bootstrapTokenStatus(token string) bootstrapStatus {
 	return bootstrapInvalid
 }
 
-// RegisterStream attaches a broadcast hub, event bus, and now-playing tracker
-// for a shared stream id. np may be nil for streams that don't track current
-// track (GET /api/streams/{id} then reports now_playing: null).
-func (s *Server) RegisterStream(id string, hub *broadcast.Hub, bus *events.Bus, np *NowPlaying) {
-	s.hubs[id] = hub
-	s.buses[id] = bus
-	if np != nil {
-		s.nowPlaying[id] = np
-	}
-}
-
-// listenerCount returns connected listeners for a registered shared stream, or
-// 0 for private streams with no hub.
-func (s *Server) listenerCount(streamID string) int {
-	if hub, ok := s.hubs[streamID]; ok {
-		return hub.ListenerCount()
-	}
-	return 0
-}
-
 // Handler returns the routed mux. Handlers live in sibling files.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/artists", s.listArtists)
 	mux.HandleFunc("GET /api/albums", s.listAlbums)
 	mux.HandleFunc("GET /api/tracks", s.listTracks)
+	// Stream CRUD. Listing is open; create/rename/delete are admin-gated on the
+	// same terms as the other shared-stream controls (including the open-mode
+	// escape hatch), because every one of them creates or destroys a shared stream.
+	mux.HandleFunc("GET /api/streams", s.listStreams)
+	mux.HandleFunc("POST /api/streams", s.requireAdminOrOpen(s.createStream))
+	mux.HandleFunc("PATCH /api/streams/{id}", s.requireAdminShared(s.renameStream))
+	mux.HandleFunc("DELETE /api/streams/{id}", s.requireAdminShared(s.deleteStream))
 	mux.HandleFunc("GET /api/streams/{id}", s.getStream)
-	// next/remove/clear/shuffle mutate the queue. They're gated only for the shared
-	// house stream (requireAdminShared); each guest's private "me" stream stays open
-	// so they can always drive their own queue.
+	// next/remove/clear/shuffle mutate the queue. requireAdminShared gates them on
+	// the stream's kind, so every shared stream is admin-only; each guest's private
+	// stream stays open so they can always drive their own queue.
 	mux.HandleFunc("POST /api/streams/{id}/next", s.requireAdminShared(s.nextTrack))
 	mux.HandleFunc("POST /api/streams/{id}/requests", s.request)
 	mux.HandleFunc("DELETE /api/streams/{id}/requests/{trackID}", s.requireAdminShared(s.removeRequest))

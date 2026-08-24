@@ -10,7 +10,7 @@ func TestQueueWithRequester(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()
 	id, _ := UpsertTrack(db, model.Track{Path: "/m/a.mp3", Title: "A"}, "Band", "", "LP")
-	if err := EnsureStream(db, "s", "", "private"); err != nil {
+	if err := EnsurePrivateStream(db, "s"); err != nil {
 		t.Fatal(err)
 	}
 	if err := Enqueue(db, "s", id, "Mira"); err != nil {
@@ -32,7 +32,7 @@ func TestQueueWithRequester(t *testing.T) {
 func TestPopNextShuffleEmptiesQueue(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()
-	EnsureStream(db, "s", "", "private")
+	EnsurePrivateStream(db, "s")
 	var ids []int64
 	for _, title := range []string{"A", "B", "C"} {
 		id, _ := UpsertTrack(db, model.Track{Path: "/m/" + title + ".mp3", Title: title}, "Band", "", "LP")

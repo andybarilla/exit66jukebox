@@ -120,8 +120,8 @@ func TestReupsertReusesTrackIDPreservingQueue(t *testing.T) {
 	db, _ := Open(":memory:")
 	defer db.Close()
 	id1, _ := UpsertTrack(db, model.Track{Path: "/m/1.mp3", Title: "One"}, "Artist A", "", "Album")
-	if err := EnsureStream(db, "s", "", "private"); err != nil {
-		t.Fatalf("EnsureStream: %v", err)
+	if err := EnsurePrivateStream(db, "s"); err != nil {
+		t.Fatalf("EnsurePrivateStream: %v", err)
 	}
 	if err := Enqueue(db, "s", id1, ""); err != nil {
 		t.Fatalf("Enqueue: %v", err)

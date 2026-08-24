@@ -21,8 +21,14 @@ type Hub struct {
 	silence  []byte
 	idlePace time.Duration
 
+	// RequireListener holds the loop off next() while nobody is tuned in, so a
+	// stream spawns no encoder until someone listens. The always-on house stream
+	// leaves it false and advances regardless.
+	RequireListener bool
+
 	mu        sync.Mutex
 	listeners map[chan []byte]struct{}
+	closed    bool
 }
 
 func NewHub(src Source, next func() (string, bool), silence []byte) *Hub {
@@ -40,6 +46,13 @@ func NewHub(src Source, next func() (string, bool), silence []byte) *Hub {
 func (h *Hub) Listen() (<-chan []byte, func()) {
 	ch := make(chan []byte, 64)
 	h.mu.Lock()
+	if h.closed {
+		// The stream is gone; hand back an already-closed channel so the caller
+		// unwinds instead of blocking on a feed that will never arrive.
+		h.mu.Unlock()
+		close(ch)
+		return ch, func() {}
+	}
 	h.listeners[ch] = struct{}{}
 	h.mu.Unlock()
 
@@ -47,12 +60,31 @@ func (h *Hub) Listen() (<-chan []byte, func()) {
 	cancel := func() {
 		once.Do(func() {
 			h.mu.Lock()
+			_, live := h.listeners[ch]
 			delete(h.listeners, ch)
 			h.mu.Unlock()
-			close(ch)
+			if live { // Close already closed it
+				close(ch)
+			}
 		})
 	}
 	return ch, cancel
+}
+
+// Close drops every listener and marks the hub dead, so handlers blocked on a
+// listener channel return rather than hanging when the stream is deleted.
+// Idempotent, and safe alongside each listener's own cancel func.
+func (h *Hub) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
+	h.closed = true
+	for ch := range h.listeners {
+		delete(h.listeners, ch)
+		close(ch)
+	}
 }
 
 func (h *Hub) broadcast(b []byte) {
@@ -73,6 +105,10 @@ func (h *Hub) Run(ctx context.Context) {
 	for {
 		if ctx.Err() != nil {
 			return
+		}
+		if h.RequireListener && h.ListenerCount() == 0 {
+			h.waitIdle(ctx)
+			continue
 		}
 		path, ok := h.next()
 		if !ok {
@@ -116,6 +152,12 @@ func (h *Hub) idle(ctx context.Context) {
 	if len(h.silence) > 0 {
 		h.broadcast(h.silence)
 	}
+	h.waitIdle(ctx)
+}
+
+// waitIdle paces the loop without emitting anything. Used while a
+// listener-gated stream has nobody tuned in: there is no one to send silence to.
+func (h *Hub) waitIdle(ctx context.Context) {
 	select {
 	case <-ctx.Done():
 	case <-time.After(h.idlePace):

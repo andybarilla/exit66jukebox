@@ -16,7 +16,9 @@ func (s *Server) streamAudio(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	hub, ok := s.hubs[id]
+	// First listener on a shared stream is what starts its pipeline (and, once
+	// it pops a track, its encoder). house's is already running.
+	p, ok := s.ensurePipeline(id)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -31,7 +33,7 @@ func (s *Server) streamAudio(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	ch, cancel := hub.Listen()
+	ch, cancel := p.Hub.Listen()
 	defer cancel()
 	for {
 		select {
@@ -64,7 +66,7 @@ func (s *Server) streamAudioGuarded(w http.ResponseWriter, r *http.Request) {
 
 // streamEvents is an SSE endpoint pushing now-playing/queue-changed events.
 func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
-	bus, ok := s.buses[r.PathValue("id")]
+	p, ok := s.ensurePipeline(r.PathValue("id"))
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -80,7 +82,7 @@ func (s *Server) streamEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	ch, cancel := bus.Subscribe()
+	ch, cancel := p.Bus.Subscribe()
 	defer cancel()
 	for {
 		select {
