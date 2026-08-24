@@ -356,26 +356,6 @@ func (s *Server) createAndSendVerification(email, name, hash string) (int64, err
 	return uid, nil
 }
 
-// createAccountAndLogin hashes the password, inserts the user, and logs them in
-// by setting a session cookie. isAdmin grants the admin role.
-func (s *Server) createAccountAndLogin(w http.ResponseWriter, r *http.Request, email, name, pw string, isAdmin bool) {
-	hash, err := auth.HashPassword(pw)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "hash error")
-		return
-	}
-	uid, err := store.CreateUser(s.db, email, name, hash, isAdmin)
-	if err != nil {
-		writeErr(w, http.StatusConflict, "email already registered")
-		return
-	}
-	if err := s.setSessionCookie(w, r, uid); err != nil {
-		writeErr(w, http.StatusInternalServerError, "session error")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": uid, "email": email, "is_admin": isAdmin})
-}
-
 type loginReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
