@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   login,
+  signup,
   fetchMe,
   requestPasswordReset,
   resetPassword,
@@ -136,6 +137,14 @@ describe('auth api', () => {
     const [url, opts] = fetch.mock.calls[0];
     expect(url).toBe('/api/auth/password-reset/forgot');
     expect(JSON.parse(opts.body)).toEqual({ email: 'a@b.com' });
+  });
+
+  it('signup includes an optional bootstrap token', async () => {
+    fetch.mockReturnValue(jsonResp({ id: 1, email: 'a@b.com', is_admin: true }));
+    await signup('a@b.com', 'A', 'pw123456', 'boot-token');
+    const [url, opts] = fetch.mock.calls[0];
+    expect(url).toBe('/api/auth/signup');
+    expect(JSON.parse(opts.body)).toEqual({ email: 'a@b.com', display_name: 'A', password: 'pw123456', bootstrap_token: 'boot-token' });
   });
 
   it('resetPassword redeems token with new password', async () => {

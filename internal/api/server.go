@@ -2,15 +2,18 @@ package api
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/andybarilla/exit66jukebox/internal/auth"
 	"github.com/andybarilla/exit66jukebox/internal/broadcast"
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/events"
@@ -49,6 +52,11 @@ type Server struct {
 	// at startup from the store (store.MediaSigningSecret).
 	signingSecret []byte
 	mfaKey        []byte
+	// bootstrapTokenHash is the armed first-admin bootstrap token, hashed;
+	// empty once claimed. Read by concurrent signups, cleared by the winner.
+	bootstrapMu        sync.RWMutex
+	bootstrapTokenHash string
+	bootstrapClaimed   bool
 	// loginAttempts throttles the password form per client IP (soft brute-force
 	// guard); guarded by loginMu.
 	loginMu       sync.Mutex
@@ -152,6 +160,54 @@ func (s *Server) SetVerificationEmailer(fn func(to, link string) error) { s.emai
 func (s *Server) SetSigningSecret(secret []byte) { s.signingSecret = secret }
 
 func (s *Server) SetMFAKey(key []byte) { s.mfaKey = append([]byte(nil), key...) }
+
+// bootstrapStatus is what a presented bootstrap token entitles a caller to.
+// Claimed is kept distinct from invalid so a caller holding the real token is
+// told the bootstrap is gone rather than that its token is wrong.
+type bootstrapStatus int
+
+const (
+	bootstrapInvalid bootstrapStatus = iota
+	bootstrapValid
+	bootstrapClaimed
+)
+
+// SetBootstrapToken arms the one-time first-admin bootstrap token and returns
+// the URL an operator opens to claim it. The token itself is never persisted,
+// so a restart before the first admin exists mints a fresh one.
+func (s *Server) SetBootstrapToken(token string) string {
+	s.bootstrapMu.Lock()
+	s.bootstrapTokenHash = auth.HashToken(token)
+	s.bootstrapClaimed = false
+	s.bootstrapMu.Unlock()
+	return s.publicBaseURL() + "/?bootstrap_token=" + url.QueryEscape(token)
+}
+
+// markBootstrapClaimed disarms bootstrap once the first admin exists, so
+// deleting every account while the process is still running can't re-arm it
+// with the old token.
+func (s *Server) markBootstrapClaimed() {
+	s.bootstrapMu.Lock()
+	s.bootstrapTokenHash = ""
+	s.bootstrapClaimed = true
+	s.bootstrapMu.Unlock()
+}
+
+func (s *Server) bootstrapTokenStatus(token string) bootstrapStatus {
+	s.bootstrapMu.RLock()
+	hash, claimed := s.bootstrapTokenHash, s.bootstrapClaimed
+	s.bootstrapMu.RUnlock()
+	if claimed {
+		return bootstrapClaimed
+	}
+	if hash == "" || token == "" {
+		return bootstrapInvalid
+	}
+	if subtle.ConstantTimeCompare([]byte(hash), []byte(auth.HashToken(token))) == 1 {
+		return bootstrapValid
+	}
+	return bootstrapInvalid
+}
 
 // RegisterStream attaches a broadcast hub, event bus, and now-playing tracker
 // for a shared stream id. np may be nil for streams that don't track current

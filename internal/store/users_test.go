@@ -2,6 +2,8 @@ package store
 
 import (
 	"database/sql"
+	"errors"
+	"sync"
 	"testing"
 )
 
@@ -77,6 +79,65 @@ func TestCreateUserCanStoreUnverifiedAndVerifiedAccounts(t *testing.T) {
 	}
 	if verified.EmailVerifiedAt == 0 {
 		t.Fatal("invited/bootstrap user should start verified")
+	}
+}
+
+func TestCreateFirstAdminOnlyWinsOnEmptyUserTable(t *testing.T) {
+	db := mustOpenMem(t)
+	id, err := CreateFirstAdmin(db, "admin@example.com", "Admin", "h")
+	if err != nil {
+		t.Fatalf("create first admin: %v", err)
+	}
+	user, ok, err := GetUserByID(db, id)
+	if err != nil || !ok {
+		t.Fatalf("load first admin: ok=%v err=%v", ok, err)
+	}
+	if !user.IsAdmin || user.EmailVerifiedAt == 0 {
+		t.Fatalf("first admin not admin/verified: %+v", user)
+	}
+	if _, err := CreateFirstAdmin(db, "second@example.com", "Second", "h"); !errors.Is(err, ErrBootstrapAlreadyClaimed) {
+		t.Fatalf("second first-admin attempt: want claimed, got %v", err)
+	}
+}
+
+func TestCreateFirstAdminConcurrentRaceCreatesOneAdmin(t *testing.T) {
+	db := mustOpenMem(t)
+	const attempts = 12
+	var wg sync.WaitGroup
+	results := make(chan error, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := CreateFirstAdmin(db, string(rune('a'+i))+"@example.com", "Admin", "h")
+			results <- err
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+
+	winners := 0
+	claimed := 0
+	for err := range results {
+		if err == nil {
+			winners++
+			continue
+		}
+		if errors.Is(err, ErrBootstrapAlreadyClaimed) {
+			claimed++
+			continue
+		}
+		t.Fatalf("unexpected create error: %v", err)
+	}
+	if winners != 1 || claimed != attempts-1 {
+		t.Fatalf("race results: winners=%d claimed=%d", winners, claimed)
+	}
+	users, err := ListUsers(db)
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	if len(users) != 1 || !users[0].IsAdmin {
+		t.Fatalf("want one admin, got %+v", users)
 	}
 }
 

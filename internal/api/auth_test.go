@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -326,8 +327,9 @@ func TestPasswordlessProfileEndpointsRequireHouseholdProfilesMode(t *testing.T) 
 
 func TestSignupBootstrapsAdmin(t *testing.T) {
 	s, db := newTestServer(t)
+	s.SetBootstrapToken("boot-token")
 	rec := httptest.NewRecorder()
-	body := `{"email":"a@b.com","display_name":"A","password":"pw123456"}`
+	body := `{"email":"a@b.com","display_name":"A","password":"pw123456","bootstrap_token":"boot-token"}`
 	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
 	if rec.Code != 200 {
 		t.Fatalf("bootstrap signup: want 200, got %d (%s)", rec.Code, rec.Body)
@@ -344,6 +346,92 @@ func TestSignupBootstrapsAdmin(t *testing.T) {
 	s.signup(rec2, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body2)))
 	if rec2.Code == 200 {
 		t.Fatal("second signup allowed while disabled")
+	}
+}
+
+func TestSignupBootstrapRejectsMissingOrInvalidToken(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetBootstrapToken("boot-token")
+	for _, body := range []string{
+		`{"email":"a@b.com","display_name":"A","password":"pw123456"}`,
+		`{"email":"a@b.com","display_name":"A","password":"pw123456","bootstrap_token":"wrong"}`,
+	} {
+		rec := httptest.NewRecorder()
+		s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("bootstrap signup without valid token: want 403, got %d (%s)", rec.Code, rec.Body)
+		}
+	}
+	if n, err := store.CountUsers(db); err != nil || n != 0 {
+		t.Fatalf("invalid bootstrap created users: n=%d err=%v", n, err)
+	}
+}
+
+func TestSignupBootstrapTokenRotatesAcrossServerInstances(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetBootstrapToken("new-token")
+	rec := httptest.NewRecorder()
+	body := `{"email":"a@b.com","display_name":"A","password":"pw123456","bootstrap_token":"old-token"}`
+	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("old token: want 403, got %d (%s)", rec.Code, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	body = `{"email":"a@b.com","display_name":"A","password":"pw123456","bootstrap_token":"new-token"}`
+	s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("new token: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	user, _, _ := store.GetUserByEmail(db, "a@b.com")
+	if !user.IsAdmin {
+		t.Fatal("new token did not create admin")
+	}
+}
+
+func TestSignupBootstrapConcurrentRaceCreatesOneAdmin(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetBootstrapToken("boot-token")
+	const attempts = 12
+	var wg sync.WaitGroup
+	type result struct {
+		code int
+		body string
+	}
+	statuses := make(chan result, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			body := `{"email":"` + string(rune('a'+i)) + `@b.com","display_name":"A","password":"pw123456","bootstrap_token":"boot-token"}`
+			rec := httptest.NewRecorder()
+			s.signup(rec, httptest.NewRequest("POST", "/api/auth/signup", strings.NewReader(body)))
+			statuses <- result{rec.Code, rec.Body.String()}
+		}(i)
+	}
+	wg.Wait()
+	close(statuses)
+
+	winners := 0
+	for res := range statuses {
+		if res.code == http.StatusOK {
+			winners++
+			continue
+		}
+		// Every loser held a genuinely valid token, so it must be told the
+		// bootstrap was claimed. A 403 "valid bootstrap token required" here
+		// means the winner disarmed the token in the window between this
+		// request's CountUsers and its token check.
+		if res.code != http.StatusConflict || !strings.Contains(res.body, "bootstrap already claimed") {
+			t.Fatalf("loser got %d %s, want 409 bootstrap already claimed", res.code, res.body)
+		}
+	}
+	users, err := store.ListUsers(db)
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	if winners != 1 || len(users) != 1 || !users[0].IsAdmin {
+		t.Fatalf("race results: winners=%d users=%+v", winners, users)
 	}
 }
 
@@ -1089,5 +1177,48 @@ func TestLoginThrottlePerEmailDefeatsIPRotation(t *testing.T) {
 	}
 	if last != http.StatusTooManyRequests {
 		t.Fatalf("per-email throttle should trip despite rotating IPs: got %d", last)
+	}
+}
+
+// The spec requires that once any user exists the server stops accepting a
+// bootstrap token. The signup handler's CountUsers check covers the normal
+// case, but the armed token must also be disarmed so that deleting every user
+// while the process is still running can't re-arm bootstrap with the old token.
+func TestSignupBootstrapDisarmsTokenAfterFirstAdmin(t *testing.T) {
+	s, db := newTestServer(t)
+	s.SetBootstrapToken("boot-token")
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"email":"admin@example.com","display_name":"Admin","password":"password123","bootstrap_token":"boot-token"}`)
+	s.signup(rec, httptest.NewRequest(http.MethodPost, "/api/auth/signup", body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bootstrap signup: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	if got := s.bootstrapTokenStatus("boot-token"); got != bootstrapClaimed {
+		t.Fatalf("token status after bootstrap = %v, want bootstrapClaimed", got)
+	}
+
+	users, err := store.ListUsers(db)
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	for _, u := range users {
+		if err := store.DeleteUser(db, u.ID); err != nil {
+			t.Fatalf("delete user: %v", err)
+		}
+	}
+
+	// Zero users again, so signup takes the bootstrap branch — but the claimed
+	// flag must still refuse, and must say "claimed" rather than telling the
+	// holder of the real token that it is invalid. This is the deterministic
+	// form of what a concurrency loser sees.
+	rec = httptest.NewRecorder()
+	body = strings.NewReader(`{"email":"attacker@example.com","display_name":"X","password":"password123","bootstrap_token":"boot-token"}`)
+	s.signup(rec, httptest.NewRequest(http.MethodPost, "/api/auth/signup", body))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "bootstrap already claimed") {
+		t.Fatalf("stale token re-armed bootstrap: got %d (%s)", rec.Code, rec.Body)
+	}
+	if users, err := store.ListUsers(db); err != nil || len(users) != 0 {
+		t.Fatalf("claimed bootstrap created an account: users=%+v err=%v", users, err)
 	}
 }

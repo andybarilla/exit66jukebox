@@ -243,6 +243,9 @@ func main() {
 	srv.SetMFAKey(cfg.MFAKey)
 	srv.SetListenAddr(cfg.Addr)
 	srv.SetPublicOrigin(cfg.PublicOrigin)
+	if token, ok := bootstrapToken(db); ok {
+		log.Printf("First admin bootstrap URL: %s", srv.SetBootstrapToken(token))
+	}
 	srv.SetMuteLocalOnCast(cfg.MuteLocalOnCast)
 	srv.SetSigningSecret(signingSecret)
 	srv.SetScanWorkers(cfg.ScanWorkers)
@@ -383,6 +386,26 @@ func waitForClose(done <-chan struct{}, timeout time.Duration) bool {
 	case <-time.After(timeout):
 		return false
 	}
+}
+
+// bootstrapToken mints the startup first-admin token, or reports false when the
+// instance already has users (or the count/mint fails, in which case the server
+// still starts — a missing bootstrap link is not worth refusing to boot over).
+func bootstrapToken(db *sql.DB) (string, bool) {
+	n, err := store.CountUsers(db)
+	if err != nil {
+		log.Printf("bootstrap token skipped: count users: %v", err)
+		return "", false
+	}
+	if n != 0 {
+		return "", false
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		log.Printf("bootstrap token skipped: generate: %v", err)
+		return "", false
+	}
+	return token, true
 }
 
 func startupLibraryRoots(db *sql.DB, cliRoots []string) ([]string, error) {

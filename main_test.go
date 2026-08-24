@@ -129,6 +129,26 @@ func TestMainWiresConfiguredMFAKeyIntoAPIServer(t *testing.T) {
 	}
 }
 
+func TestBootstrapTokenOnlyGeneratedForEmptyUserTable(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+
+	first, ok := bootstrapToken(db)
+	if !ok || first == "" {
+		t.Fatal("empty user table should get a bootstrap token")
+	}
+	second, ok := bootstrapToken(db)
+	if !ok || second == "" || second == first {
+		t.Fatalf("new startup should get a fresh token, first=%q second=%q ok=%v", first, second, ok)
+	}
+	if _, err := store.CreateUser(db, "admin@example.com", "Admin", "h", true); err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+	if token, ok := bootstrapToken(db); ok || token != "" {
+		t.Fatalf("existing users should not get bootstrap token: token=%q ok=%v", token, ok)
+	}
+}
+
 // waitForClose returns true once the hub goroutine signals done, false if the
 // bounded timeout expires first (so shutdown can't hang on a stuck goroutine).
 func TestWaitForClose(t *testing.T) {

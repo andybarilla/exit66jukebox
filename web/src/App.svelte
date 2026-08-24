@@ -28,14 +28,18 @@
   let volume = $state(68);
   let showSignup = $state(false);
   let showAuth = $state(false);
+  let bootstrapToken = $state('');
   let adminPanelOpen = $state(false);
   let currentPath = $state(window.location.pathname);
   const onInvitePath = $derived(currentPath.startsWith('/invite/'));
   const onResetPath = $derived(currentPath.startsWith('/reset-password/'));
   const onVerifyPath = $derived(currentPath.startsWith('/verify/'));
   const onAdminPath = $derived(currentPath === '/admin');
+  // !bootstrapToken: a recovery link must not dead-end on an empty profile
+  // picker. Unreachable through the API, but an operator with sqlite3 can leave
+  // an instance in household_profiles with zero users.
   const needsProfileSelection = $derived(
-    s.config.requiresProfile && !onAdminPath && !s.me?.is_passwordless_profile
+    s.config.requiresProfile && !onAdminPath && !bootstrapToken && !s.me?.is_passwordless_profile
   );
   const needsAccountLogin = $derived(
     s.config.requiresLogin && (!s.me || s.me?.is_passwordless_profile)
@@ -143,6 +147,12 @@
   }
 
   onMount(async () => {
+    bootstrapToken = new URLSearchParams(window.location.search).get('bootstrap_token') || '';
+    // showAuth as well as showSignup: requiresLogin is only set in full_login
+    // mode, so a zero-user instance carrying the legacy guest_access flag
+    // (open_admin_locked) would otherwise drop the bootstrap link into the main
+    // app with no signup form.
+    if (bootstrapToken) showSignup = showAuth = true;
     // Lightweight auth/config check first; only run heavy loads once access is
     // granted (logged in or guest access on), so they never 401 on the gate.
     await s.bootstrap();
@@ -237,7 +247,7 @@
   <ProfilePicker onLoggedIn={afterLogin} />
 {:else if needsAccountLogin || showAuth}
   {#if showSignup}
-    <Signup onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />
+    <Signup {bootstrapToken} needsBootstrap={s.config.needsBootstrap} onLoggedIn={afterLogin} onSwitchToLogin={() => (showSignup = false)} />
   {:else}
     <Login canSignup={s.config.signupEnabled || s.config.needsBootstrap}
            onSwitchToSignup={() => (showSignup = true)}

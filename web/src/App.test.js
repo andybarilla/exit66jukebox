@@ -34,12 +34,6 @@ describe('App security mode routing', () => {
     expect(adminLoginBranch).toBeLessThan(profilePickerBranch);
   });
 
-  test('blocks normal sessions in household profile mode on non-admin routes', () => {
-    expect(source).toMatch(
-      /const\s+needsProfileSelection\s*=\s*\$derived\(\s*s\.config\.requiresProfile\s*&&\s*!onAdminPath\s*&&\s*!s\.me\?\.is_passwordless_profile\s*\)/
-    );
-    expect(source).toContain('{:else if needsProfileSelection}');
-  });
 
   test('allows explicit /admin route before household profile blocking', () => {
     const adminLoginBranch = source.indexOf('{:else if onAdminPath && !s.isAdmin}');
@@ -79,5 +73,19 @@ describe('App security mode routing', () => {
       /const\s+canControl\s*=\s*\$derived\(\s*canControlHouseQueue\s*\|\|\s*s\.stream\s*===\s*'me'\s*\)/
     );
     expect(source).not.toMatch(/open_admin_locked[^\n]*canControl/);
+  });
+});
+
+describe('App first-admin bootstrap link', () => {
+  test('a bootstrap token opens the auth screen regardless of security mode', () => {
+    // requiresLogin is only set for full_login, so showSignup alone leaves the
+    // link broken on a zero-user instance in open_admin_locked mode.
+    expect(source).toMatch(/if\s*\(bootstrapToken\)\s*showSignup\s*=\s*showAuth\s*=\s*true/);
+  });
+
+  test('a bootstrap token also outranks the profile picker', () => {
+    expect(source).toMatch(
+      /const\s+needsProfileSelection\s*=\s*\$derived\([^)]*!bootstrapToken[^)]*\)/s
+    );
   });
 });

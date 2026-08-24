@@ -231,16 +231,18 @@ func (s *Server) selectPasswordlessProfile(w http.ResponseWriter, r *http.Reques
 }
 
 type signupReq struct {
-	Email       string `json:"email"`
-	DisplayName string `json:"display_name"`
-	Password    string `json:"password"`
+	Email          string `json:"email"`
+	DisplayName    string `json:"display_name"`
+	Password       string `json:"password"`
+	BootstrapToken string `json:"bootstrap_token"`
 }
 
 const minPasswordLen = 8
 
-// signup creates an account. Rules: an empty user table always allows the signup
-// and makes that first account an admin (bootstrap); otherwise signup is allowed
-// only when the signup toggle is on, and the account is non-admin.
+// signup creates an account. Rules: on an empty user table the request must
+// carry the startup bootstrap token, and that first account is created as admin
+// through the atomic CreateFirstAdmin path; otherwise signup requires
+// full_login mode with the signup toggle on, and the account is non-admin.
 func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 	var req signupReq
 	if err := decodeJSON(r, &req); err != nil {
@@ -258,6 +260,19 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bootstrap := n == 0
+	if bootstrap {
+		// A caller that read an empty table can still lose the bootstrap to a
+		// concurrent winner, or find every account deleted under a claimed
+		// bootstrap. Both mean "already claimed", not "your token is wrong".
+		switch s.bootstrapTokenStatus(strings.TrimSpace(req.BootstrapToken)) {
+		case bootstrapClaimed:
+			writeErr(w, http.StatusConflict, "bootstrap already claimed")
+			return
+		case bootstrapInvalid:
+			writeErr(w, http.StatusForbidden, "valid bootstrap token required")
+			return
+		}
+	}
 	if !bootstrap && store.SecurityModeSetting(s.db) != store.SecurityModeFullLogin {
 		writeErr(w, http.StatusForbidden, "signup is available only in full_login mode")
 		return
@@ -295,11 +310,16 @@ func (s *Server) createSignupAccount(w http.ResponseWriter, r *http.Request, ema
 		writeJSON(w, http.StatusOK, map[string]any{"id": uid, "email": email, "is_admin": false, "email_verified": false})
 		return
 	}
-	uid, err := store.CreateUser(s.db, email, name, hash, true, true)
+	uid, err := store.CreateFirstAdmin(s.db, email, name, hash)
 	if err != nil {
+		if errors.Is(err, store.ErrBootstrapAlreadyClaimed) {
+			writeErr(w, http.StatusConflict, "bootstrap already claimed")
+			return
+		}
 		writeErr(w, http.StatusConflict, "email already registered")
 		return
 	}
+	s.markBootstrapClaimed()
 	if err := s.setSessionCookie(w, r, uid); err != nil {
 		writeErr(w, http.StatusInternalServerError, "session error")
 		return

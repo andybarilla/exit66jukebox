@@ -2,12 +2,17 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/andybarilla/exit66jukebox/internal/auth"
 )
 
 const PasswordlessPasswordHash = "passwordless"
+
+// ErrBootstrapAlreadyClaimed reports that CreateFirstAdmin lost the race: a user
+// row already existed, so no admin was inserted.
+var ErrBootstrapAlreadyClaimed = errors.New("bootstrap already claimed")
 
 // User is an account row. PasswordHash is the encoded pbkdf2 string from
 // internal/auth; this package never hashes or compares passwords itself.
@@ -47,6 +52,38 @@ func CreateUser(db *sql.DB, email, displayName, passwordHash string, isAdmin boo
 		email, displayName, passwordHash, boolToInt(isAdmin))
 	if err != nil {
 		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// CreateFirstAdmin inserts the bootstrap admin in a single statement, so
+// concurrent first-signup attempts can't both observe an empty table: the
+// INSERT ... SELECT ... WHERE NOT EXISTS makes exactly one of them affect a row
+// and the losers get ErrBootstrapAlreadyClaimed.
+//
+// is_passwordless_profile is deliberately not named here, and this is the one
+// writer in this file that does not call ensurePasswordlessProfileColumn:
+// schema.sql does not define that column and migrate() never adds it, so on a
+// fresh database it does not exist until some other writer's lazy ALTER runs.
+// Naming it would fail outright, and running the ALTER from here would put N
+// concurrent bootstrap attempts into exactly the write-lock contention the
+// atomic insert exists to avoid. The column's NOT NULL DEFAULT 0 covers the row
+// once the ALTER does land.
+func CreateFirstAdmin(db *sql.DB, email, displayName, passwordHash string) (int64, error) {
+	res, err := db.Exec(
+		`INSERT INTO user(email, display_name, password_hash, is_admin, created_at, email_verified_at)
+		 SELECT ?, ?, ?, 1, strftime('%s','now'), strftime('%s','now')
+		 WHERE NOT EXISTS (SELECT 1 FROM user)`,
+		email, displayName, passwordHash)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if rows == 0 {
+		return 0, ErrBootstrapAlreadyClaimed
 	}
 	return res.LastInsertId()
 }

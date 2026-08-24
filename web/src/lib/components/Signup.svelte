@@ -1,6 +1,6 @@
 <script>
   import { signup } from '../auth.js';
-  let { onLoggedIn, onSwitchToLogin } = $props();
+  let { onLoggedIn, onSwitchToLogin, bootstrapToken = '', needsBootstrap = false } = $props();
   let email = $state('');
   let displayName = $state('');
   let password = $state('');
@@ -12,7 +12,7 @@
     e.preventDefault();
     busy = true; error = ''; message = '';
     try {
-      const user = await signup(email, displayName, password);
+      const user = await signup(email, displayName, password, bootstrapToken);
       if (user.email_verified === false) {
         message = 'Check your email for a verification link before logging in.';
         return;
@@ -31,9 +31,10 @@
   <input type="email" placeholder="Email" bind:value={email} autocomplete="username" required />
   <input type="text" placeholder="Display name" bind:value={displayName} autocomplete="name" required />
   <input type="password" placeholder="Password" bind:value={password} autocomplete="new-password" required />
+  {#if needsBootstrap && !bootstrapToken}<p class="hint">First admin setup requires the bootstrap link from the server logs.</p>{/if}
   {#if error}<p class="err">{error}</p>{/if}
   {#if message}<p class="ok">{message}</p>{/if}
-  <button disabled={busy} type="submit">Create account</button>
+  <button disabled={busy || (needsBootstrap && !bootstrapToken)} type="submit">Create account</button>
   <button type="button" class="link" onclick={onSwitchToLogin}>Back to log in</button>
 </form>
 
@@ -46,5 +47,6 @@
   button[type="submit"]:disabled { opacity: 0.5; cursor: default; }
   .err { color: var(--status-danger); margin: 0; font-size: 0.875rem; }
   .ok { color: var(--status-success); margin: 0; font-size: 0.875rem; }
+  .hint { color: var(--text-muted); margin: 0; font-size: 0.875rem; }
   .link { background: none; border: none; color: var(--neon-cyan); cursor: pointer; font-family: var(--font-sans); font-size: 0.9rem; }
 </style>
