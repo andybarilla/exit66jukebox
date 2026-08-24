@@ -494,6 +494,9 @@ type streamBuilder struct {
 	signingSecret []byte
 	nowPlayers    []nowPlayer
 	enqueue       func(trackID, playedAt int64) error
+	// src overrides the encoder. Nil means ffmpeg; tests substitute a fake so
+	// the playback loop can be driven without spawning a process.
+	src broadcast.Source
 }
 
 // build wires one stream's bus, now-playing holder and hub. isHouse turns on
@@ -586,7 +589,11 @@ func (b *streamBuilder) build(streamID string, isHouse bool) *api.StreamPipeline
 		return src + "?sig=" + sig, true
 	}
 
-	hub := broadcast.NewHub(broadcast.FFmpegSource{}, next, b.silence)
+	var src broadcast.Source = broadcast.FFmpegSource{}
+	if b.src != nil {
+		src = b.src
+	}
+	hub := broadcast.NewHub(src, next, b.silence)
 	// Everything but house waits for a listener before pulling a track, so a
 	// shared stream nobody has tuned into spawns no ffmpeg.
 	hub.RequireListener = !isHouse
