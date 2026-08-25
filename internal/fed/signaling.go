@@ -23,21 +23,30 @@ type SignalMsg struct {
 	ICECandidate string `json:"ice,omitempty"`
 }
 
-// signalTimeout is how long Send waits for a peer to drain its mailbox. A peer
-// that is registered but slow to consume should not stall the sender's
-// negotiation beyond this.
+// signalTimeout bounds both ways a single signal can stall: how long Send waits
+// for a registered peer to drain its mailbox, and how long
+// WebRTCTransport.postSignal waits on the HTTP request to a remote peer. A peer
+// that is slow to consume, or a session that has gone quiet, should not stall
+// the sender's negotiation beyond this.
 const signalTimeout = 5 * time.Second
 
 // signalMailboxSize bounds per-peer buffered messages so a stalled peer cannot
 // accumulate unbounded signaling traffic.
 const signalMailboxSize = 64
 
-// Signaler relays WebRTC signaling messages between authenticated peers. The
-// hub runs one Signaler and routes messages from a connected peer to another
-// connected peer's mailbox; each peer's WebRTC transport drains its mailbox.
-// Messages are only delivered to peers that have been registered (via
-// Register), which for the hub means peers with a live authenticated session —
-// preserving the property that signaling never reaches an arbitrary host.
+// maxSignalBody bounds a relayed SignalMsg. The route is reachable by anything
+// holding a federation session, and a signal is never large.
+const maxSignalBody = 64 << 10
+
+// Signaler holds the WebRTC signaling mailboxes of this process. Every instance
+// running the peer role has one; its WebRTC transport registers a single mailbox
+// under the instance's own peer id (startedReader) and drains it. Messages
+// arrive either in-process or, from another instance, through the
+// WithSignalRelay endpoint on this instance's federation session.
+//
+// Send only ever delivers to a registered mailbox, so a message for an id this
+// process does not host is refused rather than forwarded — signaling never
+// reaches an arbitrary host.
 type Signaler struct {
 	mu        sync.Mutex
 	mailboxes map[string]chan SignalMsg
@@ -82,10 +91,13 @@ func (s *Signaler) isRegistered(peerID string) bool {
 	return ok
 }
 
-// Send delivers msg to its recipient's mailbox. It returns false (without
-// blocking long) if the recipient is unknown or its mailbox is full/unreachable
-// — callers treat that as a negotiation failure and fall back to the next
-// transport tier.
+// Send delivers msg to its recipient's mailbox, and reports whether it landed.
+// An unknown recipient is refused immediately; a known but full mailbox blocks
+// for up to signalTimeout before Send gives up. Callers treat false as a
+// negotiation failure and fall back to the next transport tier — which is why
+// WebRTCTransport.sendSignal checks isRegistered first rather than reading this
+// return value, so an absent recipient goes to the wire without waiting out a
+// full one.
 func (s *Signaler) Send(msg SignalMsg) bool {
 	s.mu.Lock()
 	ch, ok := s.mailboxes[msg.To]
@@ -104,10 +116,17 @@ func (s *Signaler) Send(msg SignalMsg) bool {
 }
 
 // WithSignalRelay mounts the WebRTC signaling relay endpoint onto next and
-// returns the composed handler. The same *Signaler must be the one the Manager
-// uses (so the recipient's mailbox, registered by the local transport, is the
-// one this handler delivers into). The route accepts a SignalMsg addressed via
-// the path value "to" and relays it to that peer's mailbox.
+// returns the composed handler. It is layered onto the session handler of both
+// the hub and the peer role, and s must be the same *Signaler the Manager uses,
+// so the recipient's mailbox — registered by this process's transport — is the
+// one this handler delivers into. The route accepts a SignalMsg addressed via
+// the path value "to" and relays it to that mailbox.
+//
+// On a peer session the only mailbox that exists is the peer's own id, so this
+// is in practice "deliver to me": it is how a remote peer's offer/answer/ICE
+// (posted by WebRTCTransport.postSignal) crosses the process boundary. A hub
+// hosts no mailboxes at all — it creates no WebRTC transport — so the mount
+// there currently answers 503 for every recipient (issue #158).
 func WithSignalRelay(s *Signaler, next http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("POST /fed/signal/{to}", s.signalRelayHandler())
@@ -119,9 +138,12 @@ func WithSignalRelay(s *Signaler, next http.Handler) http.Handler {
 
 // signalRelayHandler returns an http.Handler that accepts a SignalMsg addressed
 // to a peer (the path value "to") and relays it through s. The sender's id is
-// taken from the "from" query value (set by the hub relay after it has
-// authenticated the session); the body overrides it. This handler is mounted on
-// the hub session handler so any connected peer can signal any other.
+// taken from the body, falling back to the "from" query value. It is served only
+// over a federation session, so reaching it already required the token
+// handshake. From is not verified here and a sender may claim any id in it; what
+// refuses a forged one is routeToDial, which matches it against the peer the
+// negotiation belongs to. This handler only decides which mailbox the message
+// lands in, which the path already fixes.
 func (s *Signaler) signalRelayHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		to := r.PathValue("to")
@@ -130,7 +152,11 @@ func (s *Signaler) signalRelayHandler() http.Handler {
 			return
 		}
 		var msg SignalMsg
-		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		// A SignalMsg is an SDP or a single ICE candidate; 64 KiB is well clear of
+		// both. Unbounded decoding here would let one request hold a goroutine on
+		// an arbitrarily long body, and Send can then park it for signalTimeout on
+		// a full mailbox, so the two compound.
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSignalBody)).Decode(&msg); err != nil {
 			http.Error(w, "bad signal", http.StatusBadRequest)
 			return
 		}
@@ -147,26 +173,5 @@ func (s *Signaler) signalRelayHandler() http.Handler {
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
-	})
-}
-
-// signalPollHandler lets a peer pull its inbound messages one at a time over
-// HTTP. Each call blocks until a message arrives or the context is done. This
-// is the hubless fallback path (a peer role with no hub still needs to exchange
-// signaling over a direct yamux session; the long-poll fits that model).
-func (s *Signaler) signalPollHandler(peerID string) http.Handler {
-	ch := s.Register(peerID)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case msg, ok := <-ch:
-			if !ok {
-				http.Error(w, "mailbox closed", http.StatusServiceUnavailable)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(msg)
-		case <-r.Context().Done():
-			http.Error(w, "timeout", http.StatusServiceUnavailable)
-		}
 	})
 }

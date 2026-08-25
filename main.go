@@ -360,7 +360,7 @@ func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg
 		PeerID:        s.PeerID,
 		HubAddr:       s.HubAddr, // member: hub to dial
 		HubListen:     s.Listen,  // hub/peer: local listen addr
-		MemberHandler: fed.WithCapsRoute(caps, fed.AppRoutes(app)),
+		MemberHandler: fed.MemberSessionHandler(caps, app),
 		Registry:      reg,
 		DB:            db,
 		Caps:          caps,
@@ -374,15 +374,15 @@ func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg
 		relay := fed.NewRelay(reg, db)
 		relay.SetSelf(s.PeerID)
 		fm.Relay = relay
-		fm.HubHandler = fed.WithCapsRoute(caps, fed.WithSignalRelay(signaler, relay.Routes()))
+		fm.HubHandler = fed.HubSessionHandler(caps, signaler, relay)
 	case "peer":
-		fm.PeerHandler = fed.WithCapsRoute(caps, fed.PeerRoutes(db, app))
+		fm.PeerHandler = fed.PeerSessionHandler(caps, signaler, db, app)
 		// Direct P2P (WebRTC) transport: NAT-traversing audio path that bypasses
 		// the hub when both peers advertise support and ICE connects. Disabled by
 		// setting; falls back to the yamux-direct then hub-relay tiers on any
 		// failure, so playback is never broken.
 		if s.DirectP2P {
-			fm.WebRTC = fed.NewWebRTCTransport(s.PeerID, fedICEServers(s), signaler, nil)
+			fm.WebRTC = fed.NewWebRTCTransport(s.PeerID, fedICEServers(s), signaler, reg, nil)
 		}
 	}
 	return fm
