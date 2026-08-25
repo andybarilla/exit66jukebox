@@ -38,14 +38,16 @@ func TestSignalerRejectsUnregisteredRecipient(t *testing.T) {
 	}
 }
 
-// TestSignalRelayHandlerAcceptsAndRelays verifies the HTTP handler mounted on
-// the hub session: a POST with a JSON body is relayed to the recipient mailbox.
+// TestSignalRelayHandlerAcceptsAndRelays verifies local delivery: a POST with a
+// JSON body lands in the recipient's mailbox in this process. The nil forwarder
+// is the peer-session shape; the hub's onward half is in
+// webrtc_hub_relay_test.go.
 func TestSignalRelayHandlerAcceptsAndRelays(t *testing.T) {
 	s := NewSignaler()
 	mailbox := s.Register("bob")
 	defer s.Unregister("bob", mailbox)
 
-	h := WithSignalRelay(s, http.NewServeMux())
+	h := WithSignalRelay(s, nil, http.NewServeMux())
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/fed/signal/bob", strings.NewReader(
 		`{"from":"alice","to":"bob","type":"ice","ice":"candidate:..."}`))
@@ -64,11 +66,12 @@ func TestSignalRelayHandlerAcceptsAndRelays(t *testing.T) {
 	}
 }
 
-// TestSignalRelayHandlerRejectsOfflineRecipient verifies the handler returns
-// 503 when the recipient peer is not registered.
+// TestSignalRelayHandlerRejectsOfflineRecipient verifies a relay with no
+// forwarder returns 503 when the recipient peer is not registered here. That is
+// every composition but the hub's.
 func TestSignalRelayHandlerRejectsOfflineRecipient(t *testing.T) {
 	s := NewSignaler()
-	h := WithSignalRelay(s, http.NewServeMux())
+	h := WithSignalRelay(s, nil, http.NewServeMux())
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/fed/signal/ghost", strings.NewReader(`{}`))
 	h.ServeHTTP(rec, req)
@@ -83,7 +86,7 @@ func TestSignalRelayHandlerRejectsOfflineRecipient(t *testing.T) {
 func TestSignalRelayRejectsOversizedBody(t *testing.T) {
 	s := NewSignaler()
 	ch := s.Register("bob")
-	h := WithSignalRelay(s, http.NewServeMux())
+	h := WithSignalRelay(s, nil, http.NewServeMux())
 
 	body := `{"type":"offer","sdp":"` + strings.Repeat("A", maxSignalBody+1) + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/fed/signal/bob", strings.NewReader(body))
@@ -106,6 +109,42 @@ func TestSignalRelayRejectsOversizedBody(t *testing.T) {
 		strings.NewReader(`{"type":"offer","sdp":"v=0"}`)))
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("normal signal status = %d, want 202", rec.Code)
+	}
+	if msg := <-ch; msg.SDP != "v=0" {
+		t.Fatalf("relayed SDP = %q", msg.SDP)
+	}
+}
+
+// TestSignalRelayRefusesBodyRecipientMismatch keeps the gate and the forward on
+// one routing key. The handler checks isRegistered against the path value and
+// the hub re-addresses the forward from the message; a body naming someone else
+// would be two sources of truth for the same decision, which is how a bypass
+// appears later even though neither source is wrong today.
+func TestSignalRelayRefusesBodyRecipientMismatch(t *testing.T) {
+	s := NewSignaler()
+	ch := s.Register("bob")
+	defer s.Unregister("bob", ch)
+	h := WithSignalRelay(s, nil, http.NewServeMux())
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/bob",
+		strings.NewReader(`{"to":"carol","type":"offer"}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: the body named carol and the path named bob", rec.Code)
+	}
+	select {
+	case msg := <-ch:
+		t.Fatalf("a mismatched signal was delivered to bob anyway: %+v", msg)
+	default:
+	}
+
+	// Positive control: the same body agreeing with the path is accepted, so the
+	// 400 above is the mismatch check rather than a broken route.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/bob",
+		strings.NewReader(`{"to":"bob","type":"offer","sdp":"v=0"}`)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("matching signal status = %d, want 202", rec.Code)
 	}
 	if msg := <-ch; msg.SDP != "v=0" {
 		t.Fatalf("relayed SDP = %q", msg.SDP)

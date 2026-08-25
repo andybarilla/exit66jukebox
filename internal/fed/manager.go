@@ -256,7 +256,8 @@ func (m *Manager) learnCaps(peer *Peer) {
 }
 
 // serveHubConn performs the handshake, registers the peer, and serves HubHandler
-// over the session until it closes.
+// over the session until it closes, tagged with the peer id that session belongs
+// to.
 func (m *Manager) serveHubConn(conn net.Conn) {
 	p, err := acceptAndRegister(conn, m.Token, m.Registry)
 	if err != nil {
@@ -264,7 +265,10 @@ func (m *Manager) serveHubConn(conn net.Conn) {
 	}
 	defer m.Registry.remove(p.ID, p)
 	if m.HubHandler != nil {
-		_ = http.Serve(p.Session, m.HubHandler)
+		// One HubHandler serves every member session, so the id of the peer on
+		// the far end can only come from here. The signaling relay stamps it into
+		// the messages it forwards; without it those are refused (#158).
+		_ = http.Serve(p.Session, WithSessionPeer(p.ID, m.HubHandler))
 	} else {
 		<-p.Session.CloseChan()
 	}

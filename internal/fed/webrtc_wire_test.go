@@ -44,7 +44,7 @@ func newSignalProcess(t *testing.T, peerID string) *signalProcess {
 	p := &signalProcess{peerID: peerID, signaler: NewSignaler(), reg: NewRegistry()}
 	session := WithCapsRoute(
 		Capabilities{DirectWebRTC: true},
-		WithSignalRelay(p.signaler, PeerRoutes(nil, nil)),
+		WithSignalRelay(p.signaler, nil, PeerRoutes(nil, nil)),
 	)
 	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/fed/signal/") {
@@ -240,15 +240,16 @@ func TestWebRTCResolverStreamsAudioAcrossProcesses(t *testing.T) {
 	}
 }
 
-// TestWebRTCDialFailsWhenPeerHasNoSession pins the other half of postSignal: a
-// peer that is not in the registry has no session to signal over, so Dial fails
-// and the resolver falls back rather than hanging until webrtcSetupTimeout.
-// This is the hub-only-NAT case that #158 covers.
+// TestWebRTCDialFailsWhenPeerHasNoSession pins the last resort of postSignal: no
+// session to the recipient and no hub session either leaves no path at all, so
+// Dial fails and the resolver falls back rather than hanging until
+// webrtcSetupTimeout. With a hub the same setup negotiates instead — that is
+// TestWebRTCNegotiatesThroughHubWithNoDirectSession.
 func TestWebRTCDialFailsWhenPeerHasNoSession(t *testing.T) {
 	alice := newSignalProcess(t, "alice")
 	bob := newSignalProcess(t, "bob")
 	bob.transport.Listen(context.Background(), func(*dataChannelConn) {})
-	// alice deliberately does not know bob.
+	// alice deliberately knows neither bob nor a hub.
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
