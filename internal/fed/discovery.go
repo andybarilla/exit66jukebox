@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net"
 	"strings"
 	"time"
@@ -24,29 +25,55 @@ func StartLANDiscovery(ctx context.Context, db *sql.DB, selfID, displayName, add
 	if db == nil || announcement.PeerID == "" || announcement.Address == "" {
 		return
 	}
+	warnAboutApprovalsDiscoveryMayHaveReset(db)
 	go broadcastLANPeer(ctx, announcement)
 	go listenForLANPeers(ctx, db, announcement.PeerID)
 }
 
-func parseLANPeerAnnouncement(data []byte, sender *net.UDPAddr) (store.FederationPeer, bool) {
+// warnAboutApprovalsDiscoveryMayHaveReset names #187's damage on the way past,
+// because it is deliberately not repaired. The clobber overwrote every field
+// that told an approved peer from a never-approved one — status, the token flag
+// and manual — so a migration that re-approved anything would be guessing, and
+// a guess in a trust decision fails in the wrong direction.
+//
+// The count is a hint, not a diagnosis: a peer that has genuinely never been
+// approved matches this shape too. It is the closest honest predicate there is,
+// which is the point.
+func warnAboutApprovalsDiscoveryMayHaveReset(db *sql.DB) {
+	count, err := store.CountUnauthenticatedSeenFederationPeers(db)
+	if err != nil || count == 0 {
+		return
+	}
+	log.Printf("fed: %d discovered peer(s) sit unauthenticated. Before #187 a LAN announcement reset an approved peer to pending every 30s, so a peer you did approve may be among them; approve it once more and it will hold. Approval is not repaired automatically because the reset erased what distinguished an approved peer from a new one.", count)
+}
+
+func parseLANPeerAnnouncement(data []byte, sender *net.UDPAddr) (lanPeerAnnouncement, bool) {
 	var msg lanPeerAnnouncement
 	if err := json.Unmarshal(data, &msg); err != nil {
-		return store.FederationPeer{}, false
+		return lanPeerAnnouncement{}, false
 	}
 	address, ok := lanDialAddress(strings.TrimSpace(msg.Address), sender)
 	if !ok {
-		return store.FederationPeer{}, false
+		return lanPeerAnnouncement{}, false
 	}
-	peer := store.FederationPeer{
-		PeerID:      strings.TrimSpace(msg.PeerID),
-		DisplayName: strings.TrimSpace(msg.DisplayName),
-		Address:     address,
-		Status:      store.PeerStatusPending,
+	msg.PeerID = strings.TrimSpace(msg.PeerID)
+	msg.DisplayName = strings.TrimSpace(msg.DisplayName)
+	msg.Address = address
+	if msg.PeerID == "" {
+		return lanPeerAnnouncement{}, false
 	}
-	if peer.PeerID == "" {
-		return store.FederationPeer{}, false
+	return msg, true
+}
+
+// handleLANPeerAnnouncement files one announcement as a sighting. A sighting
+// only ever learns where a peer is; it carries no status, so no amount of
+// announcing can walk an operator's approval back (#187).
+func handleLANPeerAnnouncement(db *sql.DB, data []byte, sender *net.UDPAddr, selfID string) {
+	msg, ok := parseLANPeerAnnouncement(data, sender)
+	if !ok || msg.PeerID == selfID {
+		return
 	}
-	return peer, true
+	_ = store.RecordFederationPeerSighting(db, msg.PeerID, msg.DisplayName, msg.Address)
 }
 
 func lanDialAddress(address string, sender *net.UDPAddr) (string, bool) {
@@ -125,10 +152,6 @@ func listenForLANPeers(ctx context.Context, db *sql.DB, selfID string) {
 				continue
 			}
 		}
-		peer, ok := parseLANPeerAnnouncement(buf[:n], sender)
-		if !ok || peer.PeerID == selfID {
-			continue
-		}
-		_ = store.SaveFederationPeer(db, peer)
+		handleLANPeerAnnouncement(db, buf[:n], sender, selfID)
 	}
 }

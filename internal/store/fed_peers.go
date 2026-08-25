@@ -111,6 +111,17 @@ func ListFederationPeers(db *sql.DB, status string) ([]FederationPeer, error) {
 	return peers, rows.Err()
 }
 
+// CountUnauthenticatedSeenFederationPeers counts peers that have been seen on
+// the LAN but have never completed a handshake. That is the closest shape there
+// is to a row #187 reset, and it is deliberately not proof: a peer that was
+// never approved looks identical, which is exactly why the damage cannot be
+// repaired automatically. Callers must word what they say about it as "may".
+func CountUnauthenticatedSeenFederationPeers(db *sql.DB) (int, error) {
+	var count int
+	err := db.QueryRow(`SELECT COUNT(*) FROM federation_peer WHERE token_authenticated = 0 AND last_seen_at > 0`).Scan(&count)
+	return count, err
+}
+
 func MarkFederationPeerAuthenticated(db *sql.DB, peerID string) error {
 	peerID = strings.TrimSpace(peerID)
 	if peerID == "" {
