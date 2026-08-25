@@ -209,3 +209,29 @@ func TestStartStationOnUnknownStreamCreatesNothing(t *testing.T) {
 		t.Fatal("StartStation created the stream row")
 	}
 }
+
+// A station on a personal stream fills from the whole library: another user's
+// private listening neither shrinks the candidate pool nor shapes the fill.
+// The station's own DiscoverOpts.PersonalStream only feeds the last_played
+// ranking, which a random fill never reads, so it has no fill this test could
+// distinguish — see the comment on refill.
+func TestStationOnPersonalStreamIgnoresAnotherUsersHistory(t *testing.T) {
+	db, _ := store.Open(":memory:")
+	defer db.Close()
+	jb := New(db, Config{HistoryWindow: 5})
+	mine, theirs := store.PersonalStreamID(1), store.PersonalStreamID(2)
+	store.EnsurePrivateStream(db, mine)
+	store.EnsurePrivateStream(db, theirs)
+	id, _ := store.UpsertTrack(db,
+		model.Track{Path: "/m/only.mp3", Title: "Only", Genre: "Rock"}, "Band", "", "Album")
+	// The one candidate track was just played on the other user's stream.
+	db.Exec(`INSERT INTO history(stream_id, track_id, played_at) VALUES(?,?,9999)`, theirs, id)
+
+	if err := jb.StartStation(mine, "Rock", 3, 10); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	q, _ := jb.Queue(mine)
+	if len(q) != 1 || q[0].Track.ID != id {
+		t.Fatalf("queue = %+v, want the one Rock track queued", q)
+	}
+}

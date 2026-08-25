@@ -9,11 +9,16 @@ import (
 )
 
 func (s *Server) discover(w http.ResponseWriter, r *http.Request, orderBy string) {
+	// The caller's own personal stream widens what counts as "recently played"
+	// for the rediscover ranking; a caller with none ranks on shared streams
+	// alone, which is the right answer rather than a degraded one.
+	mine, _ := s.callerPersonalStream(r)
 	list, err := store.DiscoverTracks(s.db, store.DiscoverOpts{
-		Genre:   r.URL.Query().Get("genre"),
-		OrderBy: orderBy,
-		Limit:   queryInt(r, "limit", 50),
-		Offset:  queryInt(r, "offset", 0),
+		Genre:          r.URL.Query().Get("genre"),
+		OrderBy:        orderBy,
+		PersonalStream: mine,
+		Limit:          queryInt(r, "limit", 50),
+		Offset:         queryInt(r, "offset", 0),
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

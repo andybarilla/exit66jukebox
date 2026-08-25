@@ -153,12 +153,22 @@ func (j *Jukebox) refill(streamID string) {
 	if err != nil || n >= st.Threshold {
 		return
 	}
+	// A station's "caller" is its own stream: a personal stream's station
+	// counts that stream's own plays alongside the shared ones, a shared
+	// stream's counts the shared ones only. This only feeds the last_played
+	// ranking, which a random fill does not read, so it changes nothing today
+	// and stays correct if the fill order ever ranks.
+	personal := ""
+	if store.IsPersonalStreamID(streamID) {
+		personal = streamID
+	}
 	tracks, err := store.DiscoverTracks(j.db, store.DiscoverOpts{
-		Genre:         st.Genre,
-		OrderBy:       "random",
-		ExcludeStream: streamID,
-		Window:        j.cfg.HistoryWindow,
-		Limit:         st.Batch,
+		Genre:          st.Genre,
+		OrderBy:        "random",
+		ExcludeStream:  streamID,
+		Window:         j.cfg.HistoryWindow,
+		PersonalStream: personal,
+		Limit:          st.Batch,
 	})
 	if err != nil {
 		return

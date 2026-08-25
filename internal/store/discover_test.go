@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"slices"
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
@@ -159,5 +160,102 @@ func TestUpsertStampsAddedAt(t *testing.T) {
 	}
 	if addedAt <= 0 {
 		t.Fatalf("expected added_at to be stamped on insert, got %d", addedAt)
+	}
+}
+
+// play records a play of track on stream at played_at.
+func play(t *testing.T, db *sql.DB, streamID string, trackID int64, at int64) {
+	t.Helper()
+	if _, err := db.Exec(
+		`INSERT INTO history(stream_id, track_id, played_at) VALUES(?,?,?)`,
+		streamID, trackID, at); err != nil {
+		t.Fatalf("history %s/%d: %v", streamID, trackID, err)
+	}
+}
+
+// titles is the discovered order, which is what the ranking tests assert on.
+func titles(got []model.Track) []string {
+	out := make([]string, len(got))
+	for i, tr := range got {
+		out[i] = tr.Title
+	}
+	return out
+}
+
+func seedRankingFixture(t *testing.T, db *sql.DB) (alice, bob string) {
+	t.Helper()
+	if err := EnsureSharedStream(db, "house", "House"); err != nil {
+		t.Fatalf("house: %v", err)
+	}
+	alice, bob = PersonalStreamID(1), PersonalStreamID(2)
+	for _, id := range []string{alice, bob} {
+		if err := EnsurePrivateStream(db, id); err != nil {
+			t.Fatalf("private %s: %v", id, err)
+		}
+	}
+	// Three never-played tracks at play_count 0: rediscover falls through to
+	// last_played, so any play at all decides the order.
+	seedTrack(t, db, "/m/a.mp3", "Alpha", "Rock", 0)
+	seedTrack(t, db, "/m/b.mp3", "Bravo", "Rock", 0)
+	seedTrack(t, db, "/m/c.mp3", "Charlie", "Rock", 0)
+	return alice, bob
+}
+
+func rediscoverTitles(t *testing.T, db *sql.DB, personal string) []string {
+	t.Helper()
+	got, err := DiscoverTracks(db, DiscoverOpts{
+		OrderBy: "rediscover", PersonalStream: personal, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	return titles(got)
+}
+
+func TestRediscoverIgnoresAnotherUsersPersonalStream(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+	alice, bob := seedRankingFixture(t, db)
+	var bravo int64
+	db.QueryRow(`SELECT id FROM track WHERE title='Bravo'`).Scan(&bravo)
+	play(t, db, bob, bravo, 9999)
+
+	// Alice never heard it, so her ranking is the natural order.
+	if got := rediscoverTitles(t, db, alice); !slices.Equal(got, []string{"Alpha", "Bravo", "Charlie"}) {
+		t.Fatalf("alice order = %v, want natural order unaffected by bob's private play", got)
+	}
+	// Bob did, so it sinks for him.
+	if got := rediscoverTitles(t, db, bob); !slices.Equal(got, []string{"Alpha", "Charlie", "Bravo"}) {
+		t.Fatalf("bob order = %v, want his own play to demote Bravo", got)
+	}
+}
+
+func TestRediscoverCountsSharedStreamPlaysForEveryone(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+	alice, bob := seedRankingFixture(t, db)
+	var bravo int64
+	db.QueryRow(`SELECT id FROM track WHERE title='Bravo'`).Scan(&bravo)
+	play(t, db, "house", bravo, 9999)
+
+	for name, personal := range map[string]string{"alice": alice, "bob": bob, "no personal stream": ""} {
+		if got := rediscoverTitles(t, db, personal); !slices.Equal(got, []string{"Alpha", "Charlie", "Bravo"}) {
+			t.Fatalf("%s order = %v, want the house play to demote Bravo", name, got)
+		}
+	}
+}
+
+func TestRediscoverWithNoPersonalStreamSeesSharedStreamsOnly(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+	_, bob := seedRankingFixture(t, db)
+	var bravo, charlie int64
+	db.QueryRow(`SELECT id FROM track WHERE title='Bravo'`).Scan(&bravo)
+	db.QueryRow(`SELECT id FROM track WHERE title='Charlie'`).Scan(&charlie)
+	play(t, db, bob, bravo, 9999)    // private: never counts
+	play(t, db, "house", charlie, 5) // shared: always counts
+
+	if got := rediscoverTitles(t, db, ""); !slices.Equal(got, []string{"Alpha", "Bravo", "Charlie"}) {
+		t.Fatalf("order = %v, want only the house play to rank", got)
 	}
 }

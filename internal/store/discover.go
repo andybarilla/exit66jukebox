@@ -13,7 +13,12 @@ type DiscoverOpts struct {
 	OrderBy       string // "rediscover" | "recent" | "random"
 	ExcludeStream string // "" = no exclusion; otherwise skip this stream's recent history
 	Window        int    // size of the recent-history window for ExcludeStream
-	Limit, Offset int
+	// PersonalStream is the caller's own personal stream id, "" when the caller
+	// has none (the open security modes, or an unauthenticated caller). It only
+	// widens which plays count towards last_played; nobody else's personal
+	// stream ever does.
+	PersonalStream string
+	Limit, Offset  int
 }
 
 // GenreCount is a genre and how many tracks carry it.
@@ -23,7 +28,10 @@ type GenreCount struct {
 }
 
 // DiscoverTracks ranks/filters tracks by play stats for the discovery surfaces.
-// last_played is MAX(history.played_at) across all streams (0 = never played).
+// last_played is MAX(history.played_at) over the streams the caller can be said
+// to have heard — every shared stream, plus opts.PersonalStream when they have
+// one (0 = never played). Another user's personal stream never counts, so one
+// listener's private play cannot shape anyone else's rediscover ranking (#151).
 func DiscoverTracks(db *sql.DB, opts DiscoverOpts) ([]model.Track, error) {
 	var order string
 	switch opts.OrderBy {
@@ -35,7 +43,10 @@ func DiscoverTracks(db *sql.DB, opts DiscoverOpts) ([]model.Track, error) {
 		order = "t.play_count ASC, last_played ASC, t.id ASC"
 	}
 
-	args := []any{}
+	// The last_played subquery is in the SELECT list, so its args come first.
+	// An empty PersonalStream matches no stream row, leaving shared streams
+	// only — the right answer for a caller with no personal stream.
+	args := []any{KindShared, opts.PersonalStream}
 	where := "WHERE " + visibleTrackPredicate
 	if opts.Genre != "" {
 		where += " AND t.genre = ?"
@@ -58,7 +69,9 @@ func DiscoverTracks(db *sql.DB, opts DiscoverOpts) ([]model.Track, error) {
 	q := fmt.Sprintf(`
 		SELECT t.id, t.title, t.artist_id, t.album_id, t.track_no, t.genre,
 		       t.duration, t.play_count,
-		       coalesce((SELECT MAX(h.played_at) FROM history h WHERE h.track_id = t.id), 0) AS last_played
+		       coalesce((SELECT MAX(h.played_at) FROM history h
+		                  JOIN stream s ON s.id = h.stream_id
+		                  WHERE h.track_id = t.id AND (s.kind = ? OR s.id = ?)), 0) AS last_played
 		FROM track t
 		%s
 		ORDER BY %s
