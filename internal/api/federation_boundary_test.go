@@ -39,7 +39,7 @@ func fedHandlers(srv *Server, db *sql.DB) map[string]http.Handler {
 	caps := fed.Capabilities{DirectWebRTC: true}
 	relay := fed.NewRelay(fed.NewRegistry(), db)
 	return map[string]http.Handler{
-		"member": fed.MemberSessionHandler(caps, srv.Handler()),
+		"member": fed.MemberSessionHandler(caps, fed.NewSignaler(), srv.Handler()),
 		"peer":   fed.PeerSessionHandler(caps, fed.NewSignaler(), db, "self", srv.Handler()),
 		"hub":    fed.HubSessionHandler(caps, fed.NewSignaler(), relay),
 	}
@@ -164,6 +164,29 @@ func TestFederationSessionKeepsFedRoutes(t *testing.T) {
 	}
 }
 
+// TestMemberSessionCarriesTheSignalRelay pins the composition the hub actually
+// forwards over. A hub relays a signal through reg.Get(to).Client, which for a
+// member is a SessionClient on the session that member serves MemberHandler
+// over (runPeer -> runMember) — so if this route is missing there, the forward
+// 404s and hub-relayed signaling (#158) silently does not work, however green
+// the fed package's own tests are. It shipped that way once.
+//
+// 503 rather than 202 because this signaler hosts no mailbox for "someone", and
+// a member passes no forwarder. 404 is the regression.
+func TestMemberSessionCarriesTheSignalRelay(t *testing.T) {
+	srv, db := newTestServer(t)
+	h := fedHandlers(srv, db)["member"]
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/someone", strings.NewReader(`{"type":"offer"}`)))
+	if rec.Code == http.StatusNotFound {
+		t.Fatal("POST /fed/signal/{to} is not mounted on the member session; a hub cannot forward a signal to it")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST /fed/signal/someone on the member = %d, want 503", rec.Code)
+	}
+}
+
 // TestHubSessionServesNoApplicationRoutes pins the third composition. The hub
 // mounts the relay endpoints and the signaling relay and nothing of the
 // application — not even the one route the peer and member sessions allowlist.
@@ -193,11 +216,18 @@ func TestHubSessionServesNoApplicationRoutes(t *testing.T) {
 	if rec.Code == http.StatusNotFound {
 		t.Fatal("GET /fed/audio/{peer}/{id} is not mounted on the hub session")
 	}
-	// And the signaling relay, which the hub composition also carries.
+	// And the signaling relay, which the hub composition also carries. The hub
+	// is the one composition whose relay forwards (#158), so it answers 403
+	// here rather than the 503 a non-forwarding relay gives: this request
+	// carries no session identity, and a hub that forwards is asserting who the
+	// message came from. A 503 would mean the forwarder went missing.
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/someone", strings.NewReader(`{"type":"offer"}`)))
 	if rec.Code == http.StatusNotFound {
 		t.Fatal("POST /fed/signal/{to} is not mounted on the hub session")
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("POST /fed/signal/someone on the hub = %d, want 403 for an unattributable relay request", rec.Code)
 	}
 }
 

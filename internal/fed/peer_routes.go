@@ -21,7 +21,7 @@ func PeerRoutes(db *sql.DB, selfPeerID string, app http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /fed/catalog", func(w http.ResponseWriter, r *http.Request) {
 		rows := []store.CatalogRow{}
-		if catalogVisible(db, selfPeerID, RequestPeerID(r)) {
+		if catalogVisible(db, selfPeerID, SessionPeer(r)) {
 			var err error
 			rows, err = store.ExportCatalog(db)
 			if err != nil {

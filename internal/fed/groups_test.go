@@ -68,8 +68,7 @@ func joinGroup(t *testing.T, db *sql.DB, name string, peers ...string) {
 func fetchPeerCatalog(t *testing.T, handler http.Handler, viewer string) []store.CatalogRow {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	req := WithPeerID(httptest.NewRequest(http.MethodGet, "/fed/catalog", nil), viewer)
-	handler.ServeHTTP(rec, req)
+	WithSessionPeer(viewer, handler).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fed/catalog", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("catalog status for %s = %d (%s)", viewer, rec.Code, rec.Body)
 	}
@@ -101,7 +100,7 @@ func TestPeerCatalogScopedToGroupButAudioIsNot(t *testing.T) {
 	// The peer just denied the catalog fetches audio anyway. Groups organise
 	// what peers see; they are not a playback boundary.
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, WithPeerID(httptest.NewRequest(http.MethodGet, "/api/tracks/5/audio", nil), "stranger"))
+	WithSessionPeer("stranger", handler).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tracks/5/audio", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("audio status for a peer outside every group = %d, want 200", rec.Code)
 	}
@@ -162,8 +161,7 @@ func pushCatalog(t *testing.T, relay *Relay, peer string, rows []store.CatalogRo
 func fetchMerged(t *testing.T, relay *Relay, viewer string) MergedCatalog {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	req := WithPeerID(httptest.NewRequest(http.MethodGet, "/fed/catalog/"+viewer+"/merged", nil), viewer)
-	relay.Routes().ServeHTTP(rec, req)
+	WithSessionPeer(viewer, relay.Routes()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fed/catalog/"+viewer+"/merged", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("merged status for %s = %d (%s)", viewer, rec.Code, rec.Body)
 	}
@@ -289,8 +287,7 @@ func TestHubMergedCatalogPrefersTheSessionPeerID(t *testing.T) {
 	pushCatalog(t, relay, "office", rowsFor("OfficeSong"))
 
 	rec := httptest.NewRecorder()
-	req := WithPeerID(httptest.NewRequest(http.MethodGet, "/fed/catalog/home/merged", nil), "stranger")
-	relay.Routes().ServeHTTP(rec, req)
+	WithSessionPeer("stranger", relay.Routes()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fed/catalog/home/merged", nil))
 
 	var merged MergedCatalog
 	if err := json.Unmarshal(rec.Body.Bytes(), &merged); err != nil {
@@ -335,7 +332,7 @@ func TestBothPeerSessionDirectionsScopeOnTheRemotePeer(t *testing.T) {
 		if err != nil {
 			return
 		}
-		_ = http.Serve(p.Session, withPeerID(home.PeerHandler, p.ID))
+		_ = http.Serve(p.Session, WithSessionPeer(p.ID, home.PeerHandler))
 	}()
 	inbound := dialAsPeer(t, ln.Addr().String(), "stranger")
 	if rows := catalogOverEventually(t, inbound); len(rows) != 0 {

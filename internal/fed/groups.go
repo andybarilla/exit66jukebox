@@ -1,10 +1,8 @@
 package fed
 
 import (
-	"context"
 	"database/sql"
 	"log"
-	"net/http"
 
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
@@ -27,31 +25,10 @@ import (
 //
 // Both surfaces fail CLOSED on a request that carries no session identity: once
 // groups exist an untagged request shares no group with anyone, so it discovers
-// nothing. Production always tags (servePeerConn, dialPeer, serveHubConn), so
-// this only matters if a future path forgets to.
-
-type peerIDKey struct{}
-
-// WithPeerID tags r's context with the id the remote end claimed at the session
-// handshake. The federation handler is built once per process but served over
-// many sessions, so the requesting peer's identity can only arrive per request.
-func WithPeerID(r *http.Request, peerID string) *http.Request {
-	return r.WithContext(context.WithValue(r.Context(), peerIDKey{}, peerID))
-}
-
-// RequestPeerID returns the peer id tagged by WithPeerID, or "" when the
-// request did not arrive over an identified session.
-func RequestPeerID(r *http.Request) string {
-	id, _ := r.Context().Value(peerIDKey{}).(string)
-	return id
-}
-
-// withPeerID wraps h so every request it serves carries peerID.
-func withPeerID(h http.Handler, peerID string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.ServeHTTP(w, WithPeerID(r, peerID))
-	})
-}
+// nothing. The requesting peer's id comes from SessionPeer — the same per-session
+// tag #158 stamps onto forwarded signals, not a second one — and production
+// always applies it (servePeerConn, dialPeer, serveHubConn), so failing closed
+// only matters if a future path forgets to.
 
 // catalogVisible reports whether viewer may discover owner's catalog. A nil db
 // means no group storage is attached (tests, and the hub relay's audio-only

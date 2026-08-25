@@ -158,7 +158,7 @@ func (m *Manager) servePeerConn(conn net.Conn) {
 	if m.PeerHandler != nil {
 		// Tag every request with the id this peer claimed at the handshake, so
 		// /fed/catalog can scope its answer to shared listening groups (#88).
-		_ = http.Serve(p.Session, withPeerID(m.PeerHandler, p.ID))
+		_ = http.Serve(p.Session, WithSessionPeer(p.ID, m.PeerHandler))
 		return
 	}
 	<-p.Session.CloseChan()
@@ -202,7 +202,7 @@ func (m *Manager) dialPeer(peerID, addr string) {
 		// peerID, not m.PeerID: this session was dialled out, but the requests
 		// arriving on it are still the REMOTE peer's, so that is whose group
 		// membership /fed/catalog must be answered against.
-		_ = http.Serve(sess, withPeerID(m.PeerHandler, peerID))
+		_ = http.Serve(sess, WithSessionPeer(peerID, m.PeerHandler))
 	} else {
 		<-sess.CloseChan()
 	}
@@ -261,7 +261,8 @@ func (m *Manager) learnCaps(peer *Peer) {
 }
 
 // serveHubConn performs the handshake, registers the peer, and serves HubHandler
-// over the session until it closes.
+// over the session until it closes, tagged with the peer id that session belongs
+// to.
 func (m *Manager) serveHubConn(conn net.Conn) {
 	p, err := acceptAndRegister(conn, m.Token, m.Registry)
 	if err != nil {
@@ -269,7 +270,11 @@ func (m *Manager) serveHubConn(conn net.Conn) {
 	}
 	defer m.Registry.remove(p.ID, p)
 	if m.HubHandler != nil {
-		_ = http.Serve(p.Session, withPeerID(m.HubHandler, p.ID))
+		// One HubHandler serves every member session, so the id of the peer on
+		// the far end can only come from here. The signaling relay stamps it into
+		// the messages it forwards; without it those are refused (#158), and the
+		// catalog fan-out has no viewer to scope listening groups against (#88).
+		_ = http.Serve(p.Session, WithSessionPeer(p.ID, m.HubHandler))
 	} else {
 		<-p.Session.CloseChan()
 	}
