@@ -85,7 +85,9 @@
       if (r && r.ok && r.track) {
         s.setNowPlaying(PERSONAL, normalize(r.track));
         s.setProgress(PERSONAL, 0);
-        audio.src = audioURL(r.track.id);
+        // Guarded because this resumes after an await: the wiring effect reaches
+        // advancePersonal, and an unmount mid-request leaves the binding empty.
+        if (audio) audio.src = audioURL(r.track.id);
         if (playing) tryPlay();
       } else {
         s.setNowPlaying(PERSONAL, null);
@@ -235,8 +237,10 @@
     // reads the stream and its now-playing, and tracking those here would
     // re-attach the listeners and reset src on every track change.
     untrack(applyStreamAudio);
-    // A rebind hands back a different element, so the old one takes its
-    // listeners to the grave either way; this is hygiene, not a live leak fix.
+    // A rebind hands back a different element today, so nothing double-attaches
+    // without this. It guards the next edit rather than current behaviour: add
+    // one reactive read to this body and the effect re-runs on the SAME node,
+    // where a duplicate 'ended' handler hides behind the advancing flag.
     return () => {
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('play', onPlay);

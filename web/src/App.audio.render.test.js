@@ -35,17 +35,23 @@ const STREAMS = [{ id: 'house', name: 'House', kind: 'shared', house: true, list
 
 let nextCalls;
 let playCalls;
+let holdNext;      // when true, /next parks until releaseNext() is called
+let releaseNext;
 let loggedIn;
 
 function stubBackend() {
   nextCalls = 0;
   playCalls = 0;
+  holdNext = false;
+  releaseNext = () => {};
   loggedIn = false;
   globalThis.fetch = async (input, init) => {
     const path = String(typeof input === 'string' ? input : input.url);
     if (path === '/api/streams/me/next' || path.startsWith('/api/streams/me/next')) {
       nextCalls++;
-      return json({ ok: true, track: { id: 100 + nextCalls, title: `T${nextCalls}`, duration: 10 } });
+      const body = json({ ok: true, track: { id: 100 + nextCalls, title: `T${nextCalls}`, duration: 10 } });
+      if (holdNext) return new Promise((resolve) => { releaseNext = () => resolve(body); });
+      return body;
     }
     if (path.startsWith('/api/config')) return json(CONFIG);
     if (path.startsWith('/api/auth/login')) { loggedIn = true; return json(ME); }
@@ -142,10 +148,65 @@ async function rebindElement() {
   await new Promise((r) => setTimeout(r, 30));
 }
 
+
+// setVolumeSlider drags the desktop volume slider to `frac`. jsdom reports a
+// zero-sized box for everything, so the slider's own geometry is stated here —
+// the handler reads clientX against it.
+async function setVolumeSlider(frac) {
+  const bar = document.querySelector('[role=slider][aria-label="Volume"]');
+  expect(bar, 'the desktop volume slider should be rendered').toBeTruthy();
+  bar.getBoundingClientRect = () => ({ left: 0, top: 0, right: 200, bottom: 14, width: 200, height: 14, x: 0, y: 0 });
+  bar.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 200 * frac, clientY: 7 }));
+  await new Promise((r) => setTimeout(r, 30));
+  return bar;
+}
+
 describe('audio wiring survives a cold load', () => {
   test('the slider default reaches the element', async () => {
     const el = await mountCold();
     expect(el.volume).toBeCloseTo(0.68, 5);
+  });
+
+  // Not just the default: the effect has to follow the slider, or hardcoding
+  // 0.68 in it would satisfy every other assertion in this file.
+  test('moving the slider moves the element', async () => {
+    const el = await mountCold();
+    const bar = await setVolumeSlider(0.25);
+    expect(bar.getAttribute('aria-valuenow')).toBe('25');
+    expect(el.volume).toBeCloseTo(0.25, 5);
+  });
+
+  // Why the write lives in an effect rather than the slider's change handler:
+  // a rebound element takes the volume it should already be at, instead of
+  // sitting at the browser default until the next drag.
+  test('a rebound element takes the current volume, not the next drag', async () => {
+    await mountCold();
+    await setVolumeSlider(0.25);
+    await rebindElement();
+    expect(document.querySelector('audio').volume).toBeCloseTo(0.25, 5);
+  });
+
+  // advancePersonal resumes after an await, and the wiring effect reaches it.
+  // Unmounting mid-request empties the binding, so the resumed half must not
+  // assume an element is still there.
+  test('an unmount while a track is being fetched does not throw', async () => {
+    const el = await mountCold();
+    await toPersonal();
+    const rejections = [];
+    const onRejection = (e) => rejections.push(e.reason ?? e);
+    process.on('unhandledRejection', onRejection);
+    try {
+      holdNext = true;
+      el.dispatchEvent(new Event('ended'));
+      await new Promise((r) => setTimeout(r, 20));
+      unmount(app, { outro: false });
+      app = undefined;
+      releaseNext();
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+    expect(rejections.map(String)).toEqual([]);
   });
 
   // Both directions in one test on purpose: `playing` starts true, so an
