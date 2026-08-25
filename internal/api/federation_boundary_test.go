@@ -30,16 +30,29 @@ var fedRefusedRoutes = []struct{ method, path string }{
 	{http.MethodPost, "/api/admin/invites"},
 }
 
-// fedHandlers returns the two handlers main.go serves over a federation
-// session. It calls the same constructors main.go calls rather than repeating
-// their composition, so this test cannot drift into pinning a handler shape
+// fedHandlers returns every handler main.go serves over a federation session.
+// It calls the same constructors main.go calls rather than repeating their
+// composition, so this test cannot drift into pinning a handler shape
 // production no longer builds.
 func fedHandlers(srv *Server, db *sql.DB) map[string]http.Handler {
 	caps := fed.Capabilities{DirectWebRTC: true}
+	relay := fed.NewRelay(fed.NewRegistry(), db)
 	return map[string]http.Handler{
 		"member": fed.MemberSessionHandler(caps, srv.Handler()),
 		"peer":   fed.PeerSessionHandler(caps, fed.NewSignaler(), db, srv.Handler()),
+		"hub":    fed.HubSessionHandler(caps, fed.NewSignaler(), relay),
 	}
+}
+
+// appServingFedHandlers are the handlers that expose peerVisibleAppRoutes. The
+// hub is excluded because it mounts no application routes at all — it serves
+// relay endpoints only — so the tests about what the allowlist lets through do
+// not apply to it. TestHubSessionServesNoApplicationRoutes states that directly
+// instead.
+func appServingFedHandlers(srv *Server, db *sql.DB) map[string]http.Handler {
+	all := fedHandlers(srv, db)
+	delete(all, "hub")
+	return all
 }
 
 // TestFederationSessionRefusesApplicationRoutes is the #136 boundary: a peer
@@ -92,7 +105,7 @@ func TestFederationSessionServesTrackAudio(t *testing.T) {
 	}
 	audioPath := "/api/tracks/" + strconv.FormatInt(id, 10) + "/audio"
 
-	for name, h := range fedHandlers(srv, db) {
+	for name, h := range appServingFedHandlers(srv, db) {
 		t.Run(name+" whole file", func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, audioPath, nil))
@@ -150,6 +163,43 @@ func TestFederationSessionKeepsFedRoutes(t *testing.T) {
 	}
 }
 
+// TestHubSessionServesNoApplicationRoutes pins the third composition. The hub
+// mounts the relay endpoints and the signaling relay and nothing of the
+// application — not even the one route the peer and member sessions allowlist.
+// Without this the hub handler is the one composition no test calls, so it could
+// drift back to being spelled out by hand or grow an app mount unnoticed.
+func TestHubSessionServesNoApplicationRoutes(t *testing.T) {
+	srv, db := newTestServer(t)
+	h := fedHandlers(srv, db)["hub"]
+
+	for _, path := range []string{"/api/tracks/1/audio", "/api/tracks", "/api/streams/house"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404 (body %q)", path, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+	}
+
+	// Positive control: its own routes are mounted, so the 404s above are the
+	// absence of an application rather than an empty handler.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fed/caps", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/fed/caps status = %d, want 200", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fed/audio/somepeer/1", nil))
+	if rec.Code == http.StatusNotFound {
+		t.Fatal("GET /fed/audio/{peer}/{id} is not mounted on the hub session")
+	}
+	// And the signaling relay, which the hub composition also carries.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/someone", strings.NewReader(`{"type":"offer"}`)))
+	if rec.Code == http.StatusNotFound {
+		t.Fatal("POST /fed/signal/{to} is not mounted on the hub session")
+	}
+}
+
 // TestFederationSessionEncodedPathsReachNoOtherHandler covers the paths that get
 // past the allowlist mux. Go's {id} wildcard matches an encoded slash as a
 // literal, so /api/tracks/..%2f..%2fapi%2fstreams%2fhouse/audio does match the
@@ -169,7 +219,7 @@ func TestFederationSessionEncodedPathsReachNoOtherHandler(t *testing.T) {
 		{"/api/%73treams/house", http.StatusNotFound, "decodes to a stream route, which is not allowlisted"},
 		{"/api/streams/house%2frequests", http.StatusNotFound, "encoded slash does not conjure a pattern that is not there"},
 	}
-	for name, h := range fedHandlers(srv, db) {
+	for name, h := range appServingFedHandlers(srv, db) {
 		for _, c := range cases {
 			t.Run(name+" "+c.path, func(t *testing.T) {
 				rec := httptest.NewRecorder()

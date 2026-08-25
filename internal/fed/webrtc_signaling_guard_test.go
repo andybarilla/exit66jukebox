@@ -15,7 +15,10 @@ import (
 // carrying the right SID but the wrong sender must not reach the negotiation.
 func TestRouteToDialRefusesMessageFromAnotherPeer(t *testing.T) {
 	tr := NewWebRTCTransport("alice", nil, NewSignaler(), nil, testLogger(t))
-	in, teardown := tr.registerDial("sid-1", "bob")
+	in, teardown, ok := tr.registerDial("sid-1", "bob")
+	if !ok {
+		t.Fatal("registerDial refused a fresh sid")
+	}
 	defer teardown()
 
 	tr.routeToDial(SignalMsg{SID: "sid-1", From: "mallory", Type: "answer", SDP: "hijack"})
@@ -91,7 +94,10 @@ func itoa(i int) string {
 // ICE pump, and Dial's answer pump — blocked on it for the process's lifetime.
 func TestRegisterDialTeardownClosesTheChannel(t *testing.T) {
 	tr := NewWebRTCTransport("alice", nil, NewSignaler(), nil, testLogger(t))
-	in, teardown := tr.registerDial("sid-1", "bob")
+	in, teardown, ok := tr.registerDial("sid-1", "bob")
+	if !ok {
+		t.Fatal("registerDial refused a fresh sid")
+	}
 
 	drained := make(chan struct{})
 	go func() {
@@ -183,7 +189,10 @@ func TestReaderClaimsOfferSIDBeforeHandlingTheNextMessage(t *testing.T) {
 	// A slot the test owns, used purely as a sentinel: when a message addressed
 	// to it comes out, the reader has necessarily finished with the offer that
 	// went in ahead of it.
-	sentinel, done := bob.registerDial("sentinel", "mallory")
+	sentinel, done, ok := bob.registerDial("sentinel", "mallory")
+	if !ok {
+		t.Fatal("registerDial refused a fresh sid")
+	}
 	defer done()
 
 	signaler.Send(SignalMsg{From: "mallory", To: "bob", Type: "offer", SID: "offer-sid", SDP: "not a session description"})
@@ -337,5 +346,102 @@ func waitForDialCount(t *testing.T, tr *WebRTCTransport, want func(int) bool, wi
 			return false
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestDuplicateOfferSIDsDoNotOrphanNegotiations covers the leak that survives a
+// correct teardown: registering a SID that is already claimed.
+//
+// Storing unconditionally left the incumbent slot unmapped and unclosed — its
+// teardown is identity-guarded, so it became a no-op — and its ICE pump and
+// PeerConnection then lived for the process's lifetime. Inbound SIDs are
+// attacker-chosen, so it cost one POST per orphan.
+//
+// This asserts on the GOROUTINE COUNT, deliberately. The dial map still drains
+// to zero in the broken case, so len(t.dial) shows nothing: the orphans are
+// exactly the slots no longer in the map. Both existing leak tests use unique
+// SIDs and are blind to this.
+func TestDuplicateOfferSIDsDoNotOrphanNegotiations(t *testing.T) {
+	signaler := NewSignaler()
+	bob := NewWebRTCTransport("bob", nil, signaler, nil, testLogger(t))
+	bob.setupTimeout = 500 * time.Millisecond
+	defer bob.Close()
+	bob.Listen(t.Context(), func(*dataChannelConn) {})
+
+	// Answers must be deliverable, or the send-failure path would tear each
+	// negotiation down and hide the orphaning.
+	mallorybox := signaler.Register("mallory")
+	go func() {
+		for range mallorybox {
+		}
+	}()
+	offerSDP := wellFormedOffer(t)
+
+	settle(t)
+	before := runtime.NumGoroutine()
+
+	const offers = 30
+	for i := 0; i < offers; i++ {
+		signaler.Send(SignalMsg{From: "mallory", To: "bob", Type: "offer", SID: "same", SDP: offerSDP})
+	}
+
+	// The map drains either way; that is the point. What separates the two is
+	// whether the goroutines those offers started ever come back.
+	if !waitForDialCount(t, bob, func(n int) bool { return n == 0 }, 20*time.Second) {
+		t.Fatal("negotiations never released their slots")
+	}
+	if !waitForGoroutines(t, before, 10, 30*time.Second) {
+		t.Fatalf("goroutines grew by %d after %d offers sharing one SID; "+
+			"each duplicate orphaned a pump and a PeerConnection",
+			runtime.NumGoroutine()-before, offers)
+	}
+}
+
+// TestRegisterDialRefusesAClaimedSID is the unit-level statement of the same
+// rule, and of the choice to refuse rather than replace: replacing would let a
+// peer tear down a negotiation already in flight by naming its SID.
+func TestRegisterDialRefusesAClaimedSID(t *testing.T) {
+	tr := NewWebRTCTransport("alice", nil, NewSignaler(), nil, testLogger(t))
+
+	first, teardown, ok := tr.registerDial("sid-1", "bob")
+	if !ok {
+		t.Fatal("a fresh sid was refused")
+	}
+	if _, _, ok := tr.registerDial("sid-1", "mallory"); ok {
+		t.Fatal("a claimed sid was handed out twice; the first slot is now orphaned")
+	}
+
+	// The incumbent is untouched: still mapped, still open, still bob's.
+	tr.routeToDial(SignalMsg{SID: "sid-1", From: "bob", Type: "answer", SDP: "real"})
+	select {
+	case msg := <-first:
+		if msg.SDP != "real" {
+			t.Fatalf("incumbent received %q", msg.SDP)
+		}
+	default:
+		t.Fatal("the refused duplicate disturbed the negotiation already in flight")
+	}
+
+	// And the sid is reusable once the incumbent is done.
+	teardown()
+	if _, _, ok := tr.registerDial("sid-1", "mallory"); !ok {
+		t.Fatal("sid stayed claimed after teardown")
+	}
+}
+
+// waitForGoroutines polls until the count is within tolerance of base. Teardown
+// unwinds a PeerConnection's goroutines asynchronously, so this converges rather
+// than sampling once.
+func waitForGoroutines(t *testing.T, base, tolerance int, within time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		settle(t)
+		if runtime.NumGoroutine()-base <= tolerance {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
 	}
 }

@@ -149,7 +149,15 @@ func (t *WebRTCTransport) startedReader() {
 				// handleOffer would leave a window in which routeToDial silently
 				// drops those candidates. Doing it here means any ICE the reader
 				// sees after the offer has a slot waiting.
-				iceIn, iceDone := t.registerDial(msg.SID, msg.From)
+				iceIn, iceDone, ok := t.registerDial(msg.SID, msg.From)
+				if !ok {
+					// Another negotiation already holds this SID. Starting a
+					// second one would orphan the first's slot; see registerDial.
+					// Logged rather than dropped quietly: a repeated SID is either
+					// a retransmit or a peer probing for this leak.
+					t.log.Printf("webrtc answer: %s reused in-flight sid %s; ignoring", msg.From, msg.SID)
+					continue
+				}
 				go t.handleOffer(msg, onCh, iceIn, iceDone)
 			case "answer", "ice":
 				t.routeToDial(msg)
@@ -207,8 +215,9 @@ type dialSlot struct {
 	ch     chan SignalMsg
 }
 
-// registerDial creates an inbound channel for messages matching sid from peerID,
-// and returns it plus a teardown func.
+// registerDial claims sid for a negotiation with peerID and returns that
+// negotiation's inbound channel plus a teardown func. ok is false when sid is
+// already claimed, and the caller must then not start the negotiation at all.
 //
 // Teardown closes the channel as well as unmapping it, so whoever is ranging
 // over it returns. It used to only unmap, which left that goroutine — and, on
@@ -216,20 +225,36 @@ type dialSlot struct {
 // lifetime. Inbound SIDs are attacker-chosen strings, so anything retained per
 // negotiation is retained per request.
 //
+// Refusing a duplicate rather than replacing the incumbent is the same concern
+// one step further on. Storing unconditionally left the previous slot unmapped
+// and unclosed — its teardown is identity-guarded and so became a no-op — which
+// is the identical leak reached by a cheaper route: repeat one SID and every
+// offer after the first orphans a pump and a PeerConnection, while the dial map
+// still drains to zero and looks healthy. Replacing would fix the leak but hand
+// an attacker a way to tear down a negotiation already in flight by naming its
+// SID. Refusing cannot disturb an existing negotiation, and costs nothing
+// legitimate: outbound SIDs are 128 random bits, so a collision is never an
+// accident, and an offerer whose duplicate is refused gives up on the same
+// deadline the incumbent is torn down on and retries under a fresh SID.
+//
 // Sends happen under dialMu (see routeToDial) so the close can never race one.
-func (t *WebRTCTransport) registerDial(sid, peerID string) (<-chan SignalMsg, func()) {
+func (t *WebRTCTransport) registerDial(sid, peerID string) (ch <-chan SignalMsg, teardown func(), ok bool) {
 	slot := &dialSlot{peerID: peerID, ch: make(chan SignalMsg, 16)}
 	t.dialMu.Lock()
+	if _, taken := t.dial[sid]; taken {
+		t.dialMu.Unlock()
+		return nil, nil, false
+	}
 	t.dial[sid] = slot
 	t.dialMu.Unlock()
 	return slot.ch, func() {
 		t.dialMu.Lock()
-		if cur, ok := t.dial[sid]; ok && cur == slot {
+		if cur, exists := t.dial[sid]; exists && cur == slot {
 			delete(t.dial, sid)
 			close(slot.ch)
 		}
 		t.dialMu.Unlock()
-	}
+	}, true
 }
 
 // routeToDial forwards an answer/ICE message to the negotiation that minted its
@@ -342,7 +367,11 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 	if sid == "" {
 		return nil, fmt.Errorf("webrtc dial: no randomness for correlation id")
 	}
-	in, teardown := t.registerDial(sid, peerID)
+	in, teardown, ok := t.registerDial(sid, peerID)
+	if !ok {
+		// Unreachable in practice: sid is 128 random bits, freshly minted.
+		return nil, fmt.Errorf("webrtc dial: correlation id %s already in flight", sid)
+	}
 	defer teardown()
 
 	pc, err := t.api.NewPeerConnection(t.config)
