@@ -1,10 +1,12 @@
 package main
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +29,7 @@ func TestNewLastfmNilWhenUnconfigured(t *testing.T) {
 }
 
 // Credentials present but no persisted session -> pending auth, still nil so
-// nothing is enqueued or sent until `exit66 lastfm-auth` runs.
+// nothing is enqueued or sent until `exit66jukebox lastfm-auth` runs.
 func TestNewLastfmNilWhenPendingAuth(t *testing.T) {
 	db, _ := store.Open(":memory:")
 	defer db.Close()
@@ -240,5 +242,50 @@ func TestFedManagerHandlersRefuseApplicationRoutes(t *testing.T) {
 		if rec.Code != http.StatusOK || reached != "GET /api/tracks/7/audio" {
 			t.Fatalf("%s track audio: status %d, reached %q", name, rec.Code, reached)
 		}
+	}
+}
+
+// The lastfm-auth hint is the only instruction an operator gets — the
+// subcommand appears nowhere in the UI — so a hint naming a binary the build
+// does not produce sends them to `command not found` (#149). The expected name
+// is read out of the Makefile's build rule rather than written here, so
+// renaming the binary fails this test instead of silently stranding the hints.
+//
+// The name pattern starts at [a-z0-9] so this file's own regexp literal, whose
+// first character after the backtick is `(`, is not mistaken for a hint.
+func TestLastfmAuthHintsNameTheBuiltBinary(t *testing.T) {
+	makefile, err := os.ReadFile("Makefile")
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	build := regexp.MustCompile(`go build -o (\S+) \.`).FindSubmatch(makefile)
+	if build == nil {
+		t.Fatal("Makefile should build the binary with `go build -o <name> .`")
+	}
+	binary := string(build[1])
+
+	hint := regexp.MustCompile("`([a-z0-9][^`]*) lastfm-auth`")
+	found := 0
+	err = filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, m := range hint.FindAllSubmatch(source, -1) {
+			found++
+			if got := string(m[1]); got != binary {
+				t.Errorf("%s: lastfm-auth hint names %q, Makefile builds %q", path, got, binary)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if found == 0 {
+		t.Fatal("no `<binary> lastfm-auth` hints found; this test no longer guards anything")
 	}
 }
