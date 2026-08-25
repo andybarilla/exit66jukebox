@@ -3,6 +3,7 @@ package fed
 import (
 	"bufio"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -32,6 +33,10 @@ type Registry struct {
 
 func NewRegistry() *Registry { return &Registry{peers: make(map[string]*Peer)} }
 
+// put installs p unconditionally, closing any session it displaces. Only the
+// dial side uses it, where the id is one we chose locally — the accepted-peer
+// list, or "@hub". Inbound registrations, whose id the remote declares, go
+// through putIfFree.
 func (r *Registry) put(p *Peer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -41,6 +46,25 @@ func (r *Registry) put(p *Peer) {
 		}
 	}
 	r.peers[p.ID] = p
+}
+
+// errPeerIDInUse is returned when an inbound peer claims an id whose session is
+// still live.
+var errPeerIDInUse = errors.New("peer id already has a live session")
+
+// putIfFree registers p unless the id already holds a live session, in which
+// case the incumbent is left untouched and errPeerIDInUse is returned. An entry
+// whose session has already closed counts as free: removal happens on the
+// serving goroutine, so a peer reconnecting after a drop can arrive before its
+// old entry is reaped and must not be locked out.
+func (r *Registry) putIfFree(p *Peer) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if old := r.peers[p.ID]; old != nil && old.Session != nil && !old.Session.IsClosed() {
+		return errPeerIDInUse
+	}
+	r.peers[p.ID] = p
+	return nil
 }
 
 func (r *Registry) remove(id string, peer *Peer) {
@@ -115,7 +139,13 @@ func acceptAndRegister(conn net.Conn, token string, reg *Registry) (*Peer, error
 		return nil, err
 	}
 	p := &Peer{ID: peerID, Session: sess, Client: SessionClient(sess), BaseURL: "http://" + peerID}
-	reg.put(p)
+	if err := reg.putIfFree(p); err != nil {
+		// Refuse the newcomer rather than evicting the incumbent: the id is
+		// self-declared at handshake, so evicting would let any token holder
+		// knock a connected peer offline at will.
+		sess.Close()
+		return nil, err
+	}
 	return p, nil
 }
 
