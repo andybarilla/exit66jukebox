@@ -135,7 +135,3 @@ settings win and the environment is ignored.
 
 `EXIT66_ARGS` (systemd unit) and `EXIT66_HOST_PORT` / `EXIT66_MUSIC_DIR`
 (`docker-compose.yml`) are read by the packaging, not by the server.
-
-A `docker-compose.yml` install cannot currently set `EXIT66_MFA_KEY`,
-`EXIT66_FED_DIRECT_P2P`, `EXIT66_FED_STUN` or `EXIT66_FED_TURN` — there is no
-passthrough for them yet. See issue #148.
