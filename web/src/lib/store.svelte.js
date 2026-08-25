@@ -566,15 +566,21 @@ export function createStore() {
       await loadDiscoverLists(genre);
     },
     async startStation(genre) {
-      await apiStartStation(stream, genre);
+      const r = await apiStartStation(stream, genre);
+      if (!r.ok) { pushToast('amber', 'Not started', r.error); return false; }
       await Promise.all([loadStation(), refreshQueue(stream)]);
       pushToast('cyan', 'Station started', `${genre} radio is now filling the queue.`);
+      return true;
     },
+    // The displayed station is cleared only once the server has accepted the
+    // stop; a refused stop leaves it on screen, where it still is (#174).
     async stopStation() {
-      await apiStopStation(stream);
+      const r = await apiStopStation(stream);
+      if (!r.ok) { pushToast('amber', 'Not stopped', r.error); return false; }
       discoverStation = null;
       await refreshQueue(stream);
       pushToast('amber', 'Station stopped', 'Genre radio stopped.');
+      return true;
     },
 
     dismissToast(id) { toasts = toasts.filter((t) => t.id !== id); },

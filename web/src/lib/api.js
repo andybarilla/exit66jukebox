@@ -175,17 +175,24 @@ export async function getStation(streamId) {
   // {stream_id, genre, threshold, batch}, or {} for no station and for a 404
   return r.json().catch(() => ({}));
 }
+// startStation/stopStation resolve to {ok, error} like the stream writes do,
+// so the caller can toast the refusal rather than reporting success (#174).
+// Both routes refuse: 404 for a stream deleted since the tab loaded, 403 for a
+// non-admin on a shared stream. The body is caught for the same reason the
+// stream writes catch theirs — a proxy answering with an HTML error page.
 export async function startStation(streamId, genre) {
   const r = await fetch(`/api/streams/${streamId}/station`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ genre }),
   });
-  return r.json();
+  const body = await r.json().catch(() => ({}));
+  return r.ok ? { ok: true } : { ok: false, error: body.error || 'could not start the station' };
 }
 export async function stopStation(streamId) {
   const r = await fetch(`/api/streams/${streamId}/station`, { method: 'DELETE' });
-  return r.json();
+  const body = await r.json().catch(() => ({}));
+  return r.ok ? { ok: true } : { ok: false, error: body.error || 'could not stop the station' };
 }
 
 // subscribeEvents opens an SSE connection; onEvent gets parsed {type,data}.

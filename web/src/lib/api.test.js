@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import {
   listTracks, listAlbums, listArtists, discoverRecommended,
   getSonosVolume, setSonosVolume, addManualSonos, nextShared, nextTrack, getConfig, HOUSE,
-  removeRequest, setShuffle, castSonos,
+  removeRequest, setShuffle, castSonos, startStation, stopStation,
 } from './api.js';
 
 function mockFetch(items, totalHeader) {
@@ -115,5 +115,41 @@ describe('getConfig', () => {
     const r = await getConfig();
     expect(global.fetch.mock.calls[0][0]).toBe('/api/config');
     expect(r).toEqual({ mute_local_on_cast: true });
+  });
+});
+
+// #174: the station writes report the outcome rather than handing back a body
+// the caller reads as success. The error text is the server's when it sent one
+// and a fallback otherwise, which is also what a non-JSON body resolves to.
+describe('station writes', () => {
+  it('startStation POSTs the genre and reports success', async () => {
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ stream_id: HOUSE, genre: 'Rock' }) }));
+    const r = await startStation(HOUSE, 'Rock');
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/streams/house/station');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ genre: 'Rock' });
+    expect(r).toEqual({ ok: true });
+  });
+
+  it('stopStation DELETEs and reports success', async () => {
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }));
+    const r = await stopStation(HOUSE);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/streams/house/station');
+    expect(opts.method).toBe('DELETE');
+    expect(r).toEqual({ ok: true });
+  });
+
+  it('carries the server error message on a refusal', async () => {
+    global.fetch = vi.fn(async () => ({ ok: false, status: 403, json: async () => ({ error: 'admin required' }) }));
+    expect(await startStation(HOUSE, 'Rock')).toEqual({ ok: false, error: 'admin required' });
+    expect(await stopStation(HOUSE)).toEqual({ ok: false, error: 'admin required' });
+  });
+
+  it('falls back to its own message when the error body is not JSON', async () => {
+    global.fetch = vi.fn(async () => ({ ok: false, status: 404, json: async () => { throw new SyntaxError('Unexpected token <'); } }));
+    expect(await startStation(HOUSE, 'Rock')).toEqual({ ok: false, error: 'could not start the station' });
+    expect(await stopStation(HOUSE)).toEqual({ ok: false, error: 'could not stop the station' });
   });
 });
