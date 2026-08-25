@@ -70,13 +70,49 @@ func TestAdminFederationGroupLifecycle(t *testing.T) {
 	}
 }
 
+// Every group route, under both callers that must be refused. Routing is
+// uniformly requireAdmin, so this is a guard against one route being added
+// without it rather than a claim that they differ.
 func TestAdminFederationGroupsRequireAdmin(t *testing.T) {
-	s, _ := newTestServer(t)
-	for _, path := range []string{"/api/admin/federation/groups"} {
-		rec := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code == http.StatusOK {
-			t.Fatalf("%s answered 200 without an admin session", path)
+	routes := []struct{ method, path, body string }{
+		{http.MethodGet, "/api/admin/federation/groups", ""},
+		{http.MethodPost, "/api/admin/federation/groups", `{"name":"family"}`},
+		{http.MethodDelete, "/api/admin/federation/groups/1", ""},
+		{http.MethodPost, "/api/admin/federation/groups/1/members", `{"peer_id":"office"}`},
+		{http.MethodDelete, "/api/admin/federation/groups/1/members/office", ""},
+	}
+	for _, route := range routes {
+		for _, caller := range []string{"anonymous", "non-admin"} {
+			t.Run(route.method+" "+route.path+" as "+caller, func(t *testing.T) {
+				s, db := newTestServer(t)
+				// A group to act on, so a refusal cannot be mistaken for a 404.
+				g, err := store.CreateFederationGroup(db, "family")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := store.AddFederationGroupMember(db, g.ID, "office"); err != nil {
+					t.Fatal(err)
+				}
+
+				req := httptest.NewRequest(route.method, route.path, strings.NewReader(route.body))
+				if caller == "non-admin" {
+					req.AddCookie(nonAdminCookie(t, db))
+				}
+				rec := httptest.NewRecorder()
+				s.Handler().ServeHTTP(rec, req)
+
+				if rec.Code == http.StatusOK {
+					t.Fatalf("%s %s answered 200 to a %s caller", route.method, route.path, caller)
+				}
+				// And it must not have acted: the group and its member survive.
+				groups, err := store.ListFederationGroups(db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(groups) != 1 || len(groups[0].Members) != 1 {
+					t.Fatalf("a %s caller changed the groups: %+v", caller, groups)
+				}
+			})
 		}
 	}
 }

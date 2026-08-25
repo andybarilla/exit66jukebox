@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, getFederationGroups, createFederationGroup, deleteFederationGroup, addFederationGroupMember, removeFederationGroupMember, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths, createPasswordReset, createEmailVerification, beginMfaEnrollment, confirmMfaEnrollment, disableMfa, regenerateRecoveryCodes } from '../auth.js';
-  import { isUngrouped, ungroupedPeerIds } from '../federationGroups.js';
+  import { groupsMissingSelf, isUngrouped, ungroupedPeerIds } from '../federationGroups.js';
   import { beforeUnloadIfDirty, buildEditableSettingsSnapshot, hasEditableSettingsChanges, loadPathBrowserLocation } from '../settingsPanelState.js';
   import Switch from './Switch.svelte';
 
@@ -59,6 +59,11 @@
   // reachable and has to be visible: an approved, connected peer in no group
   // discovers nothing.
   let ungroupedPeers = $derived(ungroupedPeerIds(federationPeers, federationGroups));
+  // The peer id the RUNNING instance uses, kept apart from the editable field
+  // above: membership is matched against what the process claims at the
+  // handshake, not against an unsaved edit.
+  let activePeerID = $state('');
+  let selflessGroups = $derived(groupsMissingSelf(federationGroups, activePeerID));
   let groupDraft = $state('');
   let groupMemberDraft = $state({});
   let groupBusy = $state(false);
@@ -142,6 +147,7 @@
         libraries = librarySettings.local_libraries || [];
         libraryWarnings = librarySettings.warnings || [];
         federation = { ...federation, ...(librarySettings.federation || {}), token: '' };
+        activePeerID = (librarySettings.federation || {}).peer_id || '';
         scan = { ...scan, ...(librarySettings.scan || {}) };
         federationPeers = peerSettings.peers || [];
         federationGroups = groupSettings.groups || [];
@@ -426,6 +432,7 @@
       libraries = r.local_libraries || [];
       libraryWarnings = r.warnings || [];
       federation = { ...federation, ...(r.federation || {}), token: '' };
+      activePeerID = (r.federation || {}).peer_id || '';
       scan = { ...scan, ...(r.scan || {}) };
       libraryMessage = saveAndScan ? 'Saved. Scan started.' : 'Saved.';
       updateCleanSettingsSnapshot({ libraries, federation, scan });
@@ -640,7 +647,11 @@
                 <button type="button" class="btn-copy" disabled={groupBusy} onclick={addGroup}>Add group</button>
               </div>
               {#if federationGroups.length === 0}
-                <p class="muted">No groups yet.</p>
+                <p class="warning">
+                  No groups yet: every approved peer sees every other peer's catalog. Creating the
+                  first group scopes discovery to it at once, so peers you have not added to it go
+                  dark — and deleting the last group opens them all up again.
+                </p>
               {:else}
                 <ul class="peer-list">
                   {#each federationGroups as group (group.id)}
@@ -656,6 +667,13 @@
                     </li>
                   {/each}
                 </ul>
+              {/if}
+              {#if selflessGroups.length > 0}
+                <p class="danger">
+                  These groups do not include this instance ({activePeerID}), so your library is not
+                  shared through them: {selflessGroups.join(', ')}. A group only moves catalogs
+                  between the peers it lists — add {activePeerID} to it.
+                </p>
               {/if}
               {#if ungroupedPeers.length > 0}
                 <p class="warning">

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { isUngrouped, ungroupedPeerIds } from './federationGroups.js';
+import { groupsMissingSelf, isUngrouped, ungroupedPeerIds } from './federationGroups.js';
 
 const peers = [{ peer_id: 'office' }, { peer_id: 'dave' }, { peer_id: 'stranger' }];
 
@@ -45,5 +45,31 @@ describe('isUngrouped', () => {
 
   test('is false for everyone while the feature is dormant', () => {
     expect(isUngrouped('stranger', peers, [])).toBe(false);
+  });
+});
+
+describe('groupsMissingSelf', () => {
+  test('names a group this instance forgot to join', () => {
+    const groups = [
+      { id: 1, name: 'family', members: ['home', 'office'] },
+      { id: 2, name: 'friends', members: ['dave', 'erin'] },
+    ];
+
+    expect(groupsMissingSelf(groups, 'home')).toEqual(['friends']);
+  });
+
+  test('is quiet when this instance is in every group', () => {
+    expect(groupsMissingSelf([{ id: 1, name: 'family', members: ['home'] }], 'home')).toEqual([]);
+  });
+
+  // Without a configured peer id there is nothing to be missing from, and
+  // warning about every group would be noise on an unconfigured install.
+  test('is quiet when this instance has no peer id', () => {
+    expect(groupsMissingSelf([{ id: 1, name: 'family', members: ['office'] }], '')).toEqual([]);
+    expect(groupsMissingSelf([{ id: 1, name: 'family', members: ['office'] }], undefined)).toEqual([]);
+  });
+
+  test('a group with no members is missing this instance too', () => {
+    expect(groupsMissingSelf([{ id: 1, name: 'empty' }], 'home')).toEqual(['empty']);
   });
 });

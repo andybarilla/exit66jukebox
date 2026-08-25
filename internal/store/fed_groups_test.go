@@ -248,3 +248,51 @@ func TestFederationGroupMembershipSurvivesReopen(t *testing.T) {
 		t.Fatal("groups were not active after the restart")
 	}
 }
+
+// A member id is compared against the id a peer claims at the handshake, which
+// is read with strings.Fields off one space-delimited line. An id with
+// whitespace could never arrive that way, so storing one would leave a
+// correctly-populated-looking group that moves no catalogs.
+func TestAddFederationGroupMemberRefusesAnIDNoPeerCouldClaim(t *testing.T) {
+	db := groupTestDB(t)
+	g := mustGroup(t, db, "family")
+
+	for _, bad := range []string{"", "   ", "of fice", "office\ttwo", "office\nhome"} {
+		if err := AddFederationGroupMember(db, g.ID, bad); err == nil {
+			t.Fatalf("peer id %q was accepted; it can never match a handshake id", bad)
+		}
+	}
+
+	// Surrounding whitespace is an operator slip, not an impossible id: trim it
+	// and store the id the peer will actually claim.
+	if err := AddFederationGroupMember(db, g.ID, "  office \n"); err != nil {
+		t.Fatalf("padded id: %v", err)
+	}
+	if !mustVisible(t, db, "office", "office") {
+		t.Fatal("the trimmed id was not stored as office")
+	}
+	groups, err := ListFederationGroups(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups[0].Members) != 1 || groups[0].Members[0] != "office" {
+		t.Fatalf("members = %v, want [office]", groups[0].Members)
+	}
+}
+
+// Case is not folded: the handshake compares byte for byte, so "Office" and
+// "office" are different peers and the store must not merge them.
+func TestAddFederationGroupMemberKeepsCase(t *testing.T) {
+	db := groupTestDB(t)
+	g := mustGroup(t, db, "family", "home")
+	if err := AddFederationGroupMember(db, g.ID, "Office"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !mustVisible(t, db, "home", "Office") {
+		t.Fatal("Office was stored under some other spelling")
+	}
+	if mustVisible(t, db, "home", "office") {
+		t.Fatal("lowercase office must not match the member row for Office")
+	}
+}

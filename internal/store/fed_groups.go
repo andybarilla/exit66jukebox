@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // keyFederationGroupsSeeded records that SeedDefaultFederationGroup has already
@@ -99,18 +100,42 @@ func ListFederationGroups(db *sql.DB) ([]FederationGroup, error) {
 	return groups, members.Err()
 }
 
-func AddFederationGroupMember(db *sql.DB, groupID int64, peerID string) error {
+// normalizeGroupMemberPeerID trims a hand-typed peer id and refuses one that
+// could never match at the check.
+//
+// Membership is compared against the id a peer claims at the token handshake,
+// which is read with strings.Fields on a single space-delimited line — so an id
+// containing whitespace cannot arrive over the wire at all. Storing one would
+// seed a member row that silently never matches, and the operator would see a
+// correctly-populated group moving no catalogs. Refuse it at the door instead.
+//
+// Case is NOT folded: the handshake compares ids byte for byte, so folding here
+// would make a member row match nothing just as surely.
+func normalizeGroupMemberPeerID(peerID string) (string, error) {
 	peerID = strings.TrimSpace(peerID)
 	if peerID == "" {
-		return errors.New("peer id is required")
+		return "", errors.New("peer id is required")
 	}
-	_, err := db.Exec(
+	if strings.ContainsFunc(peerID, unicode.IsSpace) {
+		return "", fmt.Errorf("peer id %q contains whitespace, which a peer cannot claim at the handshake", peerID)
+	}
+	return peerID, nil
+}
+
+func AddFederationGroupMember(db *sql.DB, groupID int64, peerID string) error {
+	peerID, err := normalizeGroupMemberPeerID(peerID)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(
 		`INSERT INTO federation_group_member(group_id, peer_id) VALUES(?, ?)
 		 ON CONFLICT(group_id, peer_id) DO NOTHING`, groupID, peerID)
 	return err
 }
 
 func RemoveFederationGroupMember(db *sql.DB, groupID int64, peerID string) error {
+	// Trim but do not validate: a row stored before this check existed must
+	// still be removable.
 	_, err := db.Exec(`DELETE FROM federation_group_member WHERE group_id = ? AND peer_id = ?`, groupID, strings.TrimSpace(peerID))
 	return err
 }
