@@ -23,24 +23,50 @@ type GenreCount struct {
 	Count int    `json:"count"`
 }
 
+// callerPlaysJoin aggregates history over the streams the caller can be said to
+// have heard — every shared stream, plus opts.PersonalStream when they have one.
+// Both rediscover keys read this one grouped scan, so the count and the recency
+// key cannot disagree about which streams count (#166). Takes two args: the
+// shared kind and the caller's personal stream id.
+const callerPlaysJoin = `
+		LEFT JOIN (SELECT h.track_id,
+		                  COUNT(*)          AS plays,
+		                  MAX(h.played_at)  AS last_played
+		             FROM history h
+		             JOIN stream s ON s.id = h.stream_id
+		            WHERE s.kind = ? OR s.id = ?
+		            GROUP BY h.track_id) hp ON hp.track_id = t.id`
+
 // DiscoverTracks ranks/filters tracks by play stats for the discovery surfaces.
-// last_played is MAX(history.played_at) over the streams the caller can be said
-// to have heard — every shared stream, plus opts.PersonalStream when they have
-// one (0 = never played). Another user's personal stream never counts, so one
-// listener's private play cannot shape anyone else's rediscover ranking (#151).
+//
+// The rediscover order ranks on how many times the caller has heard a track,
+// then on how long ago, both measured over the streams the caller can be said
+// to have heard: every shared stream, plus opts.PersonalStream when they have
+// one (a track they never heard counts 0 plays at time 0). Another user's
+// personal stream never counts, so one listener's private plays cannot shape
+// anyone else's rediscover ranking (#151, #166). A play on a stream whose row
+// has since been deleted counts for nobody.
+//
+// The track's stored play_count is still selected and returned unchanged; it is
+// the household-wide number every display site shows, and no order reads it.
 func DiscoverTracks(db *sql.DB, opts DiscoverOpts) ([]model.Track, error) {
-	var order string
+	var order, join string
+	var args []any
 	switch opts.OrderBy {
 	case "recent":
 		order = "t.added_at DESC, t.id DESC"
 	case "random":
 		order = "RANDOM()"
 	default: // "rediscover"
-		order = "t.play_count ASC, last_played ASC, t.id ASC"
+		order = "coalesce(hp.plays, 0) ASC, coalesce(hp.last_played, 0) ASC, t.id ASC"
+		// Only rediscover reads the aggregate; the other orders would pay for a
+		// scan of history they discard.
+		join = callerPlaysJoin
+		args = append(args, KindShared, opts.PersonalStream)
 	}
 
-	// The last_played subquery is in the SELECT list, so its args come first.
-	args := []any{KindShared, opts.PersonalStream}
+	// SQLite binds ? by position, so args follow the clauses in textual order:
+	// the join's, then the genre's, then the exclusion's, then the limit's.
 	where := "WHERE " + visibleTrackPredicate
 	if opts.Genre != "" {
 		where += " AND t.genre = ?"
@@ -62,14 +88,11 @@ func DiscoverTracks(db *sql.DB, opts DiscoverOpts) ([]model.Track, error) {
 
 	q := fmt.Sprintf(`
 		SELECT t.id, t.title, t.artist_id, t.album_id, t.track_no, t.genre,
-		       t.duration, t.play_count,
-		       coalesce((SELECT MAX(h.played_at) FROM history h
-		                  JOIN stream s ON s.id = h.stream_id
-		                  WHERE h.track_id = t.id AND (s.kind = ? OR s.id = ?)), 0) AS last_played
-		FROM track t
+		       t.duration, t.play_count
+		FROM track t%s
 		%s
 		ORDER BY %s
-		LIMIT ? OFFSET ?`, where, order)
+		LIMIT ? OFFSET ?`, join, where, order)
 
 	rows, err := db.Query(q, args...)
 	if err != nil {
@@ -79,9 +102,8 @@ func DiscoverTracks(db *sql.DB, opts DiscoverOpts) ([]model.Track, error) {
 	var out []model.Track
 	for rows.Next() {
 		var t model.Track
-		var lastPlayed int64 // selected only for ORDER BY; no model field
 		if err := rows.Scan(&t.ID, &t.Title, &t.ArtistID, &t.AlbumID, &t.TrackNo,
-			&t.Genre, &t.Duration, &t.PlayCount, &lastPlayed); err != nil {
+			&t.Genre, &t.Duration, &t.PlayCount); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
