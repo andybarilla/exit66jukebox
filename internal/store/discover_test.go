@@ -401,3 +401,37 @@ func dropIfOrphan(t *testing.T, db *sql.DB, streamID string, orphan bool) {
 		t.Fatalf("delete %s: %v", streamID, err)
 	}
 }
+
+// The rediscover order is the only one that adds a clause before WHERE, so it
+// is the only combination where a misordered placeholder is possible: join,
+// then genre, then exclusion.
+func TestRediscoverBindsJoinGenreAndExclusionInOrder(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+	alice, _ := seedRankingFixture(t, db)
+	seedTrack(t, db, "/m/j.mp3", "Jazzy", "Jazz", 0)
+	var alpha, bravo int64
+	db.QueryRow(`SELECT id FROM track WHERE title='Alpha'`).Scan(&alpha)
+	db.QueryRow(`SELECT id FROM track WHERE title='Bravo'`).Scan(&bravo)
+	seedPlay(t, db, "house", bravo, 60)
+	seedPlay(t, db, alice, bravo, 50) // Bravo: two plays alice can be said to have heard
+	seedPlay(t, db, "house", alpha, 100)
+
+	got, err := DiscoverTracks(db, DiscoverOpts{
+		OrderBy: "rediscover", PersonalStream: alice,
+		Genre: "Rock", ExcludeStream: "house", Window: 1, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	titles := make([]string, len(got))
+	for i, tr := range got {
+		titles[i] = tr.Title
+	}
+	// Jazzy is filtered by genre and Alpha by the exclusion window (it is the
+	// house's one most recent play). Charlie leads the survivors on 0 plays to
+	// Bravo's 2. A misbound placeholder cannot produce all three at once.
+	if !slices.Equal(titles, []string{"Charlie", "Bravo"}) {
+		t.Fatalf("order = %v, want [Charlie Bravo]", titles)
+	}
+}
