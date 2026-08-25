@@ -1,11 +1,14 @@
 package fed
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,10 +33,17 @@ import (
 // reachable candidate pair, negotiation fails and the resolver falls back to the
 // yamux-direct then hub-relay tiers — playback is never broken.
 //
-// Signaling rides the authenticated hub relay (Signaler): SDP offer/answer and
-// trickle ICE candidates are relayed only between registered, token-authenticated
-// peers, preserving the federation's SSRF-safety property. Correlation across an
-// offer/answer/ICE exchange is by SID (see SignalMsg).
+// Signaling rides the peer's own authenticated federation session: SDP
+// offer/answer and trickle ICE candidates are POSTed to the recipient's
+// /fed/signal/{to} endpoint over the session established by the token
+// handshake, and land in that process's Signaler mailbox (see sendSignal). Only
+// peers that are in the registry — i.e. token-authenticated and on the accepted
+// federation_peer list — can be signalled, preserving the federation's
+// SSRF-safety property. Correlation across an offer/answer/ICE exchange is by
+// SID (see SignalMsg).
+//
+// Two peers that have no session to each other cannot signal at all; hub-relayed
+// signaling for that case is not built (issue #158).
 //
 // Dispatch model: each transport owns one mailbox (under selfID) and one reader
 // goroutine (startedReader). The reader routes inbound offers to handleOffer and
@@ -50,7 +60,10 @@ type WebRTCTransport struct {
 	selfID   string
 	config   webrtc.Configuration
 	signaler *Signaler
-	log      *log.Logger
+	// reg resolves a peer id to its live federation session, which is how an
+	// outbound signal reaches a peer in another process (see postSignal).
+	reg *Registry
+	log *log.Logger
 
 	api *webrtc.API
 
@@ -76,9 +89,10 @@ type WebRTCTransport struct {
 }
 
 // NewWebRTCTransport builds a transport. iceServers are the STUN/TURN servers
-// from settings (STUN always; TURN when configured). A nil logger defaults to
-// the standard logger.
-func NewWebRTCTransport(selfID string, iceServers []webrtc.ICEServer, signaler *Signaler, logger *log.Logger) *WebRTCTransport {
+// from settings (STUN always; TURN when configured). reg is the peer registry
+// outbound signaling is addressed through; a nil reg confines signaling to
+// signaler's in-process mailboxes. A nil logger defaults to the standard logger.
+func NewWebRTCTransport(selfID string, iceServers []webrtc.ICEServer, signaler *Signaler, reg *Registry, logger *log.Logger) *WebRTCTransport {
 	if logger == nil {
 		logger = log.Default()
 	}
@@ -91,6 +105,7 @@ func NewWebRTCTransport(selfID string, iceServers []webrtc.ICEServer, signaler *
 		selfID:     selfID,
 		config:     webrtc.Configuration{ICEServers: iceServers},
 		signaler:   signaler,
+		reg:        reg,
 		log:        logger,
 		api:        webrtc.NewAPI(webrtc.WithSettingEngine(se)),
 		cache:      make(map[string]*dataChannelConn),
@@ -179,6 +194,70 @@ func (t *WebRTCTransport) routeToDial(msg SignalMsg) {
 	}
 }
 
+// sendSignal delivers msg to its recipient, whichever process it lives in.
+//
+// A recipient with a mailbox in this process is served from it directly: that is
+// the shared-Signaler arrangement the in-process tests use. In production the
+// only locally-registered id is this transport's own selfID, so a peer id always
+// takes the wire path below.
+//
+// isRegistered gates the local attempt rather than Signaler.Send's return value:
+// Send also returns false after blocking for signalTimeout on a registered but
+// full mailbox, and this runs on pion's ICE-gathering goroutine, which must not
+// stall for five seconds before trying the wire.
+func (t *WebRTCTransport) sendSignal(msg SignalMsg) bool {
+	if t.signaler.isRegistered(msg.To) {
+		return t.signaler.Send(msg)
+	}
+	return t.postSignal(msg)
+}
+
+// postSignal POSTs msg to the recipient's /fed/signal/{to} endpoint over the
+// recipient's own federation session, where WithSignalRelay drops it into that
+// process's mailbox. It returns false when the peer has no live session — the
+// caller treats that as a negotiation failure and falls back a tier.
+//
+// The session is the authorization: reg only holds peers that completed the
+// token handshake and are on the accepted federation_peer list, so this cannot
+// address an arbitrary host.
+func (t *WebRTCTransport) postSignal(msg SignalMsg) bool {
+	if t.reg == nil {
+		return false
+	}
+	p := t.reg.Get(msg.To)
+	if p == nil || p.Client == nil {
+		return false
+	}
+	baseURL := p.BaseURL
+	if baseURL == "" {
+		baseURL = "http://" + msg.To
+	}
+	body, err := json.Marshal(msg)
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), signalTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		baseURL+"/fed/signal/"+url.PathEscape(msg.To), bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.Client.Do(req)
+	if err != nil {
+		t.log.Printf("webrtc signal %s %s: %v", msg.Type, msg.To, err)
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusAccepted {
+		t.log.Printf("webrtc signal %s %s: status %d", msg.Type, msg.To, resp.StatusCode)
+		return false
+	}
+	return true
+}
+
 // Dial is the offerer side: create a PeerConnection + data channel, exchange
 // offer/answer and ICE with the peer via the signaler, and wait for the channel
 // to open. Returns a cached or fresh *dataChannelConn. On any failure returns an
@@ -239,7 +318,7 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 			return // gathering complete
 		}
 		b, _ := json.Marshal(c.ToJSON())
-		t.signaler.Send(SignalMsg{From: t.selfID, To: peerID, Type: "ice", SID: sid, ICECandidate: string(b)})
+		t.sendSignal(SignalMsg{From: t.selfID, To: peerID, Type: "ice", SID: sid, ICECandidate: string(b)})
 	})
 
 	iceFailed := make(chan struct{}, 1)
@@ -259,7 +338,7 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 	if err := pc.SetLocalDescription(offer); err != nil {
 		return nil, fmt.Errorf("webrtc dial: set local: %w", err)
 	}
-	if !t.signaler.Send(SignalMsg{From: t.selfID, To: peerID, Type: "offer", SID: sid, SDP: offer.SDP}) {
+	if !t.sendSignal(SignalMsg{From: t.selfID, To: peerID, Type: "offer", SID: sid, SDP: offer.SDP}) {
 		return nil, fmt.Errorf("webrtc dial: peer %s offline", peerID)
 	}
 
@@ -316,7 +395,7 @@ func (t *WebRTCTransport) handleOffer(offer SignalMsg, onChannel func(*dataChann
 			return
 		}
 		b, _ := json.Marshal(c.ToJSON())
-		t.signaler.Send(SignalMsg{From: t.selfID, To: offer.From, Type: "ice", SID: offer.SID, ICECandidate: string(b)})
+		t.sendSignal(SignalMsg{From: t.selfID, To: offer.From, Type: "ice", SID: offer.SID, ICECandidate: string(b)})
 	})
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offer.SDP}); err != nil {
 		t.log.Printf("webrtc answer: set remote: %v", err)
@@ -348,7 +427,7 @@ func (t *WebRTCTransport) handleOffer(offer SignalMsg, onChannel func(*dataChann
 			}
 		}
 	}()
-	t.signaler.Send(SignalMsg{From: t.selfID, To: offer.From, Type: "answer", SID: offer.SID, SDP: answer.SDP})
+	t.sendSignal(SignalMsg{From: t.selfID, To: offer.From, Type: "answer", SID: offer.SID, SDP: answer.SDP})
 }
 
 // Close unregisters the mailbox and waits for the reader to exit, releasing the

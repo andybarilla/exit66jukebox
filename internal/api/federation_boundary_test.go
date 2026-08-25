@@ -36,7 +36,7 @@ func fedHandlers(srv *Server, db *sql.DB) map[string]http.Handler {
 	caps := fed.Capabilities{DirectWebRTC: true}
 	return map[string]http.Handler{
 		"member": fed.WithCapsRoute(caps, fed.AppRoutes(srv.Handler())),
-		"peer":   fed.WithCapsRoute(caps, fed.PeerRoutes(db, srv.Handler())),
+		"peer":   fed.WithCapsRoute(caps, fed.WithSignalRelay(fed.NewSignaler(), fed.PeerRoutes(db, srv.Handler()))),
 	}
 }
 
@@ -131,6 +131,20 @@ func TestFederationSessionKeepsFedRoutes(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status = %d, want 200 (body %q)", path, rec.Code, strings.TrimSpace(rec.Body.String()))
 		}
+	}
+
+	// POST /fed/signal/{to} is the inbound half of WebRTC signaling (#152): a
+	// remote peer's offer/answer/ICE reaches this process only through it. The
+	// signaler here hosts no mailbox for "someone", so 503 is the expected
+	// answer — what matters is that it is not 404, which is what an unmounted
+	// route gives and what the peer session gave before #152.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/someone", strings.NewReader(`{"type":"offer"}`)))
+	if rec.Code == http.StatusNotFound {
+		t.Fatal("POST /fed/signal/{to} is not mounted on the peer session; WebRTC signaling cannot arrive")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST /fed/signal/someone status = %d, want 503 (body %q)", rec.Code, strings.TrimSpace(rec.Body.String()))
 	}
 }
 

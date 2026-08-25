@@ -376,13 +376,17 @@ func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg
 		fm.Relay = relay
 		fm.HubHandler = fed.WithCapsRoute(caps, fed.WithSignalRelay(signaler, relay.Routes()))
 	case "peer":
-		fm.PeerHandler = fed.WithCapsRoute(caps, fed.PeerRoutes(db, app))
+		// WithSignalRelay puts POST /fed/signal/{to} on the peer session so a
+		// remote peer's WebRTC negotiation reaches this process's Signaler
+		// mailbox. It is the inbound half of the transport's outbound POST; both
+		// halves are required for the tier to engage at all (#152).
+		fm.PeerHandler = fed.WithCapsRoute(caps, fed.WithSignalRelay(signaler, fed.PeerRoutes(db, app)))
 		// Direct P2P (WebRTC) transport: NAT-traversing audio path that bypasses
 		// the hub when both peers advertise support and ICE connects. Disabled by
 		// setting; falls back to the yamux-direct then hub-relay tiers on any
 		// failure, so playback is never broken.
 		if s.DirectP2P {
-			fm.WebRTC = fed.NewWebRTCTransport(s.PeerID, fedICEServers(s), signaler, nil)
+			fm.WebRTC = fed.NewWebRTCTransport(s.PeerID, fedICEServers(s), signaler, reg, nil)
 		}
 	}
 	return fm
