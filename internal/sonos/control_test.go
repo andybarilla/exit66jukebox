@@ -110,3 +110,95 @@ func TestGetVolumeParsesResponse(t *testing.T) {
 		t.Fatalf("SOAPACTION = %q, want RenderingControl#GetVolume", action)
 	}
 }
+
+// mediaInfoResponse is the shape a real Sonos returns for GetMediaInfo: the
+// CurrentURI is the one we set, with & XML-escaped.
+func mediaInfoResponse(uri string) string {
+	return `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>` +
+		`<u:GetMediaInfoResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">` +
+		`<NrTracks>1</NrTracks><CurrentURI>` + xmlEscape(uri) + `</CurrentURI>` +
+		`<CurrentURIMetaData></CurrentURIMetaData></u:GetMediaInfoResponse></s:Body></s:Envelope>`
+}
+
+func transportInfoResponse(state string) string {
+	return `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>` +
+		`<u:GetTransportInfoResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">` +
+		`<CurrentTransportState>` + state + `</CurrentTransportState>` +
+		`<CurrentTransportStatus>OK</CurrentTransportStatus></u:GetTransportInfoResponse>` +
+		`</s:Body></s:Envelope>`
+}
+
+// fakePlayer answers GetMediaInfo/GetTransportInfo the way a real player does.
+func fakePlayer(t *testing.T, uri, state string) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		action := r.Header.Get("SOAPACTION")
+		switch {
+		case strings.Contains(action, "GetMediaInfo"):
+			io.WriteString(w, mediaInfoResponse(uri))
+		case strings.Contains(action, "GetTransportInfo"):
+			io.WriteString(w, transportInfoResponse(state))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func TestNowPlayingURLReportsPlayingURI(t *testing.T) {
+	const want = "http://10.0.0.2:8066/stream/abc123.mp3?sig=99.zz&x=1"
+	uri, playing, err := nowPlayingURL(fakePlayer(t, want, "PLAYING"))
+	if err != nil {
+		t.Fatalf("nowPlayingURL: %v", err)
+	}
+	if uri != want {
+		t.Fatalf("uri = %q, want %q (the & must come back unescaped)", uri, want)
+	}
+	if !playing {
+		t.Fatalf("playing = false, want true for CurrentTransportState PLAYING")
+	}
+}
+
+// A stopped player still reports the last URI it was pointed at — GetMediaInfo
+// is the stored URI, not what is coming out of the speaker. Only the transport
+// state separates the two.
+func TestNowPlayingURLNotPlayingWhenStopped(t *testing.T) {
+	uri, playing, err := nowPlayingURL(fakePlayer(t, "http://10.0.0.2:8066/stream/abc123.mp3", "STOPPED"))
+	if err != nil {
+		t.Fatalf("nowPlayingURL: %v", err)
+	}
+	if playing {
+		t.Fatalf("playing = true for a STOPPED player, want false (uri was %q)", uri)
+	}
+}
+
+func TestNowPlayingURLTransitioningCounts(t *testing.T) {
+	_, playing, err := nowPlayingURL(fakePlayer(t, "http://10.0.0.2:8066/stream/abc.mp3", "TRANSITIONING"))
+	if err != nil {
+		t.Fatalf("nowPlayingURL: %v", err)
+	}
+	if !playing {
+		t.Fatalf("playing = false while TRANSITIONING, want true: the speaker is connecting to that stream")
+	}
+}
+
+func TestNowPlayingURLEmptyWhenNothingSet(t *testing.T) {
+	uri, playing, err := nowPlayingURL(fakePlayer(t, "", "STOPPED"))
+	if err != nil {
+		t.Fatalf("nowPlayingURL: %v", err)
+	}
+	if uri != "" || playing {
+		t.Fatalf("uri = %q playing = %v, want empty/false", uri, playing)
+	}
+}
+
+func TestNowPlayingURLSurfacesHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	if _, _, err := nowPlayingURL(srv.URL); err == nil {
+		t.Fatalf("expected error on 500 response")
+	}
+}

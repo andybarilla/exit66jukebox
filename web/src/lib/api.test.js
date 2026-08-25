@@ -75,6 +75,15 @@ describe('sonos volume + manual ip', () => {
     expect(opts.body.get('volume')).toBe('80');
   });
 
+  it('castSonos POSTs the ip and the stream to cast', async () => {
+    global.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
+    await castSonos('192.168.1.5', 'party01');
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/sonos/cast');
+    expect(opts.body.get('ip')).toBe('192.168.1.5');
+    expect(opts.body.get('stream')).toBe('party01');
+  });
+
   it('addManualSonos resolves to {name, ip} on success', async () => {
     global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ name: 'Kitchen', ip: '192.168.1.7' }) }));
     const r = await addManualSonos('192.168.1.7');

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createStore } from './store.svelte.js';
+import { HOUSE } from './api.js';
 
 // createStore reads localStorage for the saved display name; stub it (node env).
 beforeEach(() => {
@@ -24,14 +25,30 @@ describe('auth state', () => {
   });
 });
 
-describe('cast-active state', () => {
-  it('defaults to false and is toggled by setCastActive', () => {
+describe('cast state', () => {
+  it('starts with nothing cast and records the streams being cast', () => {
     const s = createStore();
-    expect(s.castActive).toBe(false);
-    s.setCastActive(true);
-    expect(s.castActive).toBe(true);
-    s.setCastActive(false);
-    expect(s.castActive).toBe(false);
+    expect(s.castStreams).toEqual([]);
+    s.setCastStreams(['house', 'party01']);
+    expect(s.castStreams).toEqual(['house', 'party01']);
+    s.setCastStreams([]);
+    expect(s.castStreams).toEqual([]);
+  });
+
+  // The mute rule is per stream: a cast of some other stream is somebody else's
+  // speaker and must leave this listener's local audio alone.
+  it('castingStream is true only for the stream being cast', () => {
+    const s = createStore();
+    expect(s.castingStream(HOUSE)).toBe(false);
+    s.setCastStreams(['party01']);
+    expect(s.castingStream('party01')).toBe(true);
+    expect(s.castingStream(HOUSE)).toBe(false);
+  });
+
+  it('setCastStreams ignores a non-array', () => {
+    const s = createStore();
+    s.setCastStreams(null);
+    expect(s.castStreams).toEqual([]);
   });
 
   it('exposes muteLocalOnCast, defaulting true before config loads', () => {

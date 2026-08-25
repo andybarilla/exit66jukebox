@@ -25,9 +25,11 @@ type Config struct {
 	PublicOrigin  string
 	MFAKey        []byte
 
-	// MuteLocalOnCast silences the browser's local <audio> while a Sonos cast is
-	// active. Sourced from EXIT66_MUTE_LOCAL_ON_CAST for now; a settings UI will
-	// replace the env source later. Defaults true when unset.
+	// MuteLocalOnCast silences the browser's local <audio> while a Sonos is
+	// casting the stream that browser is itself playing — a cast of some other
+	// stream leaves it alone (#130). Sourced from EXIT66_MUTE_LOCAL_ON_CAST for
+	// now; a settings UI will replace the env source later. Defaults true when
+	// unset.
 	MuteLocalOnCast bool
 }
 

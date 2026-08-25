@@ -53,7 +53,8 @@ type Server struct {
 	activeFed   store.FederationSettings
 
 	// muteLocalOnCast is exposed via GET /api/config so the frontend can mute the
-	// local <audio> while a Sonos cast is active. Sourced from config (env for now).
+	// local <audio> while a Sonos is casting the stream that browser is playing.
+	// Sourced from config (env for now).
 	muteLocalOnCast bool
 
 	// signingSecret is the HMAC secret used to sign Sonos media URLs; loaded once
@@ -93,6 +94,20 @@ type Server struct {
 	// fallback used when SSDP finds nothing (both injectable for tests).
 	sonosDiscover func() ([]sonos.Device, error)
 	scanUnicast   func() []sonos.Device
+
+	// castTo points a speaker at a stream URL, stopCast stops one, and deviceURI
+	// reads back the URI a speaker reports plus whether it is playing it. The
+	// read-back is how a device-to-stream mapping is answered without storing
+	// one (#130). All three are injectable so tests exercise the handlers
+	// without a player on the LAN.
+	castTo    func(ip, url, title string) error
+	stopCast  func(ip string) error
+	deviceURI func(ip string) (uri string, playing bool, err error)
+
+	// hostIPs reports the addresses this host answers on, so a URI a speaker
+	// reports can be told apart from another jukebox's on the same LAN.
+	// Injectable: tests pin it rather than depending on the machine.
+	hostIPs func() []string
 }
 
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
@@ -113,6 +128,10 @@ func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 		scanUnicast: func() []sonos.Device {
 			return sonos.ScanUnicast(sonos.OutboundIP(), 200*time.Millisecond)
 		},
+		castTo:    sonos.Cast,
+		stopCast:  sonos.Stop,
+		deviceURI: sonos.NowPlaying,
+		hostIPs:   localIPs,
 	}
 }
 

@@ -37,6 +37,12 @@ func Cast(ip, streamURL, title string) error { return castURL(ControlURL(ip), st
 // Stop stops playback on the Sonos.
 func Stop(ip string) error { return stopURL(ControlURL(ip)) }
 
+// NowPlaying reports the URI the Sonos at ip was last pointed at, and whether it
+// is actually playing it — the two are not the same, see nowPlayingURL. Nothing
+// about a cast is stored server-side, so this read-back off the device is the
+// only source of truth for what a speaker is on (#130).
+func NowPlaying(ip string) (string, bool, error) { return nowPlayingURL(ControlURL(ip)) }
+
 func castURL(controlURL, streamURL, title string) error {
 	set := fmt.Sprintf(
 		`<u:SetAVTransportURI xmlns:u="%s"><InstanceID>0</InstanceID>`+
@@ -53,6 +59,48 @@ func castURL(controlURL, streamURL, title string) error {
 func stopURL(controlURL string) error {
 	body := fmt.Sprintf(`<u:Stop xmlns:u="%s"><InstanceID>0</InstanceID></u:Stop>`, avTransport)
 	return soap(controlURL, avTransport, "Stop", body)
+}
+
+var (
+	currentURIRe = regexp.MustCompile(`<CurrentURI>([^<]*)</CurrentURI>`)
+	transportRe  = regexp.MustCompile(`<CurrentTransportState>([^<]*)</CurrentTransportState>`)
+)
+
+// nowPlayingURL reads what the player was last pointed at, and whether it is
+// playing. The two halves come from two different actions on purpose:
+// GetMediaInfo returns the STORED CurrentURI, which a player keeps reporting
+// long after it has been stopped, so on its own it would claim a speaker is
+// still on a stream it left. GetTransportInfo is what separates the two.
+//
+// TRANSITIONING counts as playing: the speaker has been pointed at the stream
+// and is opening the connection to it, which is the same answer a caller wants.
+func nowPlayingURL(controlURL string) (string, bool, error) {
+	media := fmt.Sprintf(`<u:GetMediaInfo xmlns:u="%s"><InstanceID>0</InstanceID></u:GetMediaInfo>`, avTransport)
+	resp, err := soapCall(controlURL, avTransport, "GetMediaInfo", media)
+	if err != nil {
+		return "", false, err
+	}
+	uri := ""
+	if m := currentURIRe.FindSubmatch(resp); m != nil {
+		uri = xmlUnescape(string(m[1]))
+	}
+	if uri == "" {
+		return "", false, nil // nothing set: no need for a second round trip
+	}
+	state := fmt.Sprintf(`<u:GetTransportInfo xmlns:u="%s"><InstanceID>0</InstanceID></u:GetTransportInfo>`, avTransport)
+	resp, err = soapCall(controlURL, avTransport, "GetTransportInfo", state)
+	if err != nil {
+		return "", false, err
+	}
+	m := transportRe.FindSubmatch(resp)
+	if m == nil {
+		return uri, false, nil
+	}
+	switch string(m[1]) {
+	case "PLAYING", "TRANSITIONING":
+		return uri, true, nil
+	}
+	return uri, false, nil
 }
 
 // SetVolume sets the master playback volume (0–100) on the Sonos at ip.
@@ -128,6 +176,16 @@ func didl(title string) string {
 
 func xmlEscape(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;").Replace(s)
+}
+
+// xmlUnescape reverses xmlEscape on text a player echoes back. Replacer makes a
+// single left-to-right pass and never re-scans what it wrote, so "&amp;lt;"
+// decodes to the literal "&lt;" and stops there rather than going on to "<".
+// That holds whatever order the pairs are in. It covers only the entities
+// xmlEscape emits, which is all a URI we minted ourselves can come back
+// carrying.
+func xmlUnescape(s string) string {
+	return strings.NewReplacer("&lt;", "<", "&gt;", ">", "&quot;", `"`, "&amp;", "&").Replace(s)
 }
 
 // OutboundIP returns the preferred outbound LAN IP of this host (no packets are

@@ -113,8 +113,11 @@ export async function listSonos() {
   const r = await fetch('/api/sonos/devices');
   return r.json(); // [{name, ip}]
 }
-export async function castSonos(ip) {
-  const r = await fetch('/api/sonos/cast', { method: 'POST', body: new URLSearchParams({ ip }) });
+// castSonos points a speaker at one shared stream. The server stores nothing:
+// which speaker is on which stream comes back from listSonos, read off the
+// devices themselves.
+export async function castSonos(ip, stream) {
+  const r = await fetch('/api/sonos/cast', { method: 'POST', body: new URLSearchParams({ ip, stream }) });
   return r.json();
 }
 export async function stopSonos(ip) {

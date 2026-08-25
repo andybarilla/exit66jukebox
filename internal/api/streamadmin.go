@@ -84,7 +84,12 @@ func (s *Server) deleteStream(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "the house stream cannot be deleted")
 		return
 	}
-	// Tear the pipeline down first: connected listeners get a stream-closed
+	// Stop any speaker playing this stream before the feed goes away, so the
+	// speaker ends the cast itself rather than having its connection dropped
+	// mid-play. Nothing records which speaker is on which stream, so this asks
+	// the speakers (#130).
+	s.stopSpeakersPlaying(id)
+	// Then tear the pipeline down: connected listeners get a stream-closed
 	// event and their channels closed, rather than hanging on a feed whose rows
 	// are about to vanish.
 	s.stopPipeline(id)

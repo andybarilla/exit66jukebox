@@ -5,7 +5,8 @@
   import { scanIndicator } from '../scan.js';
   let {
     isPhone = false, query = '', onSearch, streamChipLabel = '', onToggleStream,
-    scan = null, onToast = () => {}, onCastActive = () => {},
+    scan = null, onToast = () => {}, onCastChange = () => {},
+    streams = [], currentStream = '',
     isAdmin = false, me = null, onLogout = () => {}, onOpenSettings = () => {}, onLogin = () => {},
   } = $props();
   let ind = $derived(scanIndicator(scan));
@@ -53,7 +54,7 @@
     <div style="display:flex; align-items:center; gap:14px; flex:none;">
       {@render scanChip()}
       {@render accountControl()}
-      {#if isAdmin}<CastPanel {onToast} {onCastActive} />{/if}
+      {#if isAdmin}<CastPanel {onToast} {onCastChange} {streams} {currentStream} />{/if}
       <span style="display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border:1px solid var(--border-default); border-radius:var(--radius-sm); font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{streamChipLabel} listening</span>
       <Avatar name={me?.display_name || 'Guest'} ring="cyan" size="sm" />
     </div>
@@ -67,7 +68,7 @@
       </div>
       <div style="display:flex; align-items:center; gap:9px;">
         {@render accountControl()}
-        {#if isAdmin}<CastPanel {onToast} {onCastActive} />{/if}
+        {#if isAdmin}<CastPanel {onToast} {onCastChange} {streams} {currentStream} />{/if}
         <button onclick={onToggleStream} style="display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--bg-surface); font-family:var(--font-mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-body); cursor:pointer; white-space:nowrap;"><span style="width:6px; height:6px; border-radius:50%; background:var(--neon-cyan);"></span>{streamChipLabel}</button>
       </div>
     </div>

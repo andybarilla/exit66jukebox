@@ -1,38 +1,146 @@
 package api
 
 import (
+	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/auth"
 	"github.com/andybarilla/exit66jukebox/internal/sonos"
 )
 
-// streamURL builds the house-stream URL the Sonos will fetch, from a server IP
+// streamURL builds the URL a Sonos will fetch for one stream, from a server IP
 // and the server's listen address (for the port). It deliberately does NOT use
 // the request Host header — that is client-controlled and could point the Sonos
 // at an attacker's URL (Host injection).
-func streamURL(ip, listenAddr string) string {
+func streamURL(ip, listenAddr, streamID string) string {
 	_, port, err := net.SplitHostPort(listenAddr)
 	if err != nil || port == "" {
 		port = "8066"
 	}
-	return "http://" + net.JoinHostPort(ip, port) + "/stream/house.mp3"
+	return "http://" + net.JoinHostPort(ip, port) + streamPath(streamID)
 }
 
-// houseStreamURL returns a Sonos-reachable, signed URL for the house stream. The
-// signed token authorizes the speaker (which has no session cookie) to fetch
-// /stream/house.mp3 until it expires.
-func (s *Server) houseStreamURL() string {
+// streamPath is the MP3 route for a stream id. One definition, because the cast
+// URL is signed over exactly the path the speaker will then request.
+func streamPath(streamID string) string { return "/stream/" + streamID + ".mp3" }
+
+// castSignatureTTL is how long a cast URL's signature stays valid.
+//
+// It is deliberately long. A speaker holds no session cookie, so the signature
+// in the URL is its only credential, and it re-fetches that same URL every time
+// it reconnects — after a Wi-Fi blip, or when the household turns the speaker
+// back on the next day. A cast already running survived the old six hours
+// (one long connection, signed once when it opened), so the failure only ever
+// showed up on a reconnect, as a 403 the speaker reports as silence (#130).
+const castSignatureTTL = 30 * 24 * time.Hour
+
+// castStreamURL returns a Sonos-reachable, signed URL for one stream. The signed
+// token authorizes the speaker (which has no session cookie) to fetch that
+// stream's own MP3 path. Callers must have established the stream is shared:
+// a private stream never gets a broadcast pipeline, so this URL would 404.
+func (s *Server) castStreamURL(streamID string) string {
 	ip := sonos.OutboundIP()
 	if ip == "" {
 		ip = "127.0.0.1" // last resort; not Sonos-reachable, but never panics
 	}
-	base := streamURL(ip, s.listenAddr)
-	exp := time.Now().Add(6 * time.Hour).Unix()
-	return base + "?sig=" + auth.SignPath(s.signingSecret, "/stream/house.mp3", exp)
+	base := streamURL(ip, s.listenAddr, streamID)
+	exp := time.Now().Add(castSignatureTTL).Unix()
+	return base + "?sig=" + auth.SignPath(s.signingSecret, streamPath(streamID), exp)
+}
+
+// streamIDFromURI recovers a stream id from a URI a speaker reports it is
+// playing. It answers "" for anything that is not one of our MP3 stream paths —
+// a Spotify session, a line-in, another player it is grouped with — so an
+// unrecognised speaker reports no stream rather than a guess.
+//
+// Sonos is documented to rewrite a plain-http radio URI to
+// x-rincon-mp3radio://<the original> on some paths, so that prefix is stripped
+// before parsing. Every read from a real player during #130 echoed the URI back
+// exactly as it was set, rewrite included nowhere — the strip is insurance, not
+// something observed. The path shape is all this checks; the caller decides
+// whether the id names a stream this server actually serves.
+func streamIDFromURI(uri string) string {
+	uri = strings.TrimPrefix(uri, "x-rincon-mp3radio://")
+	u, err := url.Parse(uri)
+	if err != nil {
+		return ""
+	}
+	id, ok := strings.CutPrefix(u.Path, "/stream/")
+	if !ok {
+		return ""
+	}
+	id, ok = strings.CutSuffix(id, ".mp3")
+	if !ok || id == "" || strings.Contains(id, "/") {
+		return ""
+	}
+	return id
+}
+
+// localIPs reports the addresses this host answers on. Errors yield nil, which
+// ownStreamURI treats as "cannot tell" rather than "not ours".
+func localIPs() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok {
+			out = append(out, ipnet.IP.String())
+		}
+	}
+	return out
+}
+
+// ownStreamURI reports whether uri points at THIS server rather than at another
+// jukebox on the same LAN. The path shape alone is not enough to tell them
+// apart: every install serves /stream/house.mp3, so a speaker playing the
+// neighbouring server's house stream would otherwise be reported as playing
+// ours — and, for a stream id that collided, could be stopped by our delete.
+//
+// It compares against every address this host answers on, not just the one a
+// cast URL was minted from, so a second interface or a changed DHCP lease does
+// not make the server stop recognising its own URLs. When the interfaces cannot
+// be read at all it answers true: failing open degrades to the path-shape check
+// this replaced, where failing closed would silently switch the mute rule off.
+func (s *Server) ownStreamURI(uri string) bool {
+	u, err := url.Parse(strings.TrimPrefix(uri, "x-rincon-mp3radio://"))
+	if err != nil {
+		return false
+	}
+	mine := s.hostIPs()
+	if len(mine) == 0 {
+		return true
+	}
+	host := u.Hostname()
+	for _, ip := range mine {
+		if ip == host {
+			return true
+		}
+	}
+	return false
+}
+
+// deviceStream reports which stream a speaker is playing, or "" for a speaker
+// that is stopped, unreachable, or playing anything else. Nothing is stored:
+// this read off the device is the mapping, so a speaker somebody re-pointed
+// with the Sonos app tells the truth here rather than contradicting us.
+func (s *Server) deviceStream(ip string) string {
+	uri, playing, err := s.deviceURI(ip)
+	if err != nil || !playing {
+		return ""
+	}
+	id := streamIDFromURI(uri)
+	if id == "" || !s.ownStreamURI(uri) || !s.isSharedStream(id) {
+		return ""
+	}
+	return id
 }
 
 // rememberDevices records the discovered device IPs as the cast allowlist.
@@ -111,6 +219,75 @@ func (s *Server) castTarget(w http.ResponseWriter, r *http.Request) (string, boo
 	return ip, true
 }
 
+// castDevice is a speaker plus the stream it is currently playing. Stream is nil
+// (JSON null) for a speaker playing nothing we recognise, which is also what a
+// speaker that could not be reached reports.
+type castDevice struct {
+	sonos.Device
+	Stream *string `json:"stream"`
+}
+
+// withStreams pairs each device with what it is playing, read off the devices
+// themselves. The reads run concurrently because each one is a round trip to a
+// speaker that may be asleep or gone, and a slow one must not add its timeout
+// to every other device's. Each goroutine writes its own index of out and each
+// closes over its own d — loop variables are per-iteration since Go 1.22 — so
+// no lock is needed.
+func (s *Server) withStreams(devices []sonos.Device) []castDevice {
+	out := make([]castDevice, len(devices))
+	var wg sync.WaitGroup
+	for i, d := range devices {
+		out[i] = castDevice{Device: d}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if id := s.deviceStream(d.IP); id != "" {
+				out[i].Stream = &id
+			}
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+// stopSpeakersPlaying stops every known speaker currently playing streamID, so a
+// stream being deleted ends the cast cleanly instead of yanking the feed out
+// from under the speaker. Known means the cast allowlist — the speakers already
+// discovered or added by hand — rather than a fresh discovery, which would put
+// an SSDP round trip in the middle of a delete.
+//
+// A speaker that cannot be reached is left alone: the stream is going away
+// either way, and failing the delete over an unplugged speaker helps nobody.
+func (s *Server) stopSpeakersPlaying(streamID string) {
+	s.sonosMu.Lock()
+	ips := make([]string, 0, len(s.sonosIPs)+len(s.sonosManual))
+	for ip := range s.sonosIPs {
+		ips = append(ips, ip)
+	}
+	for ip := range s.sonosManual {
+		if !s.sonosIPs[ip] {
+			ips = append(ips, ip)
+		}
+	}
+	s.sonosMu.Unlock()
+
+	// ip is per-iteration (Go 1.22+), so each goroutine stops its own speaker.
+	var wg sync.WaitGroup
+	for _, ip := range ips {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if s.deviceStream(ip) != streamID {
+				return
+			}
+			if err := s.stopCast(ip); err != nil {
+				log.Printf("sonos: stopping %s before deleting stream %s: %v", ip, streamID, err)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 func (s *Server) sonosDevices(w http.ResponseWriter, r *http.Request) {
 	// SSDP multicast is unreliable on some LANs (see #62). When it finds nothing —
 	// whether it returned cleanly empty or errored — fall back to a unicast /24
@@ -123,7 +300,26 @@ func (s *Server) sonosDevices(w http.ResponseWriter, r *http.Request) {
 		devices = []sonos.Device{}
 	}
 	s.rememberDevices(devices)
-	writeJSON(w, http.StatusOK, s.deviceList(devices))
+	writeJSON(w, http.StatusOK, s.withStreams(s.deviceList(devices)))
+}
+
+// castStreamID reads the stream to cast from the request. An absent stream is
+// the house stream, so a client that predates per-stream casting keeps working.
+//
+// Only a shared stream can be cast, and that single check covers every refusal
+// the stream routes make: an unknown id, a private row, and the personal-stream
+// alias all fail it. It answers 404 the way streamGate does, rather than
+// revealing by contrast which ids exist.
+func (s *Server) castStreamID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := r.FormValue("stream")
+	if id == "" {
+		id = houseStreamID
+	}
+	if !s.isSharedStream(id) {
+		writeErr(w, http.StatusNotFound, "no such shared stream")
+		return "", false
+	}
+	return id, true
 }
 
 func (s *Server) sonosCast(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +327,11 @@ func (s *Server) sonosCast(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := sonos.Cast(ip, s.houseStreamURL(), "Exit 66 Jukebox"); err != nil {
+	streamID, ok := s.castStreamID(w, r)
+	if !ok {
+		return
+	}
+	if err := s.castTo(ip, s.castStreamURL(streamID), "Exit 66 Jukebox"); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -143,7 +343,7 @@ func (s *Server) sonosStop(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := sonos.Stop(ip); err != nil {
+	if err := s.stopCast(ip); err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

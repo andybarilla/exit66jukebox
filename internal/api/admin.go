@@ -7,11 +7,11 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
-// houseStreamID is the always-on shared stream: created at boot, the only cast
-// target, and the only stream whose playback is scrobbled. It cannot be
-// deleted. Its display name IS editable like any other shared stream's
-// (criterion 2) — nothing derives behaviour from the name, only from this id.
-// Matches the houseID const in main.go.
+// houseStreamID is the always-on shared stream: created at boot, the stream a
+// cast falls back to when the caller names none, and the only stream whose
+// playback is scrobbled. It cannot be deleted. Its display name IS editable
+// like any other shared stream's (criterion 2) — nothing derives behaviour from
+// the name, only from this id. Matches the houseID const in main.go.
 const houseStreamID = "house"
 
 // currentUser resolves the request's session cookie to a user. ok is false for
