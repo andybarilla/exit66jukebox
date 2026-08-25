@@ -1,7 +1,6 @@
 package fed
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -9,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
-	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,12 +32,14 @@ import (
 // reachable candidate pair, negotiation fails and the resolver falls back to the
 // yamux-direct then hub-relay tiers — playback is never broken.
 //
-// Signaling rides the peer's own federation session: SDP offer/answer and
-// trickle ICE candidates are POSTed to the recipient's /fed/signal/{to} endpoint
-// over the session established by the token handshake, and land in that
-// process's Signaler mailbox (see sendSignal). An outbound signal is addressed
-// through the Registry, so it can only travel over an existing session and never
-// to an arbitrary host.
+// Signaling rides a federation session: SDP offer/answer and trickle ICE
+// candidates are POSTed to /fed/signal/{to} and land in the recipient's Signaler
+// mailbox (see sendSignal). It goes over the recipient's own session when there
+// is one, and otherwise over this instance's hub session, which forwards it on
+// over the recipient's — the case two NAT'd peers are in, since neither can dial
+// the other (#158). Either way the next hop is addressed through the Registry,
+// so a signal only travels over an existing session and never to an arbitrary
+// host.
 //
 // What that does NOT establish is who is on the far end. The handshake checks a
 // single federation-wide token and takes the peer id from the claim the dialer
@@ -51,8 +50,10 @@ import (
 // random. Correlation across an offer/answer/ICE exchange is by SID (see
 // SignalMsg).
 //
-// Two peers that have no session to each other cannot signal at all; hub-relayed
-// signaling for that case is not built (issue #158).
+// A hub-forwarded signal is the one exception: the hub replaces From with the id
+// of the session the message arrived on, so the recipient is trusting the hub's
+// attribution rather than the sender's word. That is a stronger claim than the
+// body, and no stronger than the handshake behind it (#167).
 //
 // Dispatch model: each transport owns one mailbox (under selfID) and one reader
 // goroutine (startedReader). The reader routes inbound offers to handleOffer and
@@ -79,8 +80,9 @@ type WebRTCTransport struct {
 	selfID   string
 	config   webrtc.Configuration
 	signaler *Signaler
-	// reg resolves a peer id to its live federation session, which is how an
-	// outbound signal reaches a peer in another process (see postSignal).
+	// reg resolves the next hop for an outbound signal: the recipient's own
+	// federation session, or the hub's when there is no session to the
+	// recipient (see postSignal).
 	reg *Registry
 	log *log.Logger
 
@@ -319,52 +321,32 @@ func (t *WebRTCTransport) sendSignal(msg SignalMsg) bool {
 	return t.postSignal(msg)
 }
 
-// postSignal POSTs msg to the recipient's /fed/signal/{to} endpoint over the
-// recipient's own federation session, where WithSignalRelay drops it into that
-// process's mailbox. It returns false when the peer has no live session — the
-// caller treats that as a negotiation failure and falls back a tier.
+// postSignal sends msg over a federation session to the process hosting its
+// recipient's mailbox, and reports whether it landed there.
+//
+// The recipient's own session is used when this instance has one. When it does
+// not, the hub session is — the hub's relay forwards over the recipient's
+// session on this instance's behalf, which is the only path between two peers
+// that can each reach the hub and nothing else (#158). With neither, there is no
+// path: the caller treats false as a negotiation failure and falls back a tier.
 //
 // Routing through reg is what keeps this off arbitrary hosts: reg holds peers
 // that completed the token handshake and have a live session, and p.Client is a
-// SessionClient bound to that session, so baseURL only names the peer — it
-// never selects a destination. It is not proof of who the peer is; the handshake
-// does not verify the id a token holder claims.
+// SessionClient bound to that session, so a peer id selects a session — it never
+// selects a destination. It is not proof of who the peer is; the handshake does
+// not verify the id a token holder claims.
 func (t *WebRTCTransport) postSignal(msg SignalMsg) bool {
 	if t.reg == nil {
 		return false
 	}
 	p := t.reg.Get(msg.To)
 	if p == nil || p.Client == nil {
+		p = t.reg.Get(hubPeerID)
+	}
+	if p == nil || p.Client == nil {
 		return false
 	}
-	baseURL := p.BaseURL
-	if baseURL == "" {
-		baseURL = "http://" + msg.To
-	}
-	body, err := json.Marshal(msg)
-	if err != nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), signalTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		baseURL+"/fed/signal/"+url.PathEscape(msg.To), bytes.NewReader(body))
-	if err != nil {
-		return false
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := p.Client.Do(req)
-	if err != nil {
-		t.log.Printf("webrtc signal %s %s: %v", msg.Type, msg.To, err)
-		return false
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode != http.StatusAccepted {
-		t.log.Printf("webrtc signal %s %s: status %d", msg.Type, msg.To, resp.StatusCode)
-		return false
-	}
-	return true
+	return postSignal(context.Background(), p, msg, t.log)
 }
 
 // Dial is the offerer side: create a PeerConnection + data channel, exchange

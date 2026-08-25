@@ -147,7 +147,25 @@ type directResolver struct {
 // it must be configured and both this peer and the remote must advertise direct
 // WebRTC capability.
 func (dr *directResolver) triedWebRTC(p *Peer) bool {
-	return dr.webrtc != nil && p != nil && p.Caps.DirectWebRTC
+	if dr.webrtc == nil {
+		return false
+	}
+	if p != nil {
+		return p.Caps.DirectWebRTC
+	}
+	// No session to this peer at all — the NAT case WebRTC exists for, and the
+	// one this gate used to exclude outright, so signaling could be fixed and
+	// the tier still never be attempted (#158). Its caps cannot have been
+	// learned, because /fed/caps rides the peer's own session; the hub's
+	// presence is what stands in, since the hub is the only thing that can
+	// carry the negotiation.
+	//
+	// Attempting it costs nothing when the peer cannot do WebRTC: it hosts no
+	// signaling mailbox, so the hub's forward is refused and Dial fails at its
+	// first signal in milliseconds. It costs webrtcSetupTimeout when the peer
+	// can signal but ICE finds no candidate pair — the price #124 already
+	// accepted for a peer whose caps say yes, now paid by hub-only peers too.
+	return dr.reg.Get(hubPeerID) != nil
 }
 
 // serveWebRTC attempts the WebRTC direct transport tier. Returns ok=true if it
