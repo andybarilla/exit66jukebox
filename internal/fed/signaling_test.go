@@ -45,7 +45,7 @@ func TestSignalRelayHandlerAcceptsAndRelays(t *testing.T) {
 	mailbox := s.Register("bob")
 	defer s.Unregister("bob", mailbox)
 
-	h := WithSignalRelay(s, http.NewServeMux())
+	h := WithSignalRelay(s, nil, http.NewServeMux())
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/fed/signal/bob", strings.NewReader(
 		`{"from":"alice","to":"bob","type":"ice","ice":"candidate:..."}`))
@@ -68,7 +68,7 @@ func TestSignalRelayHandlerAcceptsAndRelays(t *testing.T) {
 // 503 when the recipient peer is not registered.
 func TestSignalRelayHandlerRejectsOfflineRecipient(t *testing.T) {
 	s := NewSignaler()
-	h := WithSignalRelay(s, http.NewServeMux())
+	h := WithSignalRelay(s, nil, http.NewServeMux())
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/fed/signal/ghost", strings.NewReader(`{}`))
 	h.ServeHTTP(rec, req)
@@ -83,7 +83,7 @@ func TestSignalRelayHandlerRejectsOfflineRecipient(t *testing.T) {
 func TestSignalRelayRejectsOversizedBody(t *testing.T) {
 	s := NewSignaler()
 	ch := s.Register("bob")
-	h := WithSignalRelay(s, http.NewServeMux())
+	h := WithSignalRelay(s, nil, http.NewServeMux())
 
 	body := `{"type":"offer","sdp":"` + strings.Repeat("A", maxSignalBody+1) + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/fed/signal/bob", strings.NewReader(body))

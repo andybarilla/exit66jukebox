@@ -44,7 +44,7 @@ func newSignalProcess(t *testing.T, peerID string) *signalProcess {
 	p := &signalProcess{peerID: peerID, signaler: NewSignaler(), reg: NewRegistry()}
 	session := WithCapsRoute(
 		Capabilities{DirectWebRTC: true},
-		WithSignalRelay(p.signaler, PeerRoutes(nil, nil)),
+		WithSignalRelay(p.signaler, nil, PeerRoutes(nil, nil)),
 	)
 	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/fed/signal/") {

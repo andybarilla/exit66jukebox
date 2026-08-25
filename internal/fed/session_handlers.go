@@ -18,6 +18,7 @@ import (
 //
 //	WithCapsRoute    /fed/caps, so a peer can discover transports post-handshake
 //	WithSignalRelay  POST /fed/signal/{to}, the inbound half of WebRTC signaling
+//	                 (plus, on the hub only, the onward half)
 //	AppRoutes        the peerVisibleAppRoutes allowlist and nothing else
 //	PeerRoutes       /fed/catalog plus that same allowlist
 //
@@ -30,14 +31,27 @@ func MemberSessionHandler(caps Capabilities, app http.Handler) http.Handler {
 
 // HubSessionHandler is what a hub serves to its members: the relay routes plus
 // the signaling endpoint.
+//
+// The hub is the only composition whose relay forwards. It hosts no signaling
+// mailbox of its own — no WebRTC transport is built for the hub role — so every
+// recipient it is asked about is one of its members, and forwarding over that
+// member's session is the only path between two peers that can each reach the
+// hub and nothing else (#158). The forwarder is built from the relay's registry
+// because that is the hub's registry: main.go passes the Manager's.
+//
+// Callers must serve the result per session through WithSessionPeer, or the
+// relay has no sender to attribute a forwarded message to and refuses it.
+// Manager.serveHubConn does.
 func HubSessionHandler(caps Capabilities, signaler *Signaler, relay *Relay) http.Handler {
-	return WithCapsRoute(caps, WithSignalRelay(signaler, relay.Routes()))
+	return WithCapsRoute(caps, WithSignalRelay(signaler, hubSignalForwarder(relay.reg, nil), relay.Routes()))
 }
 
 // PeerSessionHandler is what a peer serves over a direct peer session. The
 // signal relay is what lets a remote peer's WebRTC negotiation reach this
 // process's mailbox; without it the transport's outbound POST has nothing to
-// arrive at and the tier never engages (#152).
+// arrive at and the tier never engages (#152). It takes no forwarder: a peer
+// relays to itself only, which is what stops a hub-forwarded message being
+// forwarded again.
 func PeerSessionHandler(caps Capabilities, signaler *Signaler, db *sql.DB, app http.Handler) http.Handler {
-	return WithCapsRoute(caps, WithSignalRelay(signaler, PeerRoutes(db, app)))
+	return WithCapsRoute(caps, WithSignalRelay(signaler, nil, PeerRoutes(db, app)))
 }
