@@ -30,7 +30,7 @@ func TestMiddlewareBlocksAnonymous(t *testing.T) {
 func TestForgotPasswordDoesNotRevealAccountsOrReturnLink(t *testing.T) {
 	s, db := newTestServer(t)
 	h, _ := auth.HashPassword("oldpassword")
-	store.CreateUser(db, "reset@example.com", "Reset", h, false)
+	store.CreateUser(db, "reset@example.com", "Reset", h, false, true)
 
 	existing := httptest.NewRecorder()
 	s.forgotPassword(existing, httptest.NewRequest("POST", "/api/auth/password-reset/forgot", strings.NewReader(`{"email":"reset@example.com"}`)))
@@ -51,7 +51,7 @@ func TestForgotPasswordDoesNotRevealAccountsOrReturnLink(t *testing.T) {
 func TestResetPasswordSetsNewPasswordWithoutLoginAndInvalidatesSessions(t *testing.T) {
 	s, db := newTestServer(t)
 	oldHash, _ := auth.HashPassword("oldpassword")
-	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", oldHash, false)
+	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", oldHash, false, true)
 	sessionRaw, _ := auth.GenerateToken()
 	store.CreateSession(db, auth.HashToken(sessionRaw), userID, 4_000_000_000)
 	tokenRaw, _ := auth.GenerateToken()
@@ -91,7 +91,7 @@ func TestForgotPasswordSendsEmailWhenConfigured(t *testing.T) {
 	s, db := newTestServer(t)
 	s.SetPublicOrigin("https://jukebox.example.com")
 	h, _ := auth.HashPassword("oldpassword")
-	store.CreateUser(db, "reset@example.com", "Reset", h, false)
+	store.CreateUser(db, "reset@example.com", "Reset", h, false, true)
 	var sentTo, sentLink string
 	s.SetPasswordResetEmailer(func(to, link string) { sentTo, sentLink = to, link })
 
@@ -114,7 +114,7 @@ func TestPasswordResetEndpointsPassProductionMiddleware(t *testing.T) {
 	s, db := newTestServer(t)
 	s.SetPublicOrigin("https://jukebox.example.com")
 	hash, _ := auth.HashPassword("oldpassword")
-	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", hash, false)
+	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", hash, false, true)
 	tokenRaw, _ := auth.GenerateToken()
 	store.CreatePasswordReset(db, auth.HashToken(tokenRaw), userID, 4_000_000_000)
 	h := s.RequireAuthMiddleware(s.Handler())
@@ -142,7 +142,7 @@ func TestPasswordResetEndpointsPassProductionMiddleware(t *testing.T) {
 func TestResetPasswordTokenIsSingleUseBeforePasswordChange(t *testing.T) {
 	s, db := newTestServer(t)
 	oldHash, _ := auth.HashPassword("oldpassword")
-	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", oldHash, false)
+	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", oldHash, false, true)
 	tokenRaw, _ := auth.GenerateToken()
 	store.CreatePasswordReset(db, auth.HashToken(tokenRaw), userID, 4_000_000_000)
 	body := `{"token":"` + tokenRaw + `","password":"firstpassword"}`
@@ -181,7 +181,7 @@ func TestForgotPasswordThrottle(t *testing.T) {
 
 func TestMiddlewareAllowsSession(t *testing.T) {
 	s, db := newTestServer(t)
-	uid, _ := store.CreateUser(db, "a@b.com", "A", "h", false)
+	uid, _ := store.CreateUser(db, "a@b.com", "A", "h", false, true)
 	raw, _ := auth.GenerateToken()
 	store.CreateSession(db, auth.HashToken(raw), uid, 4_000_000_000)
 	h := s.requireAuth(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
@@ -250,7 +250,7 @@ func TestSignupToggleAppliesOnlyToFullLogin(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s, db := newTestServer(t)
-			if _, err := store.CreateUser(db, "admin@example.com", "Admin", "hash", true); err != nil {
+			if _, err := store.CreateUser(db, "admin@example.com", "Admin", "hash", true, true); err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
 			if err := store.SetSignupEnabled(db, true); err != nil {
@@ -544,7 +544,7 @@ func TestVerifyEmailEndpointRejectsBadTokensAndPassesMiddleware(t *testing.T) {
 func TestLoginSetsCookieAndMe(t *testing.T) {
 	s, db := newTestServer(t)
 	h, _ := auth.HashPassword("pw123456")
-	store.CreateUser(db, "a@b.com", "A", h, true)
+	store.CreateUser(db, "a@b.com", "A", h, true, true)
 	rec := httptest.NewRecorder()
 	s.login(rec, httptest.NewRequest("POST", "/api/auth/login",
 		strings.NewReader(`{"email":"a@b.com","password":"pw123456"}`)))
@@ -1058,7 +1058,7 @@ func createMFAUser(t *testing.T, s *Server, db *sql.DB, email string) (string, i
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
-	userID, err := store.CreateUser(db, email, "MFA", h, false)
+	userID, err := store.CreateUser(db, email, "MFA", h, false, true)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -1082,7 +1082,7 @@ func createAuthenticatedUser(t *testing.T, s *Server, db *sql.DB, email string) 
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
-	userID, err := store.CreateUser(db, email, "Authenticated", passwordHash, false)
+	userID, err := store.CreateUser(db, email, "Authenticated", passwordHash, false, true)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -1133,7 +1133,7 @@ func sessionCookieFrom(rec *httptest.ResponseRecorder) *http.Cookie {
 func TestLoginWrongPassword(t *testing.T) {
 	s, db := newTestServer(t)
 	h, _ := auth.HashPassword("right")
-	store.CreateUser(db, "a@b.com", "A", h, false)
+	store.CreateUser(db, "a@b.com", "A", h, false, true)
 	rec := httptest.NewRecorder()
 	s.login(rec, httptest.NewRequest("POST", "/api/auth/login",
 		strings.NewReader(`{"email":"a@b.com","password":"wrong"}`)))
@@ -1144,7 +1144,7 @@ func TestLoginWrongPassword(t *testing.T) {
 
 func TestInviteAcceptCreatesUser(t *testing.T) {
 	s, db := newTestServer(t)
-	admin, _ := store.CreateUser(db, "admin@b.com", "Ad", "h", true)
+	admin, _ := store.CreateUser(db, "admin@b.com", "Ad", "h", true, true)
 	raw, _ := auth.GenerateToken()
 	store.CreateInvite(db, auth.HashToken(raw), "inv@b.com", true, admin, 4_000_000_000)
 	rec := httptest.NewRecorder()
@@ -1227,7 +1227,7 @@ func TestForgotPasswordRefusesWithoutPublicOrigin(t *testing.T) {
 	s, db := newTestServer(t)
 	s.SetListenAddr("0.0.0.0:8066")
 	h, _ := auth.HashPassword("oldpassword")
-	if _, err := store.CreateUser(db, "reset@example.com", "Reset", h, false); err != nil {
+	if _, err := store.CreateUser(db, "reset@example.com", "Reset", h, false, true); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	sent := false

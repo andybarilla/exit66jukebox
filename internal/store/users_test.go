@@ -22,7 +22,7 @@ func TestUserCreateGetCount(t *testing.T) {
 	if n, _ := CountUsers(db); n != 0 {
 		t.Fatalf("want 0 users, got %d", n)
 	}
-	id, err := CreateUser(db, "a@b.com", "Alice", "hash1", true)
+	id, err := CreateUser(db, "a@b.com", "Alice", "hash1", true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,17 +40,17 @@ func TestUserCreateGetCount(t *testing.T) {
 
 func TestUserDuplicateEmail(t *testing.T) {
 	db := mustOpenMem(t)
-	if _, err := CreateUser(db, "a@b.com", "A", "h", false); err != nil {
+	if _, err := CreateUser(db, "a@b.com", "A", "h", false, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CreateUser(db, "a@b.com", "A2", "h", false); err == nil {
+	if _, err := CreateUser(db, "a@b.com", "A2", "h", false, true); err == nil {
 		t.Fatal("duplicate email allowed")
 	}
 }
 
 func TestListAndDeleteUser(t *testing.T) {
 	db := mustOpenMem(t)
-	id, _ := CreateUser(db, "a@b.com", "A", "h", true)
+	id, _ := CreateUser(db, "a@b.com", "A", "h", true, true)
 	if us, _ := ListUsers(db); len(us) != 1 {
 		t.Fatalf("want 1, got %d", len(us))
 	}
@@ -270,7 +270,7 @@ func TestCreatePasswordlessProfileUsesExistingUserTable(t *testing.T) {
 func TestListPasswordlessProfilesExcludesPasswordUsers(t *testing.T) {
 	db := mustOpenMem(t)
 
-	if _, err := CreateUser(db, "admin@example.com", "Admin", "hash", true); err != nil {
+	if _, err := CreateUser(db, "admin@example.com", "Admin", "hash", true, true); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	firstID, err := CreatePasswordlessProfile(db, "Avery")

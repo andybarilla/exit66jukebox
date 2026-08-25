@@ -36,14 +36,15 @@ func CountUsers(db *sql.DB) (int, error) {
 }
 
 // CreateUser inserts an account and returns its id. The UNIQUE(email)
-// constraint surfaces as an error on a duplicate.
-
-func CreateUser(db *sql.DB, email, displayName, passwordHash string, isAdmin bool, verified ...bool) (int64, error) {
+// constraint surfaces as an error on a duplicate. verified stamps
+// email_verified_at now, which is what login's verification gate reads; pass
+// false for any account that still has to prove its address.
+func CreateUser(db *sql.DB, email, displayName, passwordHash string, isAdmin, verified bool) (int64, error) {
 	if err := ensurePasswordlessProfileColumn(db); err != nil {
 		return 0, err
 	}
 	emailVerifiedAtExpr := "0"
-	if len(verified) == 0 || verified[0] {
+	if verified {
 		emailVerifiedAtExpr = "strftime('%s','now')"
 	}
 	res, err := db.Exec(
