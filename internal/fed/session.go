@@ -25,7 +25,9 @@ type Peer struct {
 	Caps    Capabilities
 }
 
-// Registry tracks live peer sessions by id. A peer present here is online.
+// Registry tracks live peer sessions by id. A peer present here is online,
+// except for the window between a session closing and the goroutine serving it
+// removing the entry.
 type Registry struct {
 	mu    sync.RWMutex
 	peers map[string]*Peer
@@ -127,6 +129,14 @@ func acceptAndRegister(conn net.Conn, token string, reg *Registry) (*Peer, error
 		conn.Close()
 		return nil, fmt.Errorf("bad token")
 	}
+	// Refuse a claimed id before the ack, so the newcomer reads the refusal the
+	// same way it reads a bad token — closed without an ack — and backs off
+	// instead of re-dialling immediately. putIfFree below is what makes it
+	// atomic; this check is what makes it a clean rejection on the wire.
+	if old := reg.Get(peerID); old != nil && old.Session != nil && !old.Session.IsClosed() {
+		conn.Close()
+		return nil, errPeerIDInUse
+	}
 	// Send a single-byte ack before handing off to yamux so the member side
 	// can detect rejection vs. acceptance without stealing yamux framing bytes.
 	if _, err := conn.Write([]byte{1}); err != nil {
@@ -140,8 +150,9 @@ func acceptAndRegister(conn net.Conn, token string, reg *Registry) (*Peer, error
 	}
 	p := &Peer{ID: peerID, Session: sess, Client: SessionClient(sess), BaseURL: "http://" + peerID}
 	if err := reg.putIfFree(p); err != nil {
-		// Refuse the newcomer rather than evicting the incumbent: the id is
-		// self-declared at handshake, so evicting would let any token holder
+		// Backstop for two registrations racing past the pre-ack check: the
+		// loser closes its own session rather than evicting the winner. The id
+		// is self-declared at handshake, so evicting would let any token holder
 		// knock a connected peer offline at will.
 		sess.Close()
 		return nil, err

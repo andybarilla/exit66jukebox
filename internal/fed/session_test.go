@@ -121,6 +121,18 @@ func readPeerWho(t *testing.T, p *Peer) string {
 	return string(body)
 }
 
+// dialTestHandshake performs only the handshake as peerID and reports whether
+// the hub acked. No session is built.
+func dialTestHandshake(t *testing.T, addr, peerID string) error {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	return dialHandshake(conn, "tok", peerID)
+}
+
 func TestRegisterRefusesIDHoldingLiveSession(t *testing.T) {
 	reg := NewRegistry()
 	addr, results := startTestHub(t, reg)
@@ -135,10 +147,13 @@ func TestRegisterRefusesIDHoldingLiveSession(t *testing.T) {
 		t.Fatal("incumbent never registered")
 	}
 
-	usurperSess := dialTestMember(t, addr, "home", "usurper")
-	defer usurperSess.Close()
+	// The refusal lands before the ack, so the newcomer sees what a bad token
+	// sees: the connection closed without an ack.
+	if err := dialTestHandshake(t, addr, "home"); err == nil {
+		t.Fatal("a claim on an id that holds a live session must be refused")
+	}
 	if err := <-results; err == nil {
-		t.Fatal("registering an id that holds a live session must be refused")
+		t.Fatal("hub registered a second peer under a live id")
 	}
 
 	if got := reg.Get("home"); got != incumbent {
@@ -185,5 +200,51 @@ func TestRegisterReclaimsIDAfterSessionEnds(t *testing.T) {
 	}
 	if who := readPeerWho(t, second); who != "second" {
 		t.Fatalf("/who over reconnected session = %q, want %q", who, "second")
+	}
+}
+
+// liveTestSession returns an open yamux session (both ends held for the life of
+// the test) for cases that need a Peer whose session is live or closable.
+func liveTestSession(t *testing.T) *yamux.Session {
+	t.Helper()
+	cConn, sConn := net.Pipe()
+	client, err := yamux.Client(cConn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := yamux.Server(sConn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.Close(); server.Close() })
+	return client
+}
+
+// putIfFree is the atomic backstop for two registrations racing past the
+// pre-ack check, which the wire-level tests cannot schedule deterministically.
+func TestPutIfFreeKeepsLiveIncumbent(t *testing.T) {
+	reg := NewRegistry()
+	incumbent := &Peer{ID: "home", Session: liveTestSession(t)}
+	if err := reg.putIfFree(incumbent); err != nil {
+		t.Fatalf("registering a free id: %v", err)
+	}
+
+	if err := reg.putIfFree(&Peer{ID: "home", Session: liveTestSession(t)}); err == nil {
+		t.Fatal("putIfFree accepted an id holding a live session")
+	}
+	if got := reg.Get("home"); got != incumbent {
+		t.Fatalf("registry peer = %p, want the incumbent %p", got, incumbent)
+	}
+	if incumbent.Session.IsClosed() {
+		t.Fatal("incumbent session was closed by the refused registration")
+	}
+
+	incumbent.Session.Close()
+	replacement := &Peer{ID: "home", Session: liveTestSession(t)}
+	if err := reg.putIfFree(replacement); err != nil {
+		t.Fatalf("reclaiming an id whose session has closed: %v", err)
+	}
+	if got := reg.Get("home"); got != replacement {
+		t.Fatalf("registry peer = %p, want the replacement %p", got, replacement)
 	}
 }
