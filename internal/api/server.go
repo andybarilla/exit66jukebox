@@ -14,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
-
 	"github.com/andybarilla/exit66jukebox/internal/auth"
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/fed"
@@ -64,12 +62,12 @@ type Server struct {
 	signingSecret []byte
 	mfaKey        []byte
 
-	// oidc is the enabled sign-in provider, nil when OIDC is off (see SetOIDC).
-	// oidcDiscovered caches the provider's discovery document, fetched on first
-	// sign-in rather than at startup and guarded by oidcMu.
-	oidc           *oidcConfig
-	oidcMu         sync.Mutex
-	oidcDiscovered *oidc.Provider
+	// sso holds the enabled sign-in providers in the order the sign-in surface
+	// offers them, and ssoByID indexes the same values by their route segment.
+	// Both are empty when sign-in through a provider is off (see SetSSO), and
+	// both are written once at startup and only read afterwards.
+	sso     []*ssoProvider
+	ssoByID map[string]*ssoProvider
 	// bootstrapTokenHash is the armed first-admin bootstrap token, hashed;
 	// empty once claimed. Read by concurrent signups, cleared by the winner.
 	bootstrapMu        sync.RWMutex
@@ -298,8 +296,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/profiles", s.listPasswordlessProfiles)
 	mux.HandleFunc("POST /api/auth/profiles", s.createPasswordlessProfile)
 	mux.HandleFunc("POST /api/auth/profiles/select", s.selectPasswordlessProfile)
-	mux.HandleFunc("GET /api/auth/oidc/start", s.oidcStart)
-	mux.HandleFunc("GET "+oidcCallbackPath, s.oidcCallback)
+	mux.HandleFunc("GET /api/auth/sso/{provider}/start", s.ssoStart)
+	mux.HandleFunc("GET "+ssoCallbackPath, s.ssoCallback)
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/auth/me", s.me)
 	mux.HandleFunc("POST /api/auth/invite/accept", s.inviteAccept)

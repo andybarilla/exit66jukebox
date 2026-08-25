@@ -22,7 +22,9 @@ type Config struct {
 	Services      Services
 	Federation    Federation
 	SMTP          SMTP
-	OIDC          OIDC
+	// SSO holds every configured sign-in provider, in the order the sign-in
+	// surface offers them. Empty means password-only.
+	SSO           []Provider
 	PublicOrigin  string
 	MFAKey        []byte
 
@@ -53,34 +55,85 @@ func smtpFromEnv() SMTP {
 	}
 }
 
-// OIDC holds the optional single-sign-on provider (env only, like Services: the
-// client secret must not reach the process list). All three of Issuer, ClientID
-// and ClientSecret are needed; anything less leaves sign-in password-only.
-// ButtonLabel is what the sign-in surface calls the provider.
-type OIDC struct {
+// Provider is one configured sign-in provider. ID is its stable slug: the
+// route segment (/api/auth/sso/{id}/start) and the key /api/config advertises
+// it under. Issuer is the OpenID issuer URL — used verbatim for discovery, and
+// the value external identities are keyed on in oidc_identity, so it must never
+// change for a provider once accounts exist against it. ButtonLabel is what the
+// sign-in surface calls the provider.
+//
+// Credentials come from the environment only, like Services: a client secret
+// passed as a -flag leaks via the process list.
+type Provider struct {
+	ID           string
 	Issuer       string
 	ClientID     string
 	ClientSecret string
 	ButtonLabel  string
 }
 
-// DefaultOIDCButtonLabel names the provider on the sign-in surface when the
-// operator has not chosen a name.
+// Provider IDs. These are wire values — they appear in the start route and in
+// /api/config — so they are fixed here rather than derived from anything the
+// operator sets.
+const (
+	// ProviderOIDC is the generic provider configured with an issuer of the
+	// operator's choosing (EXIT66_OIDC_*).
+	ProviderOIDC = "oidc"
+	// ProviderGoogle is Google, whose issuer is fixed and whose operator only
+	// supplies credentials.
+	ProviderGoogle = "google"
+)
+
+// GoogleIssuer is Google's OpenID issuer. It is a constant rather than an
+// operator setting: it is fixed for everyone, it is what Google's ID tokens
+// carry as their iss claim, and it is the value google identities are keyed on.
+const GoogleIssuer = "https://accounts.google.com"
+
+// GoogleButtonLabel is what the sign-in surface calls Google. Unlike the
+// generic provider there is no name to choose — an operator renaming this
+// button would only make it less recognisable.
+const GoogleButtonLabel = "Google"
+
+// DefaultOIDCButtonLabel names the generic provider on the sign-in surface when
+// the operator has not chosen a name.
 const DefaultOIDCButtonLabel = "single sign-on"
 
 // Configured reports whether a provider is fully specified. A partial config is
 // deliberately "off" rather than an error: the same treatment Services gets, so
 // a half-filled env file can never take password login down with it.
-func (o OIDC) Configured() bool {
-	return o.Issuer != "" && o.ClientID != "" && o.ClientSecret != ""
+func (p Provider) Configured() bool {
+	return p.Issuer != "" && p.ClientID != "" && p.ClientSecret != ""
 }
 
-func oidcFromEnv() OIDC {
+// providersFromEnv reads every configured sign-in provider, in the order the
+// sign-in surface will offer them: named providers first, because a button
+// carrying a name the user recognises belongs above a generic one.
+//
+// Each provider is its own block of environment variables rather than a list to
+// be enumerated (EXIT66_SSO_PROVIDERS=google,corp and per-name variables under
+// it). The environment is flat, every named provider we add needs exactly two
+// variables because its issuer and label are fixed, and a list is one more
+// thing to spell wrong for no gain. The internal type is a list either way, so
+// a future need for several *generic* providers can add a list source here
+// without changing anything downstream.
+func providersFromEnv() []Provider {
+	var out []Provider
+	google := Provider{
+		ID:           ProviderGoogle,
+		Issuer:       GoogleIssuer,
+		ClientID:     os.Getenv("EXIT66_GOOGLE_CLIENT_ID"),
+		ClientSecret: os.Getenv("EXIT66_GOOGLE_CLIENT_SECRET"),
+		ButtonLabel:  GoogleButtonLabel,
+	}
+	if google.Configured() {
+		out = append(out, google)
+	}
 	label := strings.TrimSpace(os.Getenv("EXIT66_OIDC_NAME"))
 	if label == "" {
 		label = DefaultOIDCButtonLabel
 	}
-	return OIDC{
+	generic := Provider{
+		ID: ProviderOIDC,
 		// Whitespace only. A trailing slash is NOT trimmed: discovery requires
 		// the issuer claim to equal this string exactly, and some providers
 		// (Auth0 among them) really do publish one with the slash.
@@ -89,6 +142,10 @@ func oidcFromEnv() OIDC {
 		ClientSecret: os.Getenv("EXIT66_OIDC_CLIENT_SECRET"),
 		ButtonLabel:  label,
 	}
+	if generic.Configured() {
+		out = append(out, generic)
+	}
+	return out
 }
 
 // Services holds external-service credentials. They are read from the
@@ -223,7 +280,7 @@ func Parse(args []string) (Config, error) {
 	c.Services = servicesFromEnv()
 	c.Federation = federationFromEnv()
 	c.SMTP = smtpFromEnv()
-	c.OIDC = oidcFromEnv()
+	c.SSO = providersFromEnv()
 	c.PublicOrigin = os.Getenv("EXIT66_PUBLIC_ORIGIN")
 	mfaKey, err := LoadMFAKey(os.Getenv("EXIT66_MFA_KEY"))
 	if err != nil {
