@@ -37,12 +37,16 @@ func TestSonosCastRequiresIP(t *testing.T) {
 }
 
 func TestStreamURL(t *testing.T) {
-	if got := streamURL("192.168.1.10", ":8066"); got != "http://192.168.1.10:8066/stream/house.mp3" {
+	if got := streamURL("192.168.1.10", ":8066", "house"); got != "http://192.168.1.10:8066/stream/house.mp3" {
 		t.Fatalf("streamURL = %q", got)
 	}
 	// Empty/invalid listen addr falls back to the default port.
-	if got := streamURL("192.168.1.10", ""); got != "http://192.168.1.10:8066/stream/house.mp3" {
+	if got := streamURL("192.168.1.10", "", "house"); got != "http://192.168.1.10:8066/stream/house.mp3" {
 		t.Fatalf("streamURL fallback = %q", got)
+	}
+	// The stream is a parameter, not the hard-coded house path.
+	if got := streamURL("192.168.1.10", ":8066", "party01"); got != "http://192.168.1.10:8066/stream/party01.mp3" {
+		t.Fatalf("streamURL per-stream = %q", got)
 	}
 }
 

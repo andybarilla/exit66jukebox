@@ -93,6 +93,15 @@ type Server struct {
 	// fallback used when SSDP finds nothing (both injectable for tests).
 	sonosDiscover func() ([]sonos.Device, error)
 	scanUnicast   func() []sonos.Device
+
+	// castTo points a speaker at a stream URL, stopCast stops one, and deviceURI
+	// reads back the URI a speaker reports plus whether it is playing it. The
+	// read-back is how a device-to-stream mapping is answered without storing
+	// one (#130). All three are injectable so tests exercise the handlers
+	// without a player on the LAN.
+	castTo    func(ip, url, title string) error
+	stopCast  func(ip string) error
+	deviceURI func(ip string) (uri string, playing bool, err error)
 }
 
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
@@ -113,6 +122,9 @@ func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 		scanUnicast: func() []sonos.Device {
 			return sonos.ScanUnicast(sonos.OutboundIP(), 200*time.Millisecond)
 		},
+		castTo:    sonos.Cast,
+		stopCast:  sonos.Stop,
+		deviceURI: sonos.NowPlaying,
 	}
 }
 
