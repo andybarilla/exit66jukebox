@@ -1,9 +1,13 @@
 package fed
 
 import (
+	"bytes"
 	"io"
+	"log"
 	"net"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -133,8 +137,41 @@ func dialTestHandshake(t *testing.T, addr, peerID string) error {
 	return dialHandshake(conn, "tok", peerID)
 }
 
+// refusalLogBuf collects standard-logger output. Locked because net/http logs
+// from its own goroutines while the capture is installed.
+type refusalLogBuf struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *refusalLogBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *refusalLogBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// captureRefusalLog redirects the standard logger — where the accept path
+// writes its refusal — for the duration of the test, and returns a reader for
+// what was written.
+func captureRefusalLog(t *testing.T) func() string {
+	t.Helper()
+	b := &refusalLogBuf{}
+	out, flags := log.Writer(), log.Flags()
+	log.SetOutput(b)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(out); log.SetFlags(flags) })
+	return b.String
+}
+
 func TestRegisterRefusesIDHoldingLiveSession(t *testing.T) {
 	reg := NewRegistry()
+	logged := captureRefusalLog(t)
 	addr, results := startTestHub(t, reg)
 
 	incumbentSess := dialTestMember(t, addr, "home", "incumbent")
@@ -154,6 +191,12 @@ func TestRegisterRefusesIDHoldingLiveSession(t *testing.T) {
 	}
 	if err := <-results; err == nil {
 		t.Fatal("hub registered a second peer under a live id")
+	}
+
+	// A refused peer is otherwise invisible: an operator seeing federation drop
+	// out needs to be able to tell a claimed id from flakiness.
+	if got := logged(); !strings.Contains(got, `refusing peer "home"`) {
+		t.Fatalf("refusal was not logged; the accept path logged: %q", got)
 	}
 
 	if got := reg.Get("home"); got != incumbent {

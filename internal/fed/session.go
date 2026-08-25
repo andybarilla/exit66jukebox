@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -35,10 +36,12 @@ type Registry struct {
 
 func NewRegistry() *Registry { return &Registry{peers: make(map[string]*Peer)} }
 
-// put installs p unconditionally, closing any session it displaces. Only the
-// dial side uses it, where the id is one we chose locally — the accepted-peer
-// list, or "@hub". Inbound registrations, whose id the remote declares, go
-// through putIfFree.
+// put installs p unconditionally and closes any session it displaces, live or
+// not — it evicts. Only the dial side uses it, where the id is one we chose
+// locally: the accepted-peer list, or "@hub". Inbound registrations, whose id
+// the remote declares, go through putIfFree and are refused rather than
+// evicting. The registry as a whole therefore does not refuse; only the accept
+// path does.
 func (r *Registry) put(p *Peer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -134,6 +137,7 @@ func acceptAndRegister(conn net.Conn, token string, reg *Registry) (*Peer, error
 	// instead of re-dialling immediately. putIfFree below is what makes it
 	// atomic; this check is what makes it a clean rejection on the wire.
 	if old := reg.Get(peerID); old != nil && old.Session != nil && !old.Session.IsClosed() {
+		log.Printf("fed refusing peer %q from %s: id already has a live session", peerID, conn.RemoteAddr())
 		conn.Close()
 		return nil, errPeerIDInUse
 	}
@@ -154,6 +158,7 @@ func acceptAndRegister(conn net.Conn, token string, reg *Registry) (*Peer, error
 		// loser closes its own session rather than evicting the winner. The id
 		// is self-declared at handshake, so evicting would let any token holder
 		// knock a connected peer offline at will.
+		log.Printf("fed refusing peer %q from %s: id claimed concurrently", peerID, conn.RemoteAddr())
 		sess.Close()
 		return nil, err
 	}
