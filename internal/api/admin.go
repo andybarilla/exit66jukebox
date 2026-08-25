@@ -8,11 +8,10 @@ import (
 )
 
 // houseStreamID is the always-on shared stream: created at boot, the stream a
-// cast defaults to when the caller names none, and the only stream whose
-// playback is scrobbled. It cannot be deleted. Any shared stream is castable
-// (#130); house is only the default. Its display name IS editable like any other shared stream's
-// (criterion 2) — nothing derives behaviour from the name, only from this id.
-// Matches the houseID const in main.go.
+// cast falls back to when the caller names none, and the only stream whose
+// playback is scrobbled. It cannot be deleted. Its display name IS editable
+// like any other shared stream's (criterion 2) — nothing derives behaviour from
+// the name, only from this id. Matches the houseID const in main.go.
 const houseStreamID = "house"
 
 // currentUser resolves the request's session cookie to a user. ok is false for

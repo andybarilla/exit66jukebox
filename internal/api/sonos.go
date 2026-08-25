@@ -82,6 +82,51 @@ func streamIDFromURI(uri string) string {
 	return id
 }
 
+// localIPs reports the addresses this host answers on. Errors yield nil, which
+// ownStreamURI treats as "cannot tell" rather than "not ours".
+func localIPs() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok {
+			out = append(out, ipnet.IP.String())
+		}
+	}
+	return out
+}
+
+// ownStreamURI reports whether uri points at THIS server rather than at another
+// jukebox on the same LAN. The path shape alone is not enough to tell them
+// apart: every install serves /stream/house.mp3, so a speaker playing the
+// neighbouring server's house stream would otherwise be reported as playing
+// ours — and, for a stream id that collided, could be stopped by our delete.
+//
+// It compares against every address this host answers on, not just the one a
+// cast URL was minted from, so a second interface or a changed DHCP lease does
+// not make the server stop recognising its own URLs. When the interfaces cannot
+// be read at all it answers true: failing open degrades to the path-shape check
+// this replaced, where failing closed would silently switch the mute rule off.
+func (s *Server) ownStreamURI(uri string) bool {
+	u, err := url.Parse(strings.TrimPrefix(uri, "x-rincon-mp3radio://"))
+	if err != nil {
+		return false
+	}
+	mine := s.hostIPs()
+	if len(mine) == 0 {
+		return true
+	}
+	host := u.Hostname()
+	for _, ip := range mine {
+		if ip == host {
+			return true
+		}
+	}
+	return false
+}
+
 // deviceStream reports which stream a speaker is playing, or "" for a speaker
 // that is stopped, unreachable, or playing anything else. Nothing is stored:
 // this read off the device is the mapping, so a speaker somebody re-pointed
@@ -92,7 +137,7 @@ func (s *Server) deviceStream(ip string) string {
 		return ""
 	}
 	id := streamIDFromURI(uri)
-	if id == "" || !s.isSharedStream(id) {
+	if id == "" || !s.ownStreamURI(uri) || !s.isSharedStream(id) {
 		return ""
 	}
 	return id

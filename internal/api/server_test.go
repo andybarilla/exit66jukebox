@@ -28,6 +28,11 @@ func newTestServer(t *testing.T) (*Server, *sql.DB) {
 	jb := jukebox.New(db, jukebox.Config{HistoryWindow: 5})
 	s := NewServer(db, jb, nil)
 	s.SetSigningSecret([]byte("test-secret"))
+	// No test may reach the LAN. deviceURI's production default POSTs SOAP to a
+	// speaker, so any test that lists devices without overriding it would spend
+	// the 4s client timeout per fabricated IP. A test that cares what a speaker
+	// reports sets its own.
+	s.deviceURI = func(string) (string, bool, error) { return "", false, nil }
 	// Mirror the single-machine install: a loopback bind is the one case where
 	// browser-facing links resolve with no public origin configured. Tests that
 	// exercise the refusal set a non-loopback address themselves.

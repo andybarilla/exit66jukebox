@@ -103,6 +103,11 @@ type Server struct {
 	castTo    func(ip, url, title string) error
 	stopCast  func(ip string) error
 	deviceURI func(ip string) (uri string, playing bool, err error)
+
+	// hostIPs reports the addresses this host answers on, so a URI a speaker
+	// reports can be told apart from another jukebox's on the same LAN.
+	// Injectable: tests pin it rather than depending on the machine.
+	hostIPs func() []string
 }
 
 func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
@@ -126,6 +131,7 @@ func NewServer(db *sql.DB, jb *jukebox.Jukebox, ui fs.FS) *Server {
 		castTo:    sonos.Cast,
 		stopCast:  sonos.Stop,
 		deviceURI: sonos.NowPlaying,
+		hostIPs:   localIPs,
 	}
 }
 

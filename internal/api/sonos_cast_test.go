@@ -193,6 +193,7 @@ func castDevicesJSON(t *testing.T, srv *Server) []map[string]any {
 func TestDeviceListReportsWhatEachSpeakerIsPlaying(t *testing.T) {
 	srv, db := newTestServer(t)
 	store.CreateSharedStream(db, "party01", "Party")
+	srv.hostIPs = func() []string { return []string{"192.168.1.10"} }
 	srv.sonosDiscover = func() ([]sonos.Device, error) {
 		return []sonos.Device{
 			{Name: "Kitchen", IP: "192.168.1.50"},
@@ -202,6 +203,7 @@ func TestDeviceListReportsWhatEachSpeakerIsPlaying(t *testing.T) {
 			{Name: "Attic", IP: "192.168.1.54"},
 		}, nil
 	}
+	srv.hostIPs = func() []string { return []string{"192.168.1.10"} }
 	srv.deviceURI = func(ip string) (string, bool, error) {
 		switch ip {
 		case "192.168.1.50":
@@ -242,6 +244,7 @@ func TestDeviceListIgnoresAnUnknownStreamID(t *testing.T) {
 	srv.sonosDiscover = func() ([]sonos.Device, error) {
 		return []sonos.Device{{Name: "Kitchen", IP: "192.168.1.50"}}, nil
 	}
+	srv.hostIPs = func() []string { return []string{"192.168.1.10"} }
 	srv.deviceURI = func(string) (string, bool, error) {
 		return "http://elsewhere.example/stream/deleted99.mp3", true, nil
 	}
@@ -261,6 +264,7 @@ func TestDeviceListSurvivesAnUnreachableSpeaker(t *testing.T) {
 			{Name: "Patio", IP: "192.168.1.51"},
 		}, nil
 	}
+	srv.hostIPs = func() []string { return []string{"192.168.1.10"} }
 	srv.deviceURI = func(ip string) (string, bool, error) {
 		if ip == "192.168.1.50" {
 			return "", false, http.ErrHandlerTimeout
@@ -287,6 +291,7 @@ func TestDeleteStreamStopsSpeakersPlayingIt(t *testing.T) {
 		{Name: "Patio", IP: "192.168.1.51"},
 	})
 	srv.sonosManual["192.168.1.52"] = "Den" // manual speakers count too
+	srv.hostIPs = func() []string { return []string{"192.168.1.10"} }
 	srv.deviceURI = func(ip string) (string, bool, error) {
 		switch ip {
 		case "192.168.1.50", "192.168.1.52":
@@ -328,6 +333,7 @@ func TestDeleteStreamSurvivesAnUnreachableSpeaker(t *testing.T) {
 	srv, db := newTestServer(t)
 	store.CreateSharedStream(db, "party01", "Party")
 	srv.rememberDevices([]sonos.Device{{Name: "Kitchen", IP: "192.168.1.50"}})
+	srv.hostIPs = func() []string { return []string{"192.168.1.10"} }
 	srv.deviceURI = func(string) (string, bool, error) {
 		return "http://192.168.1.10:8066/stream/party01.mp3", true, nil
 	}
@@ -366,6 +372,7 @@ func TestDeviceListReadsSpeakersConcurrently(t *testing.T) {
 		}
 		close(release)
 	}()
+	srv.hostIPs = func() []string { return []string{"192.168.1.10"} }
 	srv.deviceURI = func(string) (string, bool, error) {
 		arrived <- struct{}{}
 		select {
@@ -380,5 +387,89 @@ func TestDeviceListReadsSpeakersConcurrently(t *testing.T) {
 		if d["stream"] != "house" {
 			t.Fatalf("device %v stream = %v, want house", d["ip"], d["stream"])
 		}
+	}
+}
+
+// A speaker playing ANOTHER jukebox's stream is not playing ours. Every install
+// serves /stream/house.mp3, so the path shape alone cannot tell two servers on
+// one LAN apart — and for a stream id that collided, our delete would have
+// stopped their speaker.
+func TestDeviceListIgnoresAnotherServersStream(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.hostIPs = func() []string { return []string{"192.168.1.10"} }
+	srv.sonosDiscover = func() ([]sonos.Device, error) {
+		return []sonos.Device{
+			{Name: "Kitchen", IP: "192.168.1.50"},
+			{Name: "Patio", IP: "192.168.1.51"},
+		}, nil
+	}
+	srv.deviceURI = func(ip string) (string, bool, error) {
+		if ip == "192.168.1.50" {
+			return "http://192.168.1.99:8066/stream/house.mp3?sig=1.a", true, nil // the other jukebox
+		}
+		return "http://192.168.1.10:8066/stream/house.mp3?sig=1.a", true, nil // ours
+	}
+	got := map[string]any{}
+	for _, d := range castDevicesJSON(t, srv) {
+		got[d["ip"].(string)] = d["stream"]
+	}
+	if got["192.168.1.50"] != nil {
+		t.Errorf("a speaker on another server's house stream = %v, want nil", got["192.168.1.50"])
+	}
+	if got["192.168.1.51"] != "house" {
+		t.Errorf("a speaker on our own house stream = %v, want house", got["192.168.1.51"])
+	}
+}
+
+// Deleting a stream must not reach across to a speaker playing the same path on
+// a different server.
+func TestDeleteStreamLeavesAnotherServersSpeakerAlone(t *testing.T) {
+	srv, db := newTestServer(t)
+	store.CreateSharedStream(db, "party01", "Party")
+	srv.hostIPs = func() []string { return []string{"192.168.1.10"} }
+	srv.rememberDevices([]sonos.Device{
+		{Name: "Kitchen", IP: "192.168.1.50"},
+		{Name: "Patio", IP: "192.168.1.51"},
+	})
+	srv.deviceURI = func(ip string) (string, bool, error) {
+		if ip == "192.168.1.50" {
+			return "http://192.168.1.99:8066/stream/party01.mp3", true, nil // not ours
+		}
+		return "http://192.168.1.10:8066/stream/party01.mp3", true, nil
+	}
+	var mu sync.Mutex
+	stopped := map[string]bool{}
+	srv.stopCast = func(ip string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		stopped[ip] = true
+		return nil
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/streams/party01", nil)
+	req.AddCookie(adminSession(t, db))
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete: want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	if stopped["192.168.1.50"] {
+		t.Errorf("stopped a speaker playing another server's stream: %v", stopped)
+	}
+	if !stopped["192.168.1.51"] {
+		t.Errorf("our own speaker was not stopped: %v", stopped)
+	}
+}
+
+// Interfaces that cannot be read must not silently switch the mapping off: the
+// check fails open, back to the path-shape answer it replaced.
+func TestDeviceStreamFailsOpenWhenHostAddressesAreUnknown(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.hostIPs = func() []string { return nil }
+	srv.deviceURI = func(string) (string, bool, error) {
+		return "http://192.168.1.99:8066/stream/house.mp3", true, nil
+	}
+	if got := srv.deviceStream("192.168.1.50"); got != "house" {
+		t.Fatalf("deviceStream = %q, want house when the host's own addresses are unknown", got)
 	}
 }
