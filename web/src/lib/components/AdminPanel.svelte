@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, getFederationGroups, createFederationGroup, deleteFederationGroup, addFederationGroupMember, removeFederationGroupMember, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths, createPasswordReset, createEmailVerification, beginMfaEnrollment, confirmMfaEnrollment, disableMfa, regenerateRecoveryCodes } from '../auth.js';
+  import { isUngrouped, ungroupedPeerIds } from '../federationGroups.js';
   import { beforeUnloadIfDirty, buildEditableSettingsSnapshot, hasEditableSettingsChanges, loadPathBrowserLocation } from '../settingsPanelState.js';
   import Switch from './Switch.svelte';
 
@@ -54,6 +55,10 @@
   let peerBusy = $state(false);
   let peerError = $state('');
   let federationGroups = $state([]);
+  // Approving a peer deliberately does not group it (#88), so this state is
+  // reachable and has to be visible: an approved, connected peer in no group
+  // discovers nothing.
+  let ungroupedPeers = $derived(ungroupedPeerIds(federationPeers, federationGroups));
   let groupDraft = $state('');
   let groupMemberDraft = $state({});
   let groupBusy = $state(false);
@@ -607,6 +612,9 @@
                       <span class="peer-name">{peer.display_name || peer.peer_id}</span>
                       <span class="peer-address">{peer.address}</span>
                       <span class="badge badge-{peer.status}">{peer.status}</span>
+                      {#if isUngrouped(peer.peer_id, federationPeers, federationGroups)}
+                        <span class="badge badge-ungrouped">No group — catalog hidden</span>
+                      {/if}
                       {#if peer.status === 'pending' && peer.token_authenticated}
                         <button type="button" class="btn-copy" disabled={peerBusy} onclick={() => approvePeer(peer.peer_id)}>Approve</button>
                       {/if}
@@ -648,6 +656,12 @@
                     </li>
                   {/each}
                 </ul>
+              {/if}
+              {#if ungroupedPeers.length > 0}
+                <p class="warning">
+                  In no group, so their catalogs are hidden both ways:
+                  {ungroupedPeers.join(', ')}. Approving a peer does not add it to a group.
+                </p>
               {/if}
               {#if groupError}<p class="danger">{groupError}</p>{/if}
             </div>
@@ -881,6 +895,7 @@
   .badge-mfa { background: rgba(31,224,255,0.12); color: var(--neon-cyan); border: 1px solid var(--neon-cyan); }
   .badge-verified { background: rgba(61,245,155,0.12); color: var(--status-success); border: 1px solid var(--status-success-deep); }
   .badge-unverified { background: rgba(255,176,46,0.15); color: var(--neon-amber); border: 1px solid var(--neon-amber-deep); }
+  .badge-ungrouped { background: rgba(255,176,46,0.15); color: var(--neon-amber); border: 1px solid var(--neon-amber-deep); }
   .btn-danger { margin-left: auto; padding: 4px 10px; background: transparent; border: 1px solid var(--status-danger-deep); border-radius: var(--radius-sm); color: var(--status-danger); font-family: var(--font-mono); font-size: 10px; cursor: pointer; white-space: nowrap; }
   .btn-danger:hover { background: rgba(255,77,94,0.1); }
   .muted { color: var(--text-faint); font-size: 13px; font-family: var(--font-sans); }
