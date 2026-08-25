@@ -47,6 +47,44 @@ func SaveFederationPeer(db *sql.DB, peer FederationPeer) error {
 	return err
 }
 
+// RecordFederationPeerSighting records that a peer announced itself, and
+// nothing else. It writes address, display name and last-seen; on a row that
+// already exists it may never touch status, manual or token_authenticated.
+//
+// Those three are the operator's, not discovery's: an announcement arrives
+// every 30 seconds, and a trust decision that a ticker can revise is not a
+// decision (#187). The rule is the absence of those columns from DO UPDATE SET
+// rather than a branch in Go, so there is one statement, no read-then-write
+// race, and no way for a later caller to write a status through this door.
+// SaveFederationPeer keeps the old semantics for the admin path, which sets a
+// status deliberately.
+//
+// A peer never seen before is still inserted as pending and unauthenticated —
+// surfacing unknown peers for approval is what discovery is for.
+func RecordFederationPeerSighting(db *sql.DB, peerID, displayName, address string) error {
+	peer, err := normalizeFederationPeer(FederationPeer{PeerID: peerID, DisplayName: displayName, Address: address})
+	if err != nil {
+		return err
+	}
+	// Only reachable on the insert branch: an existing row's status is
+	// protected below, so a duplicate found here cannot re-quarantine one.
+	// It still decides how a newly-seen ambiguous address is filed.
+	status := peer.Status
+	if hasDuplicateFederationPeerID(db, peer.PeerID, peer.Address) {
+		status = PeerStatusQuarantined
+	}
+	_, err = db.Exec(
+		`INSERT INTO federation_peer(peer_id, display_name, address, status, manual, token_authenticated, last_seen_at, created_at, updated_at)
+		 VALUES(?, ?, ?, ?, 0, 0, strftime('%s','now'), strftime('%s','now'), strftime('%s','now'))
+		 ON CONFLICT(peer_id, address) DO UPDATE SET
+		   display_name=CASE WHEN excluded.display_name <> '' THEN excluded.display_name ELSE federation_peer.display_name END,
+		   last_seen_at=excluded.last_seen_at,
+		   updated_at=strftime('%s','now')`,
+		peer.PeerID, peer.DisplayName, peer.Address, status,
+	)
+	return err
+}
+
 func ListFederationPeers(db *sql.DB, status string) ([]FederationPeer, error) {
 	status = strings.TrimSpace(status)
 	query := `SELECT id, peer_id, display_name, address, status, manual, token_authenticated, last_seen_at, created_at, updated_at
