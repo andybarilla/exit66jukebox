@@ -271,3 +271,67 @@ describe('a station read whose body is not JSON (#160)', () => {
     expect(s.toasts).toEqual([]);
   });
 });
+
+// #174: POST/DELETE /api/streams/{id}/station both return an error body the
+// store used to ignore — it toasted "Station started" on a refused start, and
+// cleared the displayed station on a refused stop. streamGate 404s an id with
+// no row (a stream deleted since the tab loaded); requireAdmin 403s a non-admin
+// on a shared stream. A proxy answering either with an HTML error page is how
+// the body stops being JSON.
+describe('a refused station write (#174)', () => {
+  const stationURL = `/api/streams/${HOUSE}/station`;
+
+  // GET and DELETE share the station URL, so the mock branches on method: the
+  // read has to succeed for a seeded station to exist for the stop to leave.
+  function mockStation({ get, write }) {
+    global.fetch = vi.fn(async (url, init) => {
+      const u = String(url);
+      const method = init?.method || 'GET';
+      if (u === stationURL) return method === 'GET' ? get() : write();
+      return { ok: true, json: async () => [] };
+    });
+  }
+
+  const liveStation = () => ({ ok: true, json: async () => ({ stream_id: HOUSE, genre: 'Rock', threshold: 3, batch: 10 }) });
+  const refused = () => ({ ok: false, status: 404, json: async () => ({ error: 'no such stream' }) });
+  const refusedNonJSON = () => ({ ok: false, status: 404, json: async () => { throw new SyntaxError('Unexpected token <'); } });
+
+  it('toasts the error instead of "Station started" when the start is refused', async () => {
+    mockStation({ get: () => ({ ok: true, json: async () => ({}) }), write: refused });
+    const s = createStore();
+
+    await s.startStation('Rock');
+
+    expect(s.toasts.map((t) => t.title)).toEqual(['Not started']);
+    expect(s.toasts[0].message).toBe('no such stream');
+    expect(s.discoverStation).toBe(null);
+  });
+
+  it('leaves the displayed station alone when the stop is refused', async () => {
+    // Seed a live station first, so the assertion below is state this code kept
+    // rather than the null a fresh store starts in.
+    mockStation({ get: liveStation, write: refused });
+    const s = createStore();
+    await s.loadDiscover();
+    expect(s.discoverStation?.genre).toBe('Rock');
+
+    await s.stopStation();
+
+    expect(s.discoverStation?.genre).toBe('Rock');
+    expect(s.toasts.map((t) => t.title)).toEqual(['Not stopped']);
+    expect(s.toasts[0].message).toBe('no such stream');
+  });
+
+  it('does not reject out of either action when the error body is not JSON', async () => {
+    mockStation({ get: () => ({ ok: true, json: async () => ({}) }), write: refusedNonJSON });
+    const s = createStore();
+
+    await s.startStation('Rock');
+    await s.stopStation();
+
+    expect(s.toasts.map((t) => t.title)).toEqual(['Not started', 'Not stopped']);
+    expect(s.toasts.map((t) => t.message)).toEqual([
+      'could not start the station', 'could not stop the station',
+    ]);
+  });
+});
