@@ -236,3 +236,44 @@ func TestRediscoverEndpointRanksOnTheCallersOwnPlayCount(t *testing.T) {
 		t.Errorf("bob = %v, want alice's private plays not to count against him", got)
 	}
 }
+
+// #160: the station read agrees with the station's own mutating routes about an
+// unknown id. POST and DELETE on this path 404 it through streamGate, and since
+// #142 so does the stream read; this GET used to answer 200 {} for any id at
+// all. It must still create no row — a read that mints one is what
+// TestPrivilegedRoutesDoNotCreateStreams guards on the mutating side.
+func TestGetStationUnknownIDIs404AndCreatesNoRow(t *testing.T) {
+	srv, _ := newTestServer(t)
+	user := userSession(t, srv, "bob@example.com")
+
+	rec := do(srv, http.MethodGet, "/api/streams/never-seen/station", "", user)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body %q)", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+	if _, ok, _ := store.GetStream(srv.db, "never-seen"); ok {
+		t.Fatal("GET /api/streams/{id}/station created a stream row")
+	}
+}
+
+// The other side of #160: a stream that exists and has no station keeps
+// answering 200 with an empty object. Only a missing row 404s — "no station" is
+// still a legitimate answer about a stream, and the client reads a falsy genre
+// as no station.
+func TestGetStationExistingStreamWithNoStationIs200Empty(t *testing.T) {
+	srv, _ := newTestServer(t)
+	user := userSession(t, srv, "bob@example.com")
+
+	rec := do(srv, http.MethodGet, "/api/streams/house/station", "", user)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %q)", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v (body %q)", err, rec.Body.String())
+	}
+	if len(got) != 0 {
+		t.Fatalf("body = %v, want an empty object", got)
+	}
+}

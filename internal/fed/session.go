@@ -3,7 +3,9 @@ package fed
 import (
 	"bufio"
 	"crypto/subtle"
+	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -24,7 +26,9 @@ type Peer struct {
 	Caps    Capabilities
 }
 
-// Registry tracks live peer sessions by id. A peer present here is online.
+// Registry tracks live peer sessions by id. A peer present here is online,
+// except for the window between a session closing and the goroutine serving it
+// removing the entry.
 type Registry struct {
 	mu    sync.RWMutex
 	peers map[string]*Peer
@@ -32,6 +36,12 @@ type Registry struct {
 
 func NewRegistry() *Registry { return &Registry{peers: make(map[string]*Peer)} }
 
+// put installs p unconditionally and closes any session it displaces, live or
+// not — it evicts. Only the dial side uses it, where the id is one we chose
+// locally: the accepted-peer list, or "@hub". Inbound registrations, whose id
+// the remote declares, go through putIfFree and are refused rather than
+// evicting. The registry as a whole therefore does not refuse; only the accept
+// path does.
 func (r *Registry) put(p *Peer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -41,6 +51,25 @@ func (r *Registry) put(p *Peer) {
 		}
 	}
 	r.peers[p.ID] = p
+}
+
+// errPeerIDInUse is returned when an inbound peer claims an id whose session is
+// still live.
+var errPeerIDInUse = errors.New("peer id already has a live session")
+
+// putIfFree registers p unless the id already holds a live session, in which
+// case the incumbent is left untouched and errPeerIDInUse is returned. An entry
+// whose session has already closed counts as free: removal happens on the
+// serving goroutine, so a peer reconnecting after a drop can arrive before its
+// old entry is reaped and must not be locked out.
+func (r *Registry) putIfFree(p *Peer) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if old := r.peers[p.ID]; old != nil && old.Session != nil && !old.Session.IsClosed() {
+		return errPeerIDInUse
+	}
+	r.peers[p.ID] = p
+	return nil
 }
 
 func (r *Registry) remove(id string, peer *Peer) {
@@ -103,6 +132,15 @@ func acceptAndRegister(conn net.Conn, token string, reg *Registry) (*Peer, error
 		conn.Close()
 		return nil, fmt.Errorf("bad token")
 	}
+	// Refuse a claimed id before the ack, so the newcomer reads the refusal the
+	// same way it reads a bad token — closed without an ack — and backs off
+	// instead of re-dialling immediately. putIfFree below is what makes it
+	// atomic; this check is what makes it a clean rejection on the wire.
+	if old := reg.Get(peerID); old != nil && old.Session != nil && !old.Session.IsClosed() {
+		log.Printf("fed refusing peer %q from %s: id already has a live session", peerID, conn.RemoteAddr())
+		conn.Close()
+		return nil, errPeerIDInUse
+	}
 	// Send a single-byte ack before handing off to yamux so the member side
 	// can detect rejection vs. acceptance without stealing yamux framing bytes.
 	if _, err := conn.Write([]byte{1}); err != nil {
@@ -115,7 +153,15 @@ func acceptAndRegister(conn net.Conn, token string, reg *Registry) (*Peer, error
 		return nil, err
 	}
 	p := &Peer{ID: peerID, Session: sess, Client: SessionClient(sess), BaseURL: "http://" + peerID}
-	reg.put(p)
+	if err := reg.putIfFree(p); err != nil {
+		// Backstop for two registrations racing past the pre-ack check: the
+		// loser closes its own session rather than evicting the winner. The id
+		// is self-declared at handshake, so evicting would let any token holder
+		// knock a connected peer offline at will.
+		log.Printf("fed refusing peer %q from %s: id claimed concurrently", peerID, conn.RemoteAddr())
+		sess.Close()
+		return nil, err
+	}
 	return p, nil
 }
 
