@@ -9,15 +9,11 @@ import (
 
 // DiscoverOpts parameterizes the discovery selection query.
 type DiscoverOpts struct {
-	Genre         string // "" = all genres
-	OrderBy       string // "rediscover" | "recent" | "random"
-	ExcludeStream string // "" = no exclusion; otherwise skip this stream's recent history
-	Window        int    // size of the recent-history window for ExcludeStream
-	// PersonalStream is the caller's own personal stream id, "" when the caller
-	// has none (the open security modes, or an unauthenticated caller). It only
-	// widens which plays count towards last_played; nobody else's personal
-	// stream ever does.
-	PersonalStream string
+	Genre          string // "" = all genres
+	OrderBy        string // "rediscover" | "recent" | "random"
+	ExcludeStream  string // "" = no exclusion; otherwise skip this stream's recent history
+	Window         int    // size of the recent-history window for ExcludeStream
+	PersonalStream string // caller's own personal stream id; "" = none. See DiscoverTracks.
 	Limit, Offset  int
 }
 
@@ -44,8 +40,6 @@ func DiscoverTracks(db *sql.DB, opts DiscoverOpts) ([]model.Track, error) {
 	}
 
 	// The last_played subquery is in the SELECT list, so its args come first.
-	// An empty PersonalStream matches no stream row, leaving shared streams
-	// only — the right answer for a caller with no personal stream.
 	args := []any{KindShared, opts.PersonalStream}
 	where := "WHERE " + visibleTrackPredicate
 	if opts.Genre != "" {

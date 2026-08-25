@@ -210,11 +210,8 @@ func TestStartStationOnUnknownStreamCreatesNothing(t *testing.T) {
 	}
 }
 
-// A station on a personal stream fills from the whole library: another user's
-// private listening neither shrinks the candidate pool nor shapes the fill.
-// The station's own DiscoverOpts.PersonalStream only feeds the last_played
-// ranking, which a random fill never reads, so it has no fill this test could
-// distinguish — see the comment on refill.
+// A station's recency exclusion is scoped to its own stream, so another user's
+// private play of the only candidate does not empty the fill.
 func TestStationOnPersonalStreamIgnoresAnotherUsersHistory(t *testing.T) {
 	db, _ := store.Open(":memory:")
 	defer db.Close()

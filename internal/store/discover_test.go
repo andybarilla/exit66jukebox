@@ -173,15 +173,6 @@ func seedPlay(t *testing.T, db *sql.DB, streamID string, trackID int64, at int64
 	}
 }
 
-// trackTitles is the discovered order, which is what the ranking tests assert on.
-func trackTitles(got []model.Track) []string {
-	out := make([]string, len(got))
-	for i, tr := range got {
-		out[i] = tr.Title
-	}
-	return out
-}
-
 func seedRankingFixture(t *testing.T, db *sql.DB) (alice, bob string) {
 	t.Helper()
 	if err := EnsureSharedStream(db, "house", "House"); err != nil {
@@ -209,7 +200,12 @@ func rediscoverTitles(t *testing.T, db *sql.DB, personal string) []string {
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}
-	return trackTitles(got)
+	// The titles are the ranking, which is what these tests assert on.
+	out := make([]string, len(got))
+	for i, tr := range got {
+		out[i] = tr.Title
+	}
+	return out
 }
 
 func TestRediscoverIgnoresAnotherUsersPersonalStream(t *testing.T) {
