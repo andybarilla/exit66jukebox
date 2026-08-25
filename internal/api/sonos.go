@@ -59,10 +59,12 @@ func (s *Server) castStreamURL(streamID string) string {
 // a Spotify session, a line-in, another player it is grouped with — so an
 // unrecognised speaker reports no stream rather than a guess.
 //
-// Sonos rewrites a plain-http radio URI to x-rincon-mp3radio://<the original>
-// on some paths, so that prefix is stripped before parsing. The path shape is
-// all this checks; the caller decides whether the id names a stream this server
-// actually serves.
+// Sonos is documented to rewrite a plain-http radio URI to
+// x-rincon-mp3radio://<the original> on some paths, so that prefix is stripped
+// before parsing. Every read from a real player during #130 echoed the URI back
+// exactly as it was set, rewrite included nowhere — the strip is insurance, not
+// something observed. The path shape is all this checks; the caller decides
+// whether the id names a stream this server actually serves.
 func streamIDFromURI(uri string) string {
 	uri = strings.TrimPrefix(uri, "x-rincon-mp3radio://")
 	u, err := url.Parse(uri)
@@ -172,9 +174,9 @@ func (s *Server) castTarget(w http.ResponseWriter, r *http.Request) (string, boo
 	return ip, true
 }
 
-// castDevice is a speaker plus the stream it is currently playing. Stream is
-// empty (JSON null) for a speaker playing nothing we recognise, which is also
-// what a speaker that could not be reached reports.
+// castDevice is a speaker plus the stream it is currently playing. Stream is nil
+// (JSON null) for a speaker playing nothing we recognise, which is also what a
+// speaker that could not be reached reports.
 type castDevice struct {
 	sonos.Device
 	Stream *string `json:"stream"`

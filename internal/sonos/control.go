@@ -37,10 +37,10 @@ func Cast(ip, streamURL, title string) error { return castURL(ControlURL(ip), st
 // Stop stops playback on the Sonos.
 func Stop(ip string) error { return stopURL(ControlURL(ip)) }
 
-// NowPlaying reports the URI the Sonos at ip is playing, and whether it is
-// actually playing it. Nothing about a cast is stored server-side, so this
-// read-back off the device is the only source of truth for what a speaker is
-// on (#130).
+// NowPlaying reports the URI the Sonos at ip was last pointed at, and whether it
+// is actually playing it — the two are not the same, see nowPlayingURL. Nothing
+// about a cast is stored server-side, so this read-back off the device is the
+// only source of truth for what a speaker is on (#130).
 func NowPlaying(ip string) (string, bool, error) { return nowPlayingURL(ControlURL(ip)) }
 
 func castURL(controlURL, streamURL, title string) error {
@@ -179,9 +179,11 @@ func xmlEscape(s string) string {
 }
 
 // xmlUnescape reverses xmlEscape on text a player echoes back. Replacer makes a
-// single left-to-right pass, so an unescaped "&amp;lt;" cannot be double-decoded
-// whatever the order of the pairs. It covers only the entities xmlEscape emits,
-// which is all a URI we minted ourselves can come back carrying.
+// single left-to-right pass and never re-scans what it wrote, so "&amp;lt;"
+// decodes to the literal "&lt;" and stops there rather than going on to "<".
+// That holds whatever order the pairs are in. It covers only the entities
+// xmlEscape emits, which is all a URI we minted ourselves can come back
+// carrying.
 func xmlUnescape(s string) string {
 	return strings.NewReplacer("&lt;", "<", "&gt;", ">", "&quot;", `"`, "&amp;", "&").Replace(s)
 }
