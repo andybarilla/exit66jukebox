@@ -199,7 +199,10 @@ func (m *Manager) dialPeer(peerID, addr string) {
 	m.learnCaps(p)
 	go m.startDirectSyncLoop(p, sess.CloseChan())
 	if m.PeerHandler != nil {
-		_ = http.Serve(sess, withPeerID(m.PeerHandler, m.PeerID))
+		// peerID, not m.PeerID: this session was dialled out, but the requests
+		// arriving on it are still the REMOTE peer's, so that is whose group
+		// membership /fed/catalog must be answered against.
+		_ = http.Serve(sess, withPeerID(m.PeerHandler, peerID))
 	} else {
 		<-sess.CloseChan()
 	}

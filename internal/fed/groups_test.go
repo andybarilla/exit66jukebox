@@ -1,15 +1,21 @@
 package fed
 
 import (
+	"bufio"
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
 	"github.com/andybarilla/exit66jukebox/internal/store"
+	"github.com/hashicorp/yamux"
 )
 
 // TestPeerVisibleAppRoutesIsUnchanged pins the allowlist to exactly one route.
@@ -293,4 +299,143 @@ func TestHubMergedCatalogPrefersTheSessionPeerID(t *testing.T) {
 	if len(merged.Catalogs["office"]) != 0 {
 		t.Fatalf("stranger asked as home and got office's catalog: %#v", merged.Catalogs["office"])
 	}
+}
+
+// TestBothPeerSessionDirectionsScopeOnTheRemotePeer runs two real Managers over
+// TCP and drives a catalog pull down each direction of the peer link.
+//
+// It exists because only one direction was wrong: the outbound-dial path tagged
+// its session with THIS instance's peer id, so a peer in no group of ours was
+// answered as though it were us — and it kept receiving the full catalog. The
+// inbound path was correct, so every single-direction test passed.
+func TestBothPeerSessionDirectionsScopeOnTheRemotePeer(t *testing.T) {
+	homeDB := groupDB(t)
+	addTrack(t, homeDB, "HomeSong")
+	// home shares a group with itself only, so "stranger" is in none of its groups.
+	joinGroup(t, homeDB, "family", "home")
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	home := &Manager{
+		Role: "peer", Token: "tok", PeerID: "home", Registry: NewRegistry(),
+		PeerHandler: PeerSessionHandler(Capabilities{}, NewSignaler(), homeDB, "home", nil),
+	}
+
+	// Direction 1: stranger dials home, home accepts and serves (servePeerConn).
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		p, err := acceptAndRegister(conn, "tok", home.Registry)
+		if err != nil {
+			return
+		}
+		_ = http.Serve(p.Session, withPeerID(home.PeerHandler, p.ID))
+	}()
+	inbound := dialAsPeer(t, ln.Addr().String(), "stranger")
+	if rows := catalogOverEventually(t, inbound); len(rows) != 0 {
+		t.Fatalf("inbound session: stranger is in no group of home's, catalog = %#v", rows)
+	}
+
+	// Direction 2: home dials stranger (the real Manager.dialPeer), and serves
+	// over the session IT opened. The requests arriving on it are still
+	// stranger's, so its membership is what must be answered against.
+	strangerLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer strangerLn.Close()
+	sessions := make(chan *yamux.Session, 1)
+	go func() {
+		conn, err := strangerLn.Accept()
+		if err != nil {
+			return
+		}
+		sess, err := acceptAsPeer(conn, "tok")
+		if err != nil {
+			return
+		}
+		// Answer home's post-handshake callbacks (caps, and its own sync pull)
+		// so dialPeer reaches its http.Serve instead of blocking in learnCaps.
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /fed/caps", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"direct_webrtc":false}`))
+		})
+		mux.HandleFunc("GET /fed/catalog", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("[]"))
+		})
+		go http.Serve(sess, mux)
+		sessions <- sess
+	}()
+	go home.dialPeer("stranger", strangerLn.Addr().String())
+
+	outSess := <-sessions
+	defer outSess.Close()
+	if rows := catalogOverEventually(t, outSess); len(rows) != 0 {
+		t.Fatalf("outbound session: stranger is in no group of home's, catalog = %#v", rows)
+	}
+}
+
+// acceptAsPeer is the server half of the peer handshake: read the token line,
+// ack it, and hand back the multiplexed session.
+func acceptAsPeer(conn net.Conn, token string) (*yamux.Session, error) {
+	br := bufio.NewReader(conn)
+	line, err := br.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+	if fields := strings.Fields(strings.TrimSpace(line)); len(fields) != 2 || fields[0] != token {
+		return nil, fmt.Errorf("bad handshake %q", line)
+	}
+	if _, err := conn.Write([]byte{1}); err != nil {
+		return nil, err
+	}
+	return yamux.Server(&bufferedConn{Reader: br, Conn: conn}, nil)
+}
+
+// catalogOverEventually retries while dialPeer is still in learnCaps and has not
+// yet started serving, so the assertion is about the answer and not the timing.
+func catalogOverEventually(t *testing.T, sess *yamux.Session) []store.CatalogRow {
+	t.Helper()
+	var lastErr error
+	for i := 0; i < 100; i++ {
+		resp, err := SessionClient(sess).Get("http://peer/fed/catalog")
+		if err != nil {
+			lastErr = err
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		defer resp.Body.Close()
+		var rows []store.CatalogRow
+		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
+			t.Fatalf("decode catalog: %v", err)
+		}
+		return rows
+	}
+	t.Fatalf("no catalog answer over the dialled session: %v", lastErr)
+	return nil
+}
+
+// dialAsPeer completes the handshake against addr as peerID and returns the
+// multiplexed session.
+func dialAsPeer(t *testing.T, addr, peerID string) *yamux.Session {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dialHandshake(conn, "tok", peerID); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := yamux.Client(conn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sess.Close() })
+	return sess
 }
