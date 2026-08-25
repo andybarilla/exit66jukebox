@@ -229,7 +229,13 @@
   // speaker and leaves this listener alone (#130). Muting, not pausing — the
   // timeline keeps running so resuming is seamless and the volume is untouched.
   $effect(() => {
-    if (audio) audio.muted = s.muteLocalOnCast && s.castingStream(s.stream);
+    // Read the state BEFORE the element guard. `audio` is a plain binding, not
+    // $state, so an effect that short-circuits on `if (audio)` registers no
+    // dependency at all and never runs again — and the first run happens on the
+    // pre-auth splash, where the element does not exist yet. Computing the value
+    // first is what keeps this effect alive once the element appears.
+    const mute = s.muteLocalOnCast && s.castingStream(s.stream);
+    if (audio) audio.muted = mute;
   });
 
   // Load discover data when switching to the discover tab.
