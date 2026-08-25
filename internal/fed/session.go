@@ -37,11 +37,12 @@ type Registry struct {
 func NewRegistry() *Registry { return &Registry{peers: make(map[string]*Peer)} }
 
 // put installs p unconditionally and closes any session it displaces, live or
-// not — it evicts. Only the dial side uses it, where the id is one we chose
-// locally: the accepted-peer list, or "@hub". Inbound registrations, whose id
-// the remote declares, go through putIfFree and are refused rather than
-// evicting. The registry as a whole therefore does not refuse; only the accept
-// path does.
+// not — it evicts. In production only the member side's "@hub" registration
+// uses it: that id is a local constant with a single dialer loop behind it, so
+// nothing else can be holding it. Every id a second session could arrive
+// under — an inbound peer declaring its own id, or an outbound dial racing an
+// inbound one for the same peer (#185) — goes through putIfFree and is refused
+// rather than evicting.
 func (r *Registry) put(p *Peer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -53,12 +54,13 @@ func (r *Registry) put(p *Peer) {
 	r.peers[p.ID] = p
 }
 
-// errPeerIDInUse is returned when an inbound peer claims an id whose session is
+// errPeerIDInUse is returned when a registration names an id whose session is
 // still live.
 var errPeerIDInUse = errors.New("peer id already has a live session")
 
 // putIfFree registers p unless the id already holds a live session, in which
-// case the incumbent is left untouched and errPeerIDInUse is returned. An entry
+// case the incumbent is left untouched and errPeerIDInUse is returned. The
+// caller owns the session it failed to register and must close it. An entry
 // whose session has already closed counts as free: removal happens on the
 // serving goroutine, so a peer reconnecting after a drop can arrive before its
 // old entry is reaped and must not be locked out.

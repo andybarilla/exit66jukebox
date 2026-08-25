@@ -339,9 +339,13 @@ func TestBothPeerSessionDirectionsScopeOnTheRemotePeer(t *testing.T) {
 		t.Fatalf("inbound session: stranger is in no group of home's, catalog = %#v", rows)
 	}
 
-	// Direction 2: home dials stranger (the real Manager.dialPeer), and serves
-	// over the session IT opened. The requests arriving on it are still
-	// stranger's, so its membership is what must be answered against.
+	// Direction 2: home dials a peer (the real Manager.dialPeer), and serves
+	// over the session IT opened. The requests arriving on it are still the
+	// remote peer's, so its membership is what must be answered against.
+	//
+	// A second id, because "stranger" still holds the live inbound session from
+	// direction 1 and a dial no longer evicts a live incumbent (#185). Like
+	// "stranger", "drifter" is in no group of home's.
 	strangerLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -369,12 +373,12 @@ func TestBothPeerSessionDirectionsScopeOnTheRemotePeer(t *testing.T) {
 		go http.Serve(sess, mux)
 		sessions <- sess
 	}()
-	go home.dialPeer("stranger", strangerLn.Addr().String())
+	go home.dialPeer("drifter", strangerLn.Addr().String())
 
 	outSess := <-sessions
 	defer outSess.Close()
 	if rows := catalogOverEventually(t, outSess); len(rows) != 0 {
-		t.Fatalf("outbound session: stranger is in no group of home's, catalog = %#v", rows)
+		t.Fatalf("outbound session: drifter is in no group of home's, catalog = %#v", rows)
 	}
 }
 

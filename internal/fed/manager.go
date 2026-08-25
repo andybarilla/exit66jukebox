@@ -195,7 +195,15 @@ func (m *Manager) dialPeer(peerID, addr string) {
 		return
 	}
 	p := &Peer{ID: peerID, Session: sess, Client: SessionClient(sess), BaseURL: "http://" + peerID}
-	m.Registry.put(p)
+	if err := m.Registry.putIfFree(p); err != nil {
+		// Both ends dial each other in peer role, so a dial that began while the
+		// id was free can finish after an inbound session for the same peer was
+		// accepted in the meantime. Drop the redundant session rather than
+		// evicting the incumbent: whichever session was established first wins,
+		// on the dial path as on the accept path (#185, #171).
+		sess.Close()
+		return
+	}
 	m.learnCaps(p)
 	go m.startDirectSyncLoop(p, sess.CloseChan())
 	if m.PeerHandler != nil {

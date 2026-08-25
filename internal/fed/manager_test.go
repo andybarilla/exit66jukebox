@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/andybarilla/exit66jukebox/internal/store"
+	"github.com/hashicorp/yamux"
 )
 
 func TestManagerMemberServesHubRequests(t *testing.T) {
@@ -157,4 +158,146 @@ func openPeerDialerTestDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// startDialTarget stands in for the far end of a peer dial: it accepts the peer
+// handshake and serves the session, reporting each accepted peer. Registration
+// goes into its own registry, so the dialer's registry is the only one under
+// test.
+func startDialTarget(t *testing.T) (addr string, accepted <-chan *Peer) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	reg := NewRegistry()
+	out := make(chan *Peer, 4)
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				p, err := acceptAndRegister(conn, "tok", reg)
+				if err != nil {
+					return
+				}
+				out <- p
+				_ = http.Serve(p.Session, nil)
+			}()
+		}
+	}()
+	return ln.Addr().String(), out
+}
+
+// waitSessionClosed polls until sess reports closed, which is how the far end
+// observes the dialer tearing its redundant session down.
+func waitSessionClosed(t *testing.T, sess *yamux.Session) bool {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if sess.IsClosed() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+// In peer role both ends dial each other, so a dial that began while the id was
+// free can finish after an inbound session for the same peer was accepted. The
+// incumbent must survive and the redundant session must be dropped (#185).
+func TestDialDoesNotEvictLiveInboundSession(t *testing.T) {
+	reg := NewRegistry()
+	incumbent := &Peer{ID: "peer-a", Session: liveTestSession(t)}
+	if err := reg.putIfFree(incumbent); err != nil {
+		t.Fatalf("registering the incumbent: %v", err)
+	}
+
+	addr, accepted := startDialTarget(t)
+	m := &Manager{Role: "peer", Token: "tok", PeerID: "self", Registry: reg}
+
+	done := make(chan struct{})
+	go func() { m.dialPeer("peer-a", addr); close(done) }()
+
+	var far *Peer
+	select {
+	case far = <-accepted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial never completed its handshake")
+	}
+
+	// Settle on whichever comes first: dialPeer dropping its session, or the
+	// incumbent being displaced. Waiting only on done would report a hang for a
+	// dial that evicted and carried on serving.
+	dropped := false
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if reg.Get("peer-a") != incumbent {
+			break
+		}
+		select {
+		case <-done:
+			dropped = true
+		default:
+		}
+		if dropped {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := reg.Get("peer-a"); got != incumbent {
+		t.Fatalf("registry peer = %p, want the incumbent %p", got, incumbent)
+	}
+	if incumbent.Session.IsClosed() {
+		t.Fatal("the completed dial closed the live incumbent session")
+	}
+	if !dropped {
+		t.Fatal("dialPeer kept the redundant session instead of dropping it")
+	}
+	if !waitSessionClosed(t, far.Session) {
+		t.Fatal("the redundant dialled session was left open")
+	}
+}
+
+// The reconnect path #171 had to protect: an entry whose session has ended is
+// reaped by its serving goroutine, so a dial can arrive while the dead entry is
+// still present and must not be refused on it.
+func TestDialRegistersOverEndedSession(t *testing.T) {
+	reg := NewRegistry()
+	stale := &Peer{ID: "peer-a", Session: liveTestSession(t)}
+	if err := reg.putIfFree(stale); err != nil {
+		t.Fatalf("registering the stale peer: %v", err)
+	}
+	stale.Session.Close()
+
+	addr, accepted := startDialTarget(t)
+	m := &Manager{Role: "peer", Token: "tok", PeerID: "self", Registry: reg}
+	go m.dialPeer("peer-a", addr)
+
+	var far *Peer
+	select {
+	case far = <-accepted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial never completed its handshake")
+	}
+	t.Cleanup(func() { far.Session.Close() })
+
+	var got *Peer
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got = reg.Get("peer-a"); got != nil && got != stale {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got == nil || got == stale {
+		t.Fatal("a dial to a peer whose session ended was refused on the dead entry")
+	}
+	if got.Session.IsClosed() {
+		t.Fatal("the registered session is not live")
+	}
 }
