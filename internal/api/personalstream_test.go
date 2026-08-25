@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/andybarilla/exit66jukebox/internal/auth"
@@ -94,20 +95,32 @@ func TestPersonalStreamNotAddressableByDerivedID(t *testing.T) {
 	}
 	hers := store.PersonalStreamID(aliceID)
 
-	for _, tc := range []struct{ name, method, path, body string }{
-		{"read", http.MethodGet, "/api/streams/" + hers, ""},
-		{"request", http.MethodPost, "/api/streams/" + hers + "/requests", "kind=track&id=" + itoa(tid)},
-		{"next", http.MethodPost, "/api/streams/" + hers + "/next", ""},
-		{"clear", http.MethodDelete, "/api/streams/" + hers + "/requests", ""},
-		{"remove", http.MethodDelete, "/api/streams/" + hers + "/requests/" + itoa(tid), ""},
-		{"shuffle", http.MethodPost, "/api/streams/" + hers + "/shuffle", "value=true"},
-		{"station", http.MethodPost, "/api/streams/" + hers + "/station", `{"genre":"rock"}`},
-		{"rename", http.MethodPatch, "/api/streams/" + hers, `{"name":"mine now"}`},
-		{"delete", http.MethodDelete, "/api/streams/" + hers, ""},
+	// Every route the seam wraps, so a route added without it shows up here.
+	for _, tc := range []struct {
+		name, method, path, body string
+		form                     bool
+	}{
+		{name: "read", method: http.MethodGet, path: "/api/streams/" + hers},
+		{name: "events", method: http.MethodGet, path: "/api/streams/" + hers + "/events"},
+		{name: "request", method: http.MethodPost, path: "/api/streams/" + hers + "/requests",
+			body: "kind=track&id=" + itoa(tid), form: true},
+		{name: "next", method: http.MethodPost, path: "/api/streams/" + hers + "/next"},
+		{name: "clear", method: http.MethodDelete, path: "/api/streams/" + hers + "/requests"},
+		{name: "remove", method: http.MethodDelete, path: "/api/streams/" + hers + "/requests/" + itoa(tid)},
+		{name: "shuffle", method: http.MethodPost, path: "/api/streams/" + hers + "/shuffle",
+			body: "value=true", form: true},
+		{name: "get station", method: http.MethodGet, path: "/api/streams/" + hers + "/station"},
+		{name: "start station", method: http.MethodPost, path: "/api/streams/" + hers + "/station",
+			body: `{"genre":"rock"}`},
+		{name: "stop station", method: http.MethodDelete, path: "/api/streams/" + hers + "/station"},
+		{name: "rename", method: http.MethodPatch, path: "/api/streams/" + hers, body: `{"name":"mine now"}`},
+		{name: "delete", method: http.MethodDelete, path: "/api/streams/" + hers},
 	} {
-		var rec = do(srv, tc.method, tc.path, tc.body, bob)
-		if tc.name == "request" || tc.name == "shuffle" {
+		var rec *httptest.ResponseRecorder
+		if tc.form {
 			rec = postForm(srv, tc.path, tc.body, bob)
+		} else {
+			rec = do(srv, tc.method, tc.path, tc.body, bob)
 		}
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("bob %s on alice's derived id: want 404, got %d %s", tc.name, rec.Code, rec.Body)
@@ -277,5 +290,86 @@ func TestPersonalStreamIsNotServedAsContinuousAudio(t *testing.T) {
 	rec := do(srv, http.MethodGet, "/stream/"+store.PersonalStreamID(uid)+".mp3", "", user)
 	if rec.Code == http.StatusOK {
 		t.Fatalf("a personal stream was served as continuous audio: %d", rec.Code)
+	}
+}
+
+// R5: rename and delete refuse a private stream, so resolving the alias for
+// them must not create the row on the way to the 404. Otherwise a request that
+// is refused still writes, and a user who only ever tried to delete their
+// personal stream ends up with one.
+func TestRefusedAliasOperationsDoNotProvision(t *testing.T) {
+	for _, tc := range []struct{ name, method, body string }{
+		{"delete", http.MethodDelete, ""},
+		{"rename", http.MethodPatch, `{"name":"mine now"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newTestServer(t)
+			uid, user := userSessionWithID(t, srv, "bob@example.com")
+			mine := store.PersonalStreamID(uid)
+
+			rec := do(srv, tc.method, "/api/streams/me", tc.body, user)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("want 404, got %d %s", rec.Code, rec.Body)
+			}
+			if _, ok, _ := store.GetStream(srv.db, mine); ok {
+				t.Fatal("a refused request provisioned a personal stream row")
+			}
+		})
+	}
+}
+
+// The client decides at mount whether to run its heavy loads, using
+// guest_access — and only re-reads config once it does. That is sound only
+// while the modes allowing anonymous access are exactly the modes with no
+// personal stream: a mode that allowed both would let a logged-in user's
+// personal_stream go stale behind a mount-time fetch. Nothing enforces that
+// pairing, so assert it.
+func TestAnonymousModesAreExactlyTheModesWithoutAPersonalStream(t *testing.T) {
+	for _, mode := range []store.SecurityMode{
+		store.SecurityModeOpen, store.SecurityModeOpenAdminLocked,
+		store.SecurityModeHouseholdProfiles, store.SecurityModeFullLogin,
+	} {
+		anonymous := store.SecurityModeAllowsAnonymous(mode)
+		// Ask with a user present, so only the mode decides the answer.
+		_, hasPersonal := personalStreamFor(mode, store.User{ID: 1}, true)
+		if anonymous == hasPersonal {
+			t.Errorf("mode %s: allows anonymous = %v and has a personal stream = %v; "+
+				"these must stay mutually exclusive or the client's mount-time config fetch goes stale",
+				mode, anonymous, hasPersonal)
+		}
+	}
+}
+
+// R7: two middlewares classify a stream's kind with opposite consequences —
+// resolvePersonalStream 404s a private row, streamGate lets one through
+// ungated. That is layered rather than duplicated (reachability, then
+// authorization), and it holds only while the sole private stream able to
+// reach streamGate is the caller's own. If the resolver were ever loosened,
+// streamGate's ungated fall-through would silently become another user's
+// queue, so assert the invariant directly rather than trusting the layering.
+func TestOnlyTheCallersOwnPrivateStreamReachesTheQueueControls(t *testing.T) {
+	srv, _ := newTestServer(t)
+	aliceID, alice := userSessionWithID(t, srv, "alice@example.com")
+	_, bob := userSessionWithID(t, srv, "bob@example.com")
+	tid := insertTrack(t, srv, "Song")
+	if rec := postForm(srv, "/api/streams/me/requests", "kind=track&id="+itoa(tid), alice); rec.Code != http.StatusOK {
+		t.Fatalf("alice request: %d %s", rec.Code, rec.Body)
+	}
+	// A private stream outside the per-user namespace, as an older build could
+	// have left behind: it belongs to nobody the gate can check.
+	if err := store.EnsurePrivateStream(srv.db, "legacy-private"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := store.Enqueue(srv.db, "legacy-private", tid, "someone"); err != nil {
+		t.Fatalf("seed queue: %v", err)
+	}
+
+	for _, id := range []string{store.PersonalStreamID(aliceID), "legacy-private"} {
+		if rec := do(srv, http.MethodDelete, "/api/streams/"+id+"/requests", "", bob); rec.Code != http.StatusNotFound {
+			t.Errorf("clear on private stream %q: want 404, got %d %s", id, rec.Code, rec.Body)
+		}
+		if ids, _ := store.QueueTrackIDs(srv.db, id); len(ids) != 1 {
+			t.Errorf("private stream %q was cleared through the ungated fall-through: %v", id, ids)
+		}
 	}
 }

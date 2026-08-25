@@ -6,53 +6,50 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
-// callerPersonalStream returns the stream id that "my personal stream" names
-// for this request, and false when the request has none.
+// personalStreamFor returns the stream id that "my personal stream" names for a
+// caller, and false when there is none.
 //
-// It has none in the two open security modes: those admit requests carrying no
-// user at all, so a personal stream there would be a single row shared by
-// every listener again — the exact bug (#128). The Personal control is hidden
-// in those modes rather than backed by a session-keyed stream, so there is no
-// per-caller row to hand back.
+// The two open modes have none: they admit requests carrying no user, so a
+// personal stream there would be one row shared by every listener (#128).
 //
-// In the two secured modes every request that reaches a stream route has
-// already resolved to a user (RequireAuthMiddleware refuses anonymous ones), so
-// the id is derived from that user and never from anything the client sent.
-func (s *Server) callerPersonalStream(r *http.Request) (string, bool) {
-	switch store.SecurityModeSetting(s.db) {
+// Mode and user are passed in rather than read, so getConfig and the resolver
+// share one rule without either repeating the other's lookups.
+func personalStreamFor(mode store.SecurityMode, u store.User, authed bool) (string, bool) {
+	switch mode {
 	case store.SecurityModeHouseholdProfiles, store.SecurityModeFullLogin:
 	default:
 		return "", false
 	}
-	u, ok := s.currentUser(r)
-	if !ok {
+	if !authed {
 		return "", false
 	}
 	return store.PersonalStreamID(u.ID), true
 }
 
+// callerPersonalStream resolves personalStreamFor from the request itself.
+func (s *Server) callerPersonalStream(r *http.Request) (string, bool) {
+	u, authed := s.currentUser(r)
+	return personalStreamFor(store.SecurityModeSetting(s.db), u, authed)
+}
+
 // resolvePersonalStream rewrites the route's {id} when the client sent the
-// personal-stream alias, and refuses any other route into a private stream.
-// Every /api/streams/{id} route goes through it, so the rules hold for reads,
-// queue controls, stations, rename and delete alike.
+// personal-stream alias, and refuses every other route into a private stream.
+// All of /api/streams/{id} goes through it, so reads, queue controls, stations,
+// rename and delete are covered alike.
 //
-// Three cases, in order:
+// An id in the per-user namespace is refused even when it is the caller's own:
+// the ids are derived from a user id, so honouring one in a path would let
+// anyone reach anyone's queue by counting. The alias is the only way in, which
+// is what keeps the derivation server-side. Any other private row is refused
+// too — it is somebody's queue however it came to exist.
 //
-//   - The alias. Resolved to the caller's own id and provisioned if this is
-//     their first use — boot used to create the one global row, and with the id
-//     now derived per user there is nothing at boot that knows the users.
-//   - An id in the per-user namespace. Always refused, even the caller's own:
-//     the ids are derived from a user id, so honouring one in a path would let
-//     anyone read or wipe anyone's queue by counting upwards. The alias is the
-//     only way in, which is what keeps the derivation server-side.
-//   - Any other private row. Refused too. Nothing creates private streams
-//     outside the namespace any more, so this only catches rows left by an
-//     older build — but a private stream is somebody's queue whichever way it
-//     got there.
+// provision says whether resolving the alias may create the row, which is how a
+// user gets their first personal stream. Rename and delete pass false: they
+// refuse a private stream downstream, so provisioning would make a 404 write.
 //
-// A refusal is 404 rather than 403 so the answer does not reveal whether the
+// Refusals are 404 rather than 403, so the answer does not reveal whether the
 // stream exists.
-func (s *Server) resolvePersonalStream(next http.HandlerFunc) http.HandlerFunc {
+func (s *Server) resolvePersonalStream(next http.HandlerFunc, provision bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 
@@ -62,9 +59,11 @@ func (s *Server) resolvePersonalStream(next http.HandlerFunc) http.HandlerFunc {
 				writeErr(w, http.StatusNotFound, "no such stream")
 				return
 			}
-			if err := store.EnsurePrivateStream(s.db, mine); err != nil {
-				writeErr(w, http.StatusInternalServerError, "db error")
-				return
+			if provision {
+				if err := store.EnsurePrivateStream(s.db, mine); err != nil {
+					writeErr(w, http.StatusInternalServerError, "db error")
+					return
+				}
 			}
 			r.SetPathValue("id", mine)
 			next(w, r)
@@ -87,4 +86,14 @@ func (s *Server) resolvePersonalStream(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// personalStream serves the routes a caller drives against their own stream.
+func (s *Server) personalStream(next http.HandlerFunc) http.HandlerFunc {
+	return s.resolvePersonalStream(next, true)
+}
+
+// personalStreamNoProvision serves rename and delete. See provision above.
+func (s *Server) personalStreamNoProvision(next http.HandlerFunc) http.HandlerFunc {
+	return s.resolvePersonalStream(next, false)
 }

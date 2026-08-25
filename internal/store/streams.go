@@ -53,6 +53,11 @@ var (
 	ErrStreamCapReached = fmt.Errorf("shared stream limit reached (%d)", MaxSharedStreams)
 	// ErrStreamExists is returned when the id is already taken.
 	ErrStreamExists = errors.New("stream already exists")
+	// ErrReservedStreamID is returned when a caller-supplied id lands in the
+	// per-user namespace. Such a stream would be permanently unreachable and
+	// undeletable: every route into it resolves personal ids first and refuses
+	// them, delete included.
+	ErrReservedStreamID = errors.New("stream id is reserved")
 )
 
 // EnsurePrivateStream creates the stream row as private if it does not exist.
@@ -80,7 +85,14 @@ func EnsureSharedStream(db *sql.DB, id, name string) error {
 // CreateSharedStream creates a named shared stream, enforcing MaxSharedStreams.
 // The count and the insert share one transaction so the cap cannot be exceeded
 // by two concurrent creates, and so no caller can opt out of it.
+//
+// It is the only path that takes an id from a caller, so it is where the
+// per-user namespace is defended. EnsureSharedStream needs no such check: its
+// one caller provisions house from a constant.
 func CreateSharedStream(db *sql.DB, id, name string) error {
+	if IsPersonalStreamID(id) || id == PersonalStreamAlias {
+		return ErrReservedStreamID
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err

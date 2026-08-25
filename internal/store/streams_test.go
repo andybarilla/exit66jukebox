@@ -255,3 +255,24 @@ func TestDeleteUserRemovesTheirPersonalStream(t *testing.T) {
 		t.Errorf("another user's queue was emptied: %v", ids)
 	}
 }
+
+// A shared stream in the per-user namespace would be permanently unreachable
+// and undeletable: every route resolves personal ids first and refuses them,
+// delete included. Nothing can reach this today (createStream mints its own
+// id), so the rejection is what keeps that true if a caller-supplied id ever
+// arrives.
+func TestCreateSharedStreamRejectsReservedIDs(t *testing.T) {
+	db := openTestDB(t)
+	for _, id := range []string{PersonalStreamID(5), PersonalStreamAlias, personalStreamPrefix} {
+		if err := CreateSharedStream(db, id, "Sneaky"); !errors.Is(err, ErrReservedStreamID) {
+			t.Errorf("CreateSharedStream(%q) = %v, want ErrReservedStreamID", id, err)
+		}
+		if _, ok, _ := GetStream(db, id); ok {
+			t.Errorf("CreateSharedStream(%q) created a row anyway", id)
+		}
+	}
+	// An ordinary id is unaffected.
+	if err := CreateSharedStream(db, "a1b2c3", "Kitchen"); err != nil {
+		t.Fatalf("ordinary id rejected: %v", err)
+	}
+}

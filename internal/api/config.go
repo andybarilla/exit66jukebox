@@ -15,7 +15,7 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	u, authed := s.currentUser(r)
 	mode := store.SecurityModeSetting(s.db)
 	isPasswordlessProfile := authed && u.IsPasswordlessProfile
-	_, hasPersonalStream := s.callerPersonalStream(r)
+	_, hasPersonalStream := personalStreamFor(mode, u, authed)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mute_local_on_cast": s.muteLocalOnCast,
 		"fed_peers":          peers,

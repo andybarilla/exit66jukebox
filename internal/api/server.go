@@ -231,26 +231,26 @@ func (s *Server) Handler() http.Handler {
 	// Rename and delete take the shared-only gate: requireAdminShared lets a
 	// private stream through ungated so a listener can drive their own queue,
 	// and that must not extend to destroying a stream.
-	mux.HandleFunc("PATCH /api/streams/{id}", s.resolvePersonalStream(s.requireAdminOnSharedOnly(s.renameStream)))
-	mux.HandleFunc("DELETE /api/streams/{id}", s.resolvePersonalStream(s.requireAdminOnSharedOnly(s.deleteStream)))
-	mux.HandleFunc("GET /api/streams/{id}", s.resolvePersonalStream(s.getStream))
+	mux.HandleFunc("PATCH /api/streams/{id}", s.personalStreamNoProvision(s.requireAdminOnSharedOnly(s.renameStream)))
+	mux.HandleFunc("DELETE /api/streams/{id}", s.personalStreamNoProvision(s.requireAdminOnSharedOnly(s.deleteStream)))
+	mux.HandleFunc("GET /api/streams/{id}", s.personalStream(s.getStream))
 	// next/remove/clear/shuffle mutate the queue. requireAdminShared gates them on
 	// the stream's kind, so every shared stream is admin-only; a caller's own
 	// personal stream stays open so they can always drive their own queue.
 	// resolvePersonalStream runs first on every {id} route: it turns the alias
 	// into the caller's own id and refuses every other route into a private
 	// stream, so the ungated fall-through below can only ever be the caller's.
-	mux.HandleFunc("POST /api/streams/{id}/next", s.resolvePersonalStream(s.requireAdminShared(s.nextTrack)))
-	mux.HandleFunc("POST /api/streams/{id}/requests", s.resolvePersonalStream(s.request))
-	mux.HandleFunc("DELETE /api/streams/{id}/requests/{trackID}", s.resolvePersonalStream(s.requireAdminShared(s.removeRequest)))
-	mux.HandleFunc("DELETE /api/streams/{id}/requests", s.resolvePersonalStream(s.requireAdminShared(s.clearRequests)))
-	mux.HandleFunc("POST /api/streams/{id}/shuffle", s.resolvePersonalStream(s.requireAdminShared(s.setShuffle)))
+	mux.HandleFunc("POST /api/streams/{id}/next", s.personalStream(s.requireAdminShared(s.nextTrack)))
+	mux.HandleFunc("POST /api/streams/{id}/requests", s.personalStream(s.request))
+	mux.HandleFunc("DELETE /api/streams/{id}/requests/{trackID}", s.personalStream(s.requireAdminShared(s.removeRequest)))
+	mux.HandleFunc("DELETE /api/streams/{id}/requests", s.personalStream(s.requireAdminShared(s.clearRequests)))
+	mux.HandleFunc("POST /api/streams/{id}/shuffle", s.personalStream(s.requireAdminShared(s.setShuffle)))
 	mux.HandleFunc("GET /api/tracks/{id}/audio", s.trackAudio)
 	mux.HandleFunc("GET /api/tracks/{id}/cover", s.trackCover)
 	mux.HandleFunc("GET /api/albums/{id}/cover", s.albumCover)
 	mux.HandleFunc("GET /api/albums/{id}/tracks", s.albumTracks)
 	mux.HandleFunc("GET /stream/", s.streamAudioGuarded)
-	mux.HandleFunc("GET /api/streams/{id}/events", s.resolvePersonalStream(s.streamEvents))
+	mux.HandleFunc("GET /api/streams/{id}/events", s.personalStream(s.streamEvents))
 	mux.HandleFunc("GET /api/sonos/devices", s.sonosDevices)
 	// Casting drives the shared house stream onto the room speakers, so cast/stop
 	// and volume changes are admin-only. Discovery, manual add, and reading the
@@ -284,9 +284,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/enrich", s.enrichStatus)
 	mux.HandleFunc("GET /api/scan", s.scanStatus)
 	mux.HandleFunc("GET /api/config", s.getConfig)
-	mux.HandleFunc("GET /api/streams/{id}/station", s.resolvePersonalStream(s.getStationHandler))
-	mux.HandleFunc("POST /api/streams/{id}/station", s.resolvePersonalStream(s.requireAdminShared(s.startStationHandler)))
-	mux.HandleFunc("DELETE /api/streams/{id}/station", s.resolvePersonalStream(s.requireAdminShared(s.stopStationHandler)))
+	mux.HandleFunc("GET /api/streams/{id}/station", s.personalStream(s.getStationHandler))
+	mux.HandleFunc("POST /api/streams/{id}/station", s.personalStream(s.requireAdminShared(s.startStationHandler)))
+	mux.HandleFunc("DELETE /api/streams/{id}/station", s.personalStream(s.requireAdminShared(s.stopStationHandler)))
 	mux.HandleFunc("GET /api/admin/settings", s.requireAdmin(s.getAdminSettings))
 	mux.HandleFunc("POST /api/admin/settings", s.requireAdmin(s.setAdminSettings))
 	mux.HandleFunc("GET /api/admin/libraries", s.requireAdmin(s.getAdminLibraries))

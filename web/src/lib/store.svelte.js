@@ -411,8 +411,6 @@ export function createStore() {
       await loadConfig();
       fetchMe().then((u) => { me = u; }).catch(() => {}).finally(() => { authChecked = true; });
     },
-    // refreshConfig re-reads /api/config on demand. See loadConfig.
-    refreshConfig() { return loadConfig(); },
     // start runs the heavy loads once access is granted. Guarded so calling it
     // again (e.g. after login) is a no-op.
     async start() {
