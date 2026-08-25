@@ -196,3 +196,43 @@ func TestRediscoverEndpointIsScopedToTheCaller(t *testing.T) {
 		}
 	}
 }
+
+func TestRediscoverEndpointRanksOnTheCallersOwnPlayCount(t *testing.T) {
+	srv, db := newTestServer(t)
+	ids := map[string]int64{}
+	for _, title := range []string{"Alpha", "Bravo", "Charlie"} {
+		id, err := store.UpsertTrack(srv.db,
+			model.Track{Path: "/m/" + title + ".mp3", Title: title, Genre: "Rock"}, "B", "", "X")
+		if err != nil {
+			t.Fatalf("upsert %s: %v", title, err)
+		}
+		ids[title] = id
+	}
+	if err := store.EnsureSharedStream(db, "house", "House"); err != nil {
+		t.Fatalf("house: %v", err)
+	}
+	aliceID, alice := userSessionWithID(t, srv, "alice@example.com")
+	_, bob := userSessionWithID(t, srv, "bob@example.com")
+	if err := store.EnsurePrivateStream(db, store.PersonalStreamID(aliceID)); err != nil {
+		t.Fatalf("alice stream: %v", err)
+	}
+	// Alice hears Bravo twice, privately. The house heard Alpha once.
+	for _, at := range []int64{9000, 9999} {
+		if _, err := db.Exec(`INSERT INTO history(stream_id, track_id, played_at) VALUES(?,?,?)`,
+			store.PersonalStreamID(aliceID), ids["Bravo"], at); err != nil {
+			t.Fatalf("history: %v", err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO history(stream_id, track_id, played_at) VALUES('house',?,100)`,
+		ids["Alpha"]); err != nil {
+		t.Fatalf("history: %v", err)
+	}
+
+	// Alice: 0, 1, 2 plays. Bob never heard Bravo, so for him it leads.
+	if got := rediscoverTitlesFor(t, srv, alice); !slices.Equal(got, []string{"Charlie", "Alpha", "Bravo"}) {
+		t.Errorf("alice = %v, want her two private plays to sink Bravo", got)
+	}
+	if got := rediscoverTitlesFor(t, srv, bob); !slices.Equal(got, []string{"Bravo", "Charlie", "Alpha"}) {
+		t.Errorf("bob = %v, want alice's private plays not to count against him", got)
+	}
+}
