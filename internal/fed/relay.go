@@ -16,14 +16,19 @@ import (
 // Relay is the hub-side handler. It reverse-proxies GET /fed/audio/{peer}/{id}
 // to the owning peer's /api/tracks/{id}/audio over that peer's session
 // (forwarding Range, copying 206 + body back). db is the hub's own database —
-// the hub is a peer too, so received catalogs are applied to it (a later task).
-// db may be nil in tests that exercise only audio relay.
+// the hub is a peer too, so a received catalog is applied to it when the sender
+// shares one of its listening groups — and it is also where those groups are
+// stored, so it decides what each member discovers (serveMerged).
+// db may be nil in tests that exercise only audio relay; that leaves discovery
+// unscoped, as it was before groups existed.
 type Relay struct {
-	reg      *Registry
-	db       *sql.DB
-	selfID   string
-	mu       sync.Mutex
-	catalogs map[string][]store.CatalogRow // peer -> its rows (for fan-out)
+	reg    *Registry
+	db     *sql.DB
+	selfID string
+	mu     sync.Mutex
+	// peer -> its rows, as pushed. Unfiltered: which of these any one member
+	// may see is decided per request in serveMerged, not on the way in.
+	catalogs map[string][]store.CatalogRow
 }
 
 func NewRelay(reg *Registry, db *sql.DB) *Relay {

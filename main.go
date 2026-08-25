@@ -381,8 +381,8 @@ func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg
 	switch s.Role {
 	case "hub":
 		// One relay instance shared by the session handler and the resolver so the
-		// hub's own browse sees remote tracks (catalog ingest lands here in a later
-		// task). It holds the registry and the hub's DB.
+		// hub's own browse sees remote tracks. It holds the registry and the hub's
+		// DB, which is also where the listening groups it scopes fan-out by live.
 		relay := fed.NewRelay(reg, db)
 		relay.SetSelf(s.PeerID)
 		fm.Relay = relay
