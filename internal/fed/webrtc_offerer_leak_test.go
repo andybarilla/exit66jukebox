@@ -37,9 +37,13 @@ func TestOutboundDialsDoNotAccumulatePeerConnections(t *testing.T) {
 	bob := NewWebRTCTransport("bob", nil, signaler, nil, testLogger(t))
 	// A far end that holds its conn open never reacts to the channel close, so
 	// the release falls to the linger. Production waits webrtcCloseLinger for
-	// that; this test does not need to. The setup deadline is left alone —
-	// shortening it would bound the dials themselves.
+	// that; this test does not need to.
 	alice.closeLinger = 2 * time.Second
+	// The setup deadline goes the other way. Nothing here tests it, and under
+	// -race on a loaded machine a real negotiation can exceed the production 15s
+	// — #190 is the same deadline flaking a wire test. Give it room so a slow
+	// machine cannot masquerade as the leak this test is about.
+	giveNegotiationRoom(alice, bob)
 	defer alice.Close()
 	defer bob.Close()
 
@@ -90,6 +94,7 @@ func TestClosingAnOutboundConnDropsItFromTheCache(t *testing.T) {
 	signaler := NewSignaler()
 	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
 	bob := NewWebRTCTransport("bob", nil, signaler, nil, testLogger(t))
+	giveNegotiationRoom(alice, bob)
 	defer alice.Close()
 	defer bob.Close()
 
@@ -312,6 +317,7 @@ func TestClosingAnOutboundConnLetsTheFarEndSeeTheCloseFirst(t *testing.T) {
 	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
 	bob := NewWebRTCTransport("bob", nil, signaler, nil, testLogger(t))
 	alice.closeLinger = 2 * time.Second
+	giveNegotiationRoom(alice, bob)
 	defer alice.Close()
 	defer bob.Close()
 
@@ -365,5 +371,17 @@ func TestClosingAnOutboundConnLetsTheFarEndSeeTheCloseFirst(t *testing.T) {
 				conn.pc.ConnectionState(), alice.closeLinger)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// giveNegotiationRoom lifts the setup deadline on transports whose tests
+// negotiate for real. The deadline bounds Dial and arms the answerer's watchdog,
+// and 15s is a production figure chosen for a peer that has gone quiet — under
+// -race on a loaded machine an ordinary in-process negotiation can pass it, and
+// the test then fails for the machine rather than for the code. No test here
+// asserts anything about how long setup may take.
+func giveNegotiationRoom(transports ...*WebRTCTransport) {
+	for _, tr := range transports {
+		tr.setupTimeout = 2 * time.Minute
 	}
 }
