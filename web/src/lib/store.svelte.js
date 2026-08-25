@@ -17,7 +17,9 @@ export function createStore() {
   let tab = $state('albums');
   let query = $state('');
   // stream is the id currently tuned in: any shared stream, or PERSONAL for the
-  // pinned personal one. sharedStreams mirrors GET /api/streams.
+  // pinned personal one. PERSONAL is an alias the server resolves per caller,
+  // and it is only offered when config.personalStream says one exists.
+  // sharedStreams mirrors GET /api/streams.
   let stream = $state(HOUSE);
   let sharedStreams = $state([{ id: HOUSE, name: 'House', house: true, listeners: 0 }]);
   let isPhone = $state(false);
@@ -54,6 +56,9 @@ export function createStore() {
     needsBootstrap: false,
     authenticated: false,
     maxSharedStreams: 0,
+    // Assume none until /api/config says otherwise, so the Personal control
+    // never flashes in on a mode that has no personal stream.
+    personalStream: false,
   });
   let castActive = $state(false);
 
@@ -241,6 +246,31 @@ export function createStore() {
     });
   }
 
+  // loadConfig reads /api/config. Some of what it carries is per-caller rather
+  // than per-instance — personal_stream is false for a logged-out visitor and
+  // true for the same visitor once they log in — so it is re-read whenever the
+  // caller may have changed, not only at mount.
+  async function loadConfig() {
+    await getConfig()
+      .then((c) => {
+        if (!c) return;
+        config = {
+          muteLocalOnCast: typeof c.mute_local_on_cast === 'boolean' ? c.mute_local_on_cast : config.muteLocalOnCast,
+          fedPeers: Array.isArray(c.fed_peers) ? c.fed_peers : [],
+          securityMode: c.security_mode || 'full_login',
+          guestAccess: !!c.guest_access,
+          requiresProfile: !!c.requires_profile,
+          requiresLogin: !!c.requires_login,
+          signupEnabled: !!c.signup_enabled,
+          needsBootstrap: !!c.needs_bootstrap,
+          authenticated: !!c.authenticated,
+          maxSharedStreams: Number(c.max_shared_streams) || 0,
+          personalStream: !!c.personal_stream,
+        };
+      })
+      .catch(() => {});
+  }
+
   async function refreshQueue(s) {
     const r = await getQueue(s);
     queues[s] = (r.queue || []).map(normalizeQueued);
@@ -378,23 +408,7 @@ export function createStore() {
     // whether the user has access. Heavy data loads live in start(), gated on
     // access being granted, so they never 401 for a logged-out guest.
     async bootstrap() {
-      await getConfig()
-        .then((c) => {
-          if (!c) return;
-          config = {
-            muteLocalOnCast: typeof c.mute_local_on_cast === 'boolean' ? c.mute_local_on_cast : config.muteLocalOnCast,
-            fedPeers: Array.isArray(c.fed_peers) ? c.fed_peers : [],
-            securityMode: c.security_mode || 'full_login',
-            guestAccess: !!c.guest_access,
-            requiresProfile: !!c.requires_profile,
-            requiresLogin: !!c.requires_login,
-            signupEnabled: !!c.signup_enabled,
-            needsBootstrap: !!c.needs_bootstrap,
-            authenticated: !!c.authenticated,
-            maxSharedStreams: Number(c.max_shared_streams) || 0,
-          };
-        })
-        .catch(() => {});
+      await loadConfig();
       fetchMe().then((u) => { me = u; }).catch(() => {}).finally(() => { authChecked = true; });
     },
     // start runs the heavy loads once access is granted. Guarded so calling it
@@ -402,6 +416,11 @@ export function createStore() {
     async start() {
       if (_started) return;
       _started = true;
+      // Re-read config before the heavy loads. start() is the single funnel
+      // every login path reaches, and the payload fetched at mount was for a
+      // logged-out visitor: personal_stream would still be false for a user who
+      // has just logged in, hiding the Personal control until a manual reload.
+      await loadConfig();
       // Seed scan state before the initial load so a scan that finishes *during*
       // the first fetch is still seen as a true→false transition by the first
       // poll, triggering the reload that pulls in the last tracks.
@@ -411,7 +430,11 @@ export function createStore() {
       await reloadActive();        // first page of the active (albums) tab
       startScanPolling();
       await loadStreams();
-      await Promise.all([refreshQueue(stream), refreshQueue(PERSONAL)]);
+      // The personal queue is only fetched where there is one: in the open
+      // modes that route 404s, and prefetching it would just log an error.
+      const queuesToLoad = [refreshQueue(stream)];
+      if (config.personalStream && stream !== PERSONAL) queuesToLoad.push(refreshQueue(PERSONAL));
+      await Promise.all(queuesToLoad);
       discoverGenres().then((g) => { discoverGenreList = Array.isArray(g) ? g : []; }).catch(() => {});
       subscribeToStream(stream);
     },
@@ -434,9 +457,18 @@ export function createStore() {
         pushToast('cyan', 'Stream', `Tuned in to ${name} — everyone on it hears this.`);
       }
     },
+    // hasPersonalStream mirrors the server: false in the two open security
+    // modes, where a request may carry no user and so there is nobody to key a
+    // personal stream on. The Personal control is hidden rather than offered
+    // and refused.
+    get hasPersonalStream() { return config.personalStream; },
     // toggleStream flips between the personal stream and the last shared one
-    // (house when there wasn't one), which is what the compact chip does.
-    toggleStream() { this.setStream(stream === PERSONAL ? lastShared : PERSONAL); },
+    // (house when there wasn't one), which is what the compact chip does. A
+    // no-op where there is no personal stream to flip to.
+    toggleStream() {
+      if (stream !== PERSONAL && !config.personalStream) return;
+      this.setStream(stream === PERSONAL ? lastShared : PERSONAL);
+    },
 
     loadStreams() { return loadStreams(); },
 

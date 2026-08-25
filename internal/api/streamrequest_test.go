@@ -42,37 +42,6 @@ func TestRequestToUnknownStreamCreatesNothing(t *testing.T) {
 	}
 }
 
-// Boot provisioning is the personal stream's only origin, so first use is what
-// the implicit create used to cover. TestMainProvisionsPersonalStreamAtBoot is
-// what holds the boot call itself in place.
-func TestPersonalStreamWorksFromFirstUse(t *testing.T) {
-	srv, db := newTestServer(t)
-	user := userSession(t, srv, "bob@example.com")
-	tid := insertTrack(t, srv, "Song")
-
-	if err := store.DeleteStream(db, store.PersonalStreamID); err != nil {
-		t.Fatalf("delete personal stream: %v", err)
-	}
-	rec := postForm(srv, "/api/streams/"+store.PersonalStreamID+"/requests",
-		"kind=track&id="+itoa(tid), user)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("unprovisioned personal stream: want 404, got %d", rec.Code)
-	}
-
-	if err := store.EnsurePrivateStream(db, store.PersonalStreamID); err != nil {
-		t.Fatalf("provision personal stream: %v", err)
-	}
-	rec = postForm(srv, "/api/streams/"+store.PersonalStreamID+"/requests",
-		"kind=track&id="+itoa(tid), user)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("first use after provisioning: status %d body %s", rec.Code, rec.Body.String())
-	}
-	q, err := srv.jb.Queue(store.PersonalStreamID)
-	if err != nil || len(q) != 1 {
-		t.Fatalf("personal queue: len=%d err=%v", len(q), err)
-	}
-}
-
 func TestHouseStreamTakesRequests(t *testing.T) {
 	srv, _ := newTestServer(t)
 	admin := adminSession(t, srv.db)

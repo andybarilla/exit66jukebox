@@ -188,15 +188,17 @@ func eq(a, b []string) bool {
 	return true
 }
 
-// Boot is the personal stream's only origin. The behavioural test in
-// internal/api provisions the row itself, so it stays green if this call is
-// dropped; only grepping main.go holds the wiring in place.
-func TestMainProvisionsPersonalStreamAtBoot(t *testing.T) {
+// A personal stream id is derived from a user and boot knows no users, so the
+// only row boot could create is the global one every listener shared (#128).
+// Reintroducing the call would leave every test green while re-creating it, so
+// this stays a source grep. It matches the call shape rather than the bare
+// name, which would fire on any legitimate future use of the function.
+func TestMainDoesNotProvisionAPersonalStreamAtBoot(t *testing.T) {
 	source, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatalf("read main.go: %v", err)
 	}
-	if !strings.Contains(string(source), "store.EnsurePrivateStream(db, store.PersonalStreamID)") {
-		t.Fatal("main.go should provision the personal stream at boot")
+	if strings.Contains(string(source), "store.EnsurePrivateStream(db,") {
+		t.Fatal("main.go must not provision a personal stream at boot: the id is per-user and boot has no user")
 	}
 }

@@ -59,8 +59,9 @@
   const atStreamCap = $derived(s.atSharedStreamCap);
   const chip = $derived(`${streamLabel} · ${s.listeners}`);
   // Queue controls show for admins on any shared stream, for open-mode guests on
-  // any shared stream, and for any guest on their own personal stream (which the
-  // server never gates). The server gates on stream kind, so this mirrors it.
+  // any shared stream, and for a user on their own personal stream (which the
+  // server never gates, and which is the only personal stream they can address).
+  // The server gates on stream kind, so this mirrors it.
   const canControlSharedQueue = $derived(
     s.isSharedStream && (s.isAdmin || s.config.securityMode === 'open')
   );
@@ -333,7 +334,7 @@
           onVolume={(v) => { volume = v; if (audio) audio.volume = v / 100; }} />
       </div>
       <div style="width:220px; flex:none; border-top:1px solid var(--border-strong); border-left:1px solid var(--border-default); background:var(--bg-surface-raised); background-image:var(--scanline); display:flex; flex-direction:column; justify-content:center; gap:8px; padding:0 18px; box-sizing:border-box;">
-        <StreamPicker streams={s.sharedStreams} current={s.stream} personalId={PERSONAL}
+        <StreamPicker streams={s.sharedStreams} current={s.stream} personalId={s.hasPersonalStream ? PERSONAL : null}
           canManage={canManageStreams}
           atCap={atStreamCap}
           onSelect={(id) => s.setStream(id)}
@@ -365,7 +366,7 @@
              render. Without it here the top-bar chip is the only stream control
              on a phone, and it only toggles between one shared stream and the
              personal one — no way to reach a second shared stream. -->
-        <StreamPicker streams={s.sharedStreams} current={s.stream} personalId={PERSONAL}
+        <StreamPicker streams={s.sharedStreams} current={s.stream} personalId={s.hasPersonalStream ? PERSONAL : null}
           canManage={canManageStreams}
           atCap={atStreamCap}
           onSelect={(id) => s.setStream(id)}

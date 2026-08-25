@@ -213,9 +213,27 @@ func ListPasswordlessProfiles(db *sql.DB) ([]User, error) {
 }
 
 // DeleteUser removes an account; its sessions cascade away (ON DELETE CASCADE).
+// The user's personal stream goes with them in the same transaction: nothing
+// else deletes it, because rename and delete refuse private streams outright,
+// so without this the row and its queued tracks would be stranded behind a
+// foreign key with no API path left to reach them.
+//
+// history rows for that stream are deliberately left, matching DeleteStream:
+// they carry no foreign key, and the fairness window and Discovery read them.
 func DeleteUser(db *sql.DB, id int64) error {
-	_, err := db.Exec(`DELETE FROM user WHERE id = ?`, id)
-	return err
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := deleteStreamTx(tx, PersonalStreamID(id)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM user WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func scanUser(row *sql.Row) (User, bool, error) {

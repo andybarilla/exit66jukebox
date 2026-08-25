@@ -427,3 +427,59 @@ func TestMigrateBackfillsFromModTime(t *testing.T) {
 		t.Fatalf("expected added_at backfilled to mod_time 555, got %d", addedAt)
 	}
 }
+
+// An instance carrying the pre-#128 global personal stream must upgrade
+// cleanly: the shared row and everything hanging off it go, because its queue
+// was common to every user and there is nobody to migrate it to.
+func TestMigrateDropsTheLegacyGlobalPersonalStream(t *testing.T) {
+	db := openTestDB(t)
+	tid := insertTestTrack(t, db, "/m/a.mp3")
+	// Stand in for the row boot used to create, with a queue and a station.
+	if err := EnsurePrivateStream(db, legacyPersonalStreamID); err != nil {
+		t.Fatalf("seed legacy stream: %v", err)
+	}
+	if err := Enqueue(db, legacyPersonalStreamID, tid, "Alice"); err != nil {
+		t.Fatalf("seed queue: %v", err)
+	}
+	if err := UpsertStation(db, Station{
+		StreamID: legacyPersonalStreamID, Genre: "rock", Threshold: 3, Batch: 10,
+	}); err != nil {
+		t.Fatalf("seed station: %v", err)
+	}
+
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if _, ok, _ := GetStream(db, legacyPersonalStreamID); ok {
+		t.Error("legacy personal stream row survived the migration")
+	}
+	if ids, _ := QueueTrackIDs(db, legacyPersonalStreamID); len(ids) != 0 {
+		t.Errorf("legacy queue rows survived: %v", ids)
+	}
+	if _, ok := GetStation(db, legacyPersonalStreamID); ok {
+		t.Error("legacy station survived")
+	}
+	// Idempotent: a second run on the now-clean DB is a no-op.
+	if err := migrate(db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+}
+
+// A shared stream an operator happened to name "me" is a real stream with
+// listeners, not the legacy row, so the migration must leave it alone.
+func TestMigrateKeepsASharedStreamNamedMe(t *testing.T) {
+	db := openTestDB(t)
+	if err := EnsureSharedStream(db, legacyPersonalStreamID, "Me Room"); err != nil {
+		t.Fatalf("seed shared: %v", err)
+	}
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	st, ok, err := GetStream(db, legacyPersonalStreamID)
+	if err != nil || !ok {
+		t.Fatalf("shared stream named %q was dropped: ok=%v err=%v", legacyPersonalStreamID, ok, err)
+	}
+	if st.Kind != KindShared {
+		t.Fatalf("kind = %q, want shared", st.Kind)
+	}
+}

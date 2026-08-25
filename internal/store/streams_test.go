@@ -72,9 +72,10 @@ func TestEnsureSharedStreamBypassesCap(t *testing.T) {
 	}
 }
 
-// EnsurePrivateStream is boot provisioning, not a route, and it can never
-// produce a shared stream — so even if a future caller hands it an id from a
-// request, the kind-based auth gate stays unbypassable.
+// EnsurePrivateStream is now reached from a request (first-use provisioning of
+// the caller's personal stream), but only ever with a server-derived id. It can
+// never produce a shared stream, so even handed an id a client chose, the
+// kind-based auth gate stays unbypassable.
 func TestEnsurePrivateStreamNeverCreatesShared(t *testing.T) {
 	db := openTestDB(t)
 	if err := EnsurePrivateStream(db, "bobs-invented-stream"); err != nil {
@@ -183,5 +184,95 @@ func TestCreateSharedStreamRejectsDuplicateID(t *testing.T) {
 	}
 	if err := CreateSharedStream(db, "kitchen", "Kitchen"); !errors.Is(err, ErrStreamExists) {
 		t.Fatalf("want ErrStreamExists, got %v", err)
+	}
+}
+
+// Per-user ids must be distinct, and must never collide with the alias or with
+// a shared id — the alias is what a client sends, not what a row is keyed on.
+func TestPersonalStreamIDsAreDistinctAndNamespaced(t *testing.T) {
+	a, b := PersonalStreamID(1), PersonalStreamID(2)
+	if a == b {
+		t.Fatalf("two users derived the same id: %q", a)
+	}
+	for _, id := range []string{a, b} {
+		if !IsPersonalStreamID(id) {
+			t.Errorf("%q is not recognised as a personal stream id", id)
+		}
+		if id == PersonalStreamAlias {
+			t.Errorf("derived id collides with the alias: %q", id)
+		}
+	}
+	for _, id := range []string{PersonalStreamAlias, "house", "a1b2c3", ""} {
+		if IsPersonalStreamID(id) {
+			t.Errorf("%q wrongly claimed as a personal stream id", id)
+		}
+	}
+}
+
+// Deleting a user takes their personal stream with it. Nothing else can: the
+// rename/delete routes refuse private streams, so the row would otherwise be
+// stranded with queue rows behind a foreign key.
+func TestDeleteUserRemovesTheirPersonalStream(t *testing.T) {
+	db := openTestDB(t)
+	uid, err := CreateUser(db, "bob@example.com", "Bob", "h", false)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	other, err := CreateUser(db, "alice@example.com", "Alice", "h", false)
+	if err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	tid := insertTestTrack(t, db, "/m/a.mp3")
+	for _, id := range []int64{uid, other} {
+		if err := EnsurePrivateStream(db, PersonalStreamID(id)); err != nil {
+			t.Fatalf("ensure: %v", err)
+		}
+		if err := Enqueue(db, PersonalStreamID(id), tid, "x"); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+	}
+	if err := UpsertStation(db, Station{StreamID: PersonalStreamID(uid), Genre: "rock", Threshold: 3, Batch: 10}); err != nil {
+		t.Fatalf("station: %v", err)
+	}
+
+	if err := DeleteUser(db, uid); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+	if _, ok, _ := GetStream(db, PersonalStreamID(uid)); ok {
+		t.Error("the deleted user's personal stream row survived")
+	}
+	if ids, _ := QueueTrackIDs(db, PersonalStreamID(uid)); len(ids) != 0 {
+		t.Errorf("their queue rows survived: %v", ids)
+	}
+	if _, ok := GetStation(db, PersonalStreamID(uid)); ok {
+		t.Error("their station survived")
+	}
+	// And nobody else's went with them.
+	if _, ok, _ := GetStream(db, PersonalStreamID(other)); !ok {
+		t.Error("another user's personal stream was deleted")
+	}
+	if ids, _ := QueueTrackIDs(db, PersonalStreamID(other)); len(ids) != 1 {
+		t.Errorf("another user's queue was emptied: %v", ids)
+	}
+}
+
+// A shared stream in the per-user namespace would be permanently unreachable
+// and undeletable: every route resolves personal ids first and refuses them,
+// delete included. Nothing can reach this today (createStream mints its own
+// id), so the rejection is what keeps that true if a caller-supplied id ever
+// arrives.
+func TestCreateSharedStreamRejectsReservedIDs(t *testing.T) {
+	db := openTestDB(t)
+	for _, id := range []string{PersonalStreamID(5), PersonalStreamAlias, personalStreamPrefix} {
+		if err := CreateSharedStream(db, id, "Sneaky"); !errors.Is(err, ErrReservedStreamID) {
+			t.Errorf("CreateSharedStream(%q) = %v, want ErrReservedStreamID", id, err)
+		}
+		if _, ok, _ := GetStream(db, id); ok {
+			t.Errorf("CreateSharedStream(%q) created a row anyway", id)
+		}
+	}
+	// An ordinary id is unaffected.
+	if err := CreateSharedStream(db, "a1b2c3", "Kitchen"); err != nil {
+		t.Fatalf("ordinary id rejected: %v", err)
 	}
 }

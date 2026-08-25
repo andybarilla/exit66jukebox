@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/andybarilla/exit66jukebox/internal/model"
 )
@@ -15,8 +17,30 @@ const (
 	KindPrivate = "private"
 )
 
-// PersonalStreamID is the one private stream every listener currently shares.
-const PersonalStreamID = "me"
+// PersonalStreamAlias is what a client puts in a stream path to mean "my own
+// personal stream". It is never a stream id: the server resolves it to the
+// caller's id, so no client ever chooses which personal stream it addresses.
+const PersonalStreamAlias = "me"
+
+// personalStreamPrefix namespaces the per-user private stream ids. Shared ids
+// are either "house" or a random hex string from newStreamID, so nothing else
+// lands in this namespace.
+const personalStreamPrefix = "user:"
+
+// PersonalStreamID derives a user's private stream id. Every user (a household
+// profile included, which is a user row with the passwordless flag) gets their
+// own row, which is what makes one personal queue per user possible at all:
+// the queue_item rows key on stream_id, so separate ids are separate queues.
+func PersonalStreamID(userID int64) string {
+	return personalStreamPrefix + strconv.FormatInt(userID, 10)
+}
+
+// IsPersonalStreamID reports whether id is in the per-user namespace. Callers
+// use it to refuse such an id in a request path: it is derived from a user id,
+// so accepting one would let anyone address anyone's queue by counting.
+func IsPersonalStreamID(id string) bool {
+	return strings.HasPrefix(id, personalStreamPrefix)
+}
 
 // MaxSharedStreams caps how many shared streams can exist at once, house
 // included. Each one owns a broadcast pipeline and (once it has a listener) an
@@ -29,13 +53,18 @@ var (
 	ErrStreamCapReached = fmt.Errorf("shared stream limit reached (%d)", MaxSharedStreams)
 	// ErrStreamExists is returned when the id is already taken.
 	ErrStreamExists = errors.New("stream already exists")
+	// ErrReservedStreamID is returned when a caller-supplied id lands in the
+	// per-user namespace. Such a stream would be permanently unreachable and
+	// undeletable: every route into it resolves personal ids first and refuses
+	// them, delete included.
+	ErrReservedStreamID = errors.New("stream id is reserved")
 )
 
 // EnsurePrivateStream creates the stream row as private if it does not exist.
-// It is boot provisioning for PersonalStreamID and has no caller behind a
-// route: no id a client invents reaches a create path. It can never produce a
-// shared stream, so hooking it to a request later would still not bypass the
-// kind-based auth gate.
+// Its one production caller provisions a user's personal stream on first use,
+// and passes an id derived from the session's user rather than anything the
+// client supplied. It can never produce a shared stream, so even reached with
+// an attacker-chosen id it could not bypass the kind-based auth gate.
 func EnsurePrivateStream(db *sql.DB, id string) error {
 	_, err := db.Exec(
 		`INSERT INTO stream(id, name, kind) VALUES(?,'',?)
@@ -56,7 +85,14 @@ func EnsureSharedStream(db *sql.DB, id, name string) error {
 // CreateSharedStream creates a named shared stream, enforcing MaxSharedStreams.
 // The count and the insert share one transaction so the cap cannot be exceeded
 // by two concurrent creates, and so no caller can opt out of it.
+//
+// It is the only path that takes an id from a caller, so it is where the
+// per-user namespace is defended. EnsureSharedStream needs no such check: its
+// one caller provisions house from a constant.
 func CreateSharedStream(db *sql.DB, id, name string) error {
+	if IsPersonalStreamID(id) || id == PersonalStreamAlias {
+		return ErrReservedStreamID
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -141,6 +177,16 @@ func DeleteStream(db *sql.DB, id string) error {
 	}
 	defer tx.Rollback()
 
+	if err := deleteStreamTx(tx, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// deleteStreamTx is DeleteStream's body without the transaction, so DeleteUser
+// can drop a user and their personal stream in one commit rather than leaving
+// the two able to diverge.
+func deleteStreamTx(tx *sql.Tx, id string) error {
 	for _, q := range []string{
 		`DELETE FROM queue_item WHERE stream_id=?`,
 		`DELETE FROM station WHERE stream_id=?`,
@@ -150,5 +196,5 @@ func DeleteStream(db *sql.DB, id string) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
