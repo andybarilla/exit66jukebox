@@ -23,10 +23,9 @@ func userSession(t *testing.T, srv *Server, email string) *http.Cookie {
 // have to name that user's personal stream: the id is derived from it.
 func userSessionWithID(t *testing.T, srv *Server, email string) (int64, *http.Cookie) {
 	t.Helper()
-	// verified is passed explicitly: CreateUser's variadic defaults it to TRUE
-	// (users.go:46), which is easy to read the wrong way round. true is what
-	// these fixtures have always got, and it is inert here — the session is
-	// created directly rather than through login.
+	// true is what these fixtures have always got, and it is inert here: the
+	// session is created directly rather than through login, which is the only
+	// thing that gates on EmailVerifiedAt.
 	uid, err := store.CreateUser(srv.db, email, "User", "h", false, true)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
