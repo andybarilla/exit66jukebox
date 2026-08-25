@@ -360,8 +360,11 @@ func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg
 	// peers, which leaves groups dormant. The peer id comes from settings rather
 	// than the DB because federationSettings falls back to the environment when
 	// no row has been saved.
-	if err := store.SeedDefaultFederationGroup(db, s.PeerID); err != nil {
-		log.Printf("fed group migration: %v", err)
+	// db is nil in the wiring test that observes the handlers this builds.
+	if db != nil {
+		if err := store.SeedDefaultFederationGroup(db, s.PeerID); err != nil {
+			log.Printf("fed group migration: %v", err)
+		}
 	}
 	fm := &fed.Manager{
 		Role:          s.Role,
