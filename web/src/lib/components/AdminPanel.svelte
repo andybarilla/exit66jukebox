@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths, createPasswordReset, createEmailVerification, beginMfaEnrollment, confirmMfaEnrollment, disableMfa, regenerateRecoveryCodes } from '../auth.js';
+  import { getSettings, setSettings, getLibraries, setLibraries, getFederationPeers, addFederationPeer, approveFederationPeer, getFederationGroups, createFederationGroup, deleteFederationGroup, addFederationGroupMember, removeFederationGroupMember, createInvite, listInvites, deleteInvite, listUsers, deleteUser, listLibraryPaths, createPasswordReset, createEmailVerification, beginMfaEnrollment, confirmMfaEnrollment, disableMfa, regenerateRecoveryCodes } from '../auth.js';
   import { beforeUnloadIfDirty, buildEditableSettingsSnapshot, hasEditableSettingsChanges, loadPathBrowserLocation } from '../settingsPanelState.js';
   import Switch from './Switch.svelte';
 
@@ -53,6 +53,11 @@
   let peerDraft = $state({ peer_id: '', display_name: '', address: '' });
   let peerBusy = $state(false);
   let peerError = $state('');
+  let federationGroups = $state([]);
+  let groupDraft = $state('');
+  let groupMemberDraft = $state({});
+  let groupBusy = $state(false);
+  let groupError = $state('');
   let cleanEditableSettingsState = $state(null);
   let cleanSettingsSnapshot = $state('');
   let hasUnsavedChanges = $state(false);
@@ -124,7 +129,7 @@
   onMount(() => {
     async function loadSettings() {
       try {
-        const [settings, librarySettings, peerSettings, invList, userList] = await Promise.all([getSettings(), getLibraries(), getFederationPeers(), listInvites(), listUsers()]);
+        const [settings, librarySettings, peerSettings, groupSettings, invList, userList] = await Promise.all([getSettings(), getLibraries(), getFederationPeers(), getFederationGroups(), listInvites(), listUsers()]);
         signupEnabled = !!settings.signup_enabled;
         guestAccess = !!settings.guest_access_enabled;
         securityMode = settings.security_mode || 'full_login';
@@ -134,6 +139,7 @@
         federation = { ...federation, ...(librarySettings.federation || {}), token: '' };
         scan = { ...scan, ...(librarySettings.scan || {}) };
         federationPeers = peerSettings.peers || [];
+        federationGroups = groupSettings.groups || [];
         invites = invList;
         users = userList;
         refreshCleanSettingsSnapshot();
@@ -439,6 +445,35 @@
     }
   }
 
+  // Every group endpoint answers with the full group list, so each action just
+  // replaces local state rather than refetching.
+  async function runGroupAction(action) {
+    groupBusy = true;
+    groupError = '';
+    try {
+      const r = await action();
+      federationGroups = r.groups || [];
+    } catch (err) {
+      groupError = err.message || 'failed to update listening groups';
+    } finally {
+      groupBusy = false;
+    }
+  }
+
+  async function addGroup() {
+    const name = groupDraft.trim();
+    if (!name) return;
+    await runGroupAction(() => createFederationGroup(name));
+    groupDraft = '';
+  }
+
+  async function addGroupMember(groupID) {
+    const peerID = (groupMemberDraft[groupID] || '').trim();
+    if (!peerID) return;
+    await runGroupAction(() => addFederationGroupMember(groupID, peerID));
+    groupMemberDraft = { ...groupMemberDraft, [groupID]: '' };
+  }
+
   async function approvePeer(peerID) {
     peerBusy = true;
     peerError = '';
@@ -580,6 +615,41 @@
                 </ul>
               {/if}
               {#if peerError}<p class="danger">{peerError}</p>{/if}
+            </div>
+          {/if}
+
+          {#if federation.role === 'peer' || federation.role === 'hub'}
+            <div class="peer-box">
+              <h4>Listening groups</h4>
+              <p class="muted">
+                Groups decide whose music shows up in browse. A peer only sees the libraries of
+                peers it shares a group with. They are not a playback restriction: a peer that
+                already has a track's link can still play it, whatever group it is in. With no
+                groups at all, every approved peer sees every other.
+              </p>
+              <div class="peer-draft">
+                <input type="text" placeholder="Group name" value={groupDraft} oninput={(e) => groupDraft = e.currentTarget.value} />
+                <button type="button" class="btn-copy" disabled={groupBusy} onclick={addGroup}>Add group</button>
+              </div>
+              {#if federationGroups.length === 0}
+                <p class="muted">No groups yet.</p>
+              {:else}
+                <ul class="peer-list">
+                  {#each federationGroups as group (group.id)}
+                    <li class="peer-row">
+                      <span class="peer-name">{group.name}</span>
+                      <span class="peer-address">{group.members.join(', ') || 'no members'}</span>
+                      <input type="text" placeholder="Peer ID" value={groupMemberDraft[group.id] || ''} oninput={(e) => groupMemberDraft = { ...groupMemberDraft, [group.id]: e.currentTarget.value }} />
+                      <button type="button" class="btn-copy" disabled={groupBusy} onclick={() => addGroupMember(group.id)}>Add member</button>
+                      {#each group.members as member (member)}
+                        <button type="button" class="btn-copy" disabled={groupBusy} onclick={() => runGroupAction(() => removeFederationGroupMember(group.id, member))}>Remove {member}</button>
+                      {/each}
+                      <button type="button" class="btn-copy" disabled={groupBusy} onclick={() => runGroupAction(() => deleteFederationGroup(group.id))}>Delete group</button>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+              {#if groupError}<p class="danger">{groupError}</p>{/if}
             </div>
           {/if}
         </div>

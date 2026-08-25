@@ -63,6 +63,23 @@ export async function listLibraryPaths(path) {
 export const getFederationPeers = () => fetch('/api/admin/federation/peers').then((r) => r.json());
 export const addFederationPeer = (peer) => postJSON('/api/admin/federation/peers', peer);
 export const approveFederationPeer = (peerID) => postJSON(`/api/admin/federation/peers/${encodeURIComponent(peerID)}/approve`, {});
+export const getFederationGroups = () => fetch('/api/admin/federation/groups').then((r) => r.json());
+export const createFederationGroup = (name) => postJSON('/api/admin/federation/groups', { name });
+export const deleteFederationGroup = (id) => deleteReturningGroups(`/api/admin/federation/groups/${id}`);
+export const addFederationGroupMember = (id, peerID) => postJSON(`/api/admin/federation/groups/${id}/members`, { peer_id: peerID });
+export const removeFederationGroupMember = (id, peerID) =>
+  deleteReturningGroups(`/api/admin/federation/groups/${id}/members/${encodeURIComponent(peerID)}`);
+
+// The group DELETE endpoints answer with the remaining groups, so the caller
+// gets the same shape a create or add returns and never needs a second fetch.
+async function deleteReturningGroups(url) {
+  const r = await fetch(url, { method: 'DELETE' });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || 'request failed');
+  }
+  return r.json();
+}
 export const createInvite = (email, is_admin) => postJSON('/api/admin/invites', { email, is_admin });
 export const listInvites = () => fetch('/api/admin/invites').then((r) => r.json());
 export const deleteInvite = (id) => fetch(`/api/admin/invites/${id}`, { method: 'DELETE' });

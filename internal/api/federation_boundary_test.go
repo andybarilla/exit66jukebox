@@ -27,6 +27,7 @@ var fedRefusedRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/tracks"},
 	{http.MethodGet, "/api/admin/settings"},
 	{http.MethodGet, "/api/admin/federation/peers"},
+	{http.MethodGet, "/api/admin/federation/groups"},
 	{http.MethodPost, "/api/admin/invites"},
 }
 

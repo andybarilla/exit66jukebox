@@ -354,6 +354,15 @@ func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg
 	// the token-authenticated session after the handshake. The WebRTC transport
 	// is only meaningful for the peer role with direct P2P enabled.
 	caps := fed.Capabilities{DirectWebRTC: s.Role == "peer" && s.DirectP2P}
+	// Migrate an install that federated before listening groups existed: its
+	// already-accepted peers join one default group so they stay visible to each
+	// other. Runs at most once, and seeds nothing on an install with no accepted
+	// peers, which leaves groups dormant. The peer id comes from settings rather
+	// than the DB because federationSettings falls back to the environment when
+	// no row has been saved.
+	if err := store.SeedDefaultFederationGroup(db, s.PeerID); err != nil {
+		log.Printf("fed group migration: %v", err)
+	}
 	fm := &fed.Manager{
 		Role:          s.Role,
 		Token:         s.Token,

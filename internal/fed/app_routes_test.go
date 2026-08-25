@@ -31,6 +31,8 @@ var refusedRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/admin/settings"},
 	{http.MethodPost, "/api/admin/settings"},
 	{http.MethodGet, "/api/admin/federation/peers"},
+	{http.MethodGet, "/api/admin/federation/groups"},
+	{http.MethodPost, "/api/admin/federation/groups"},
 	{http.MethodGet, "/api/tracks"},
 	{http.MethodGet, "/api/auth/me"},
 	{http.MethodGet, "/"},
