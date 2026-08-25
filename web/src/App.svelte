@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { createStore } from './lib/store.svelte.js';
   import { audioURL, streamAudioURL, nextShared, nextTrack, PERSONAL } from './lib/api.js';
   import { fmt, keyActivate } from './lib/format.js';
@@ -24,7 +24,7 @@
   import ProfilePicker from './lib/components/ProfilePicker.svelte';
 
   const s = createStore();
-  let audio;
+  let audio = $state();
   let playing = $state(true);
   let volume = $state(68);
   let showSignup = $state(false);
@@ -171,8 +171,6 @@
     popstateHandler = () => { currentPath = window.location.pathname; };
     window.addEventListener('resize', resizeHandler);
     window.addEventListener('popstate', popstateHandler);
-    if (audio) audio.volume = volume / 100;
-    applyStreamAudio();
     // 1s tick: personal reads exact audio time; house approximates.
     tickTimer = setInterval(() => {
       if (!playing || !s.nowPlaying) return;
@@ -182,13 +180,6 @@
         s.setProgress(s.stream, s.progress + 1);
       }
     }, 1000);
-    if (audio) {
-      audio.addEventListener('ended', () => { if (!s.isSharedStream) advancePersonal(); });
-      // Reflect the element's real state so the transport never lies about
-      // whether sound is coming out (autoplay block, stall, manual pause).
-      audio.addEventListener('play', () => { playing = true; });
-      audio.addEventListener('pause', () => { playing = false; });
-    }
   });
   onDestroy(() => {
     clearInterval(tickTimer);
@@ -224,18 +215,47 @@
     }
   });
 
+  // Wire the element every time it binds. It lives in the authed branch of the
+  // template, so behind a login gate it does not exist until afterLogin — long
+  // after onMount — and it unmounts and rebinds whenever the auth overlay comes
+  // back. onMount runs once and so cannot do this at all; reacting to the
+  // binding is the only thing that can, which is why `audio` is $state (#170).
+  $effect(() => {
+    const el = audio;
+    if (!el) return;
+    const onEnded = () => { if (!s.isSharedStream) advancePersonal(); };
+    // Reflect the element's real state so the transport never lies about
+    // whether sound is coming out (autoplay block, stall, manual pause).
+    const onPlay = () => { playing = true; };
+    const onPause = () => { playing = false; };
+    el.addEventListener('ended', onEnded);
+    el.addEventListener('play', onPlay);
+    el.addEventListener('pause', onPause);
+    // Point the fresh element at the tuned-in stream. untrack: applyStreamAudio
+    // reads the stream and its now-playing, and tracking those here would
+    // re-attach the listeners and reset src on every track change.
+    untrack(applyStreamAudio);
+    // A rebind hands back a different element, so the old one takes its
+    // listeners to the grave either way; this is hygiene, not a live leak fix.
+    return () => {
+      el.removeEventListener('ended', onEnded);
+      el.removeEventListener('play', onPlay);
+      el.removeEventListener('pause', onPause);
+    };
+  });
+
+  // The slider is the source of truth for volume; the element is written from
+  // here rather than from the change handler so a fresh binding picks it up.
+  $effect(() => {
+    if (audio) audio.volume = volume / 100;
+  });
+
   // Mute the local <audio> while a Sonos is playing the stream this browser is
   // itself on (gated by config). A cast of a different stream is somebody else's
   // speaker and leaves this listener alone (#130). Muting, not pausing — the
   // timeline keeps running so resuming is seamless and the volume is untouched.
   $effect(() => {
-    // Read the state BEFORE the element guard. `audio` is a plain binding, not
-    // $state, so an effect that short-circuits on `if (audio)` registers no
-    // dependency at all and never runs again — and the first run happens on the
-    // pre-auth splash, where the element does not exist yet. Computing the value
-    // first is what keeps this effect alive once the element appears.
-    const mute = s.muteLocalOnCast && s.castingStream(s.stream);
-    if (audio) audio.muted = mute;
+    if (audio) audio.muted = s.muteLocalOnCast && s.castingStream(s.stream);
   });
 
   // Load discover data when switching to the discover tab.
@@ -339,7 +359,7 @@
           albumId={np?.albumId} onOpenAlbum={np?.albumId ? () => s.openAlbum({ id: np.albumId, name: np.albumName, artistName: np.artistName }) : undefined}
           current={cur} duration={dur} {playing} {volume} canSkip={canControl}
           onPlayPause={togglePlay} onPrev={onPrev} onNext={onNext} onSeek={onSeek}
-          onVolume={(v) => { volume = v; if (audio) audio.volume = v / 100; }} />
+          onVolume={(v) => (volume = v)} />
       </div>
       <div style="width:220px; flex:none; border-top:1px solid var(--border-strong); border-left:1px solid var(--border-default); background:var(--bg-surface-raised); background-image:var(--scanline); display:flex; flex-direction:column; justify-content:center; gap:8px; padding:0 18px; box-sizing:border-box;">
         <StreamPicker streams={s.sharedStreams} current={s.stream} personalId={s.hasPersonalStream ? PERSONAL : null}
