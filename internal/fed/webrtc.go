@@ -89,6 +89,11 @@ type WebRTCTransport struct {
 	onChMu    sync.RWMutex
 	onChannel func(*dataChannelConn)
 
+	// setupTimeout is how long a negotiation may stay half-open: it bounds Dial
+	// and arms handleOffer's watchdog. It is webrtcSetupTimeout in production and
+	// exists as a field so tests can drive the watchdog without waiting it out.
+	setupTimeout time.Duration
+
 	readerOnce sync.Once
 	readerDone chan struct{}
 	mailbox    chan SignalMsg // set by startedReader; the channel the mailbox maps to
@@ -108,15 +113,16 @@ func NewWebRTCTransport(selfID string, iceServers []webrtc.ICEServer, signaler *
 	se := webrtc.SettingEngine{}
 	se.DetachDataChannels()
 	return &WebRTCTransport{
-		selfID:     selfID,
-		config:     webrtc.Configuration{ICEServers: iceServers},
-		signaler:   signaler,
-		reg:        reg,
-		log:        logger,
-		api:        webrtc.NewAPI(webrtc.WithSettingEngine(se)),
-		cache:      make(map[string]*dataChannelConn),
-		dial:       make(map[string]*dialSlot),
-		readerDone: make(chan struct{}),
+		selfID:       selfID,
+		config:       webrtc.Configuration{ICEServers: iceServers},
+		signaler:     signaler,
+		reg:          reg,
+		log:          logger,
+		setupTimeout: webrtcSetupTimeout,
+		api:          webrtc.NewAPI(webrtc.WithSettingEngine(se)),
+		cache:        make(map[string]*dataChannelConn),
+		dial:         make(map[string]*dialSlot),
+		readerDone:   make(chan struct{}),
 	}
 }
 
@@ -329,7 +335,7 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 		return existing, nil
 	}
 	t.ensureReader()
-	ctx, cancel := context.WithTimeout(ctx, webrtcSetupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, t.setupTimeout)
 	defer cancel()
 
 	sid := t.newSID()
@@ -465,7 +471,7 @@ func (t *WebRTCTransport) handleOffer(offer SignalMsg, onChannel func(*dataChann
 	// A negotiation that never opens a channel — a peer that vanishes, or an
 	// offer sent purely to allocate one — is torn down on the same deadline the
 	// offerer gives up on.
-	watchdog := time.AfterFunc(webrtcSetupTimeout, teardown)
+	watchdog := time.AfterFunc(t.setupTimeout, teardown)
 
 	go func() {
 		for msg := range iceIn {
@@ -486,16 +492,32 @@ func (t *WebRTCTransport) handleOffer(offer SignalMsg, onChannel func(*dataChann
 				teardown()
 				return
 			}
-			// Established: the deadline no longer applies, but the connection
-			// still owns its slot (ICE can trickle for the life of the channel),
-			// so teardown moves to the channel's own close.
+			// Established: the setup deadline no longer applies, because the
+			// connection legitimately owns its slot for as long as it lives (ICE
+			// can trickle throughout). Release now follows the conn instead.
+			//
+			// It has to be the conn and not dc.OnClose: this channel is detached,
+			// and pion surfaces a remote close on a detached channel as an EOF to
+			// the reader, not as an OnClose. Relying on OnClose here left every
+			// established answerer negotiation — its PeerConnection included —
+			// held until ICE eventually failed, or forever if the offerer kept its
+			// PeerConnection up. Whoever consumes the conn closes it when done
+			// (see Manager.Start), and that is what releases this.
 			watchdog.Stop()
-			dc.OnClose(teardown)
-			onChannel(newDataChannelConn(offer.From, dc, rwc))
+			conn := newDataChannelConn(offer.From, dc, rwc)
+			conn.onClose = teardown
+			onChannel(conn)
 		})
 	})
+	// A peer that vanishes rather than closing tidily: ICE reports it on the
+	// first, and DTLS/SCTP failures that leave ICE untouched on the second.
 	pc.OnICEConnectionStateChange(func(st webrtc.ICEConnectionState) {
 		if st == webrtc.ICEConnectionStateFailed || st == webrtc.ICEConnectionStateClosed {
+			teardown()
+		}
+	})
+	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
+		if st == webrtc.PeerConnectionStateFailed || st == webrtc.PeerConnectionStateClosed {
 			teardown()
 		}
 	})
@@ -568,6 +590,10 @@ type dataChannelConn struct {
 	peerID string
 	dc     *webrtc.DataChannel
 	rwc    io.ReadWriteCloser
+	// onClose, when set, releases whatever owns this channel's negotiation. The
+	// answerer sets it because a detached channel gives it no other reliable
+	// signal that the far end is done (see handleOffer).
+	onClose func()
 }
 
 func newDataChannelConn(peerID string, dc *webrtc.DataChannel, rwc io.ReadWriteCloser) *dataChannelConn {
@@ -577,6 +603,9 @@ func newDataChannelConn(peerID string, dc *webrtc.DataChannel, rwc io.ReadWriteC
 func (c *dataChannelConn) Read(p []byte) (int, error)  { return c.rwc.Read(p) }
 func (c *dataChannelConn) Write(p []byte) (int, error) { return c.rwc.Write(p) }
 func (c *dataChannelConn) Close() error {
+	if c.onClose != nil {
+		c.onClose()
+	}
 	_ = c.dc.Close()
 	return c.rwc.Close()
 }

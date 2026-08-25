@@ -1,10 +1,13 @@
 package fed
 
 import (
+	"context"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pion/webrtc/v4"
 )
 
 // TestRouteToDialRefusesMessageFromAnotherPeer is the unit-level guard for the
@@ -197,5 +200,142 @@ func TestReaderClaimsOfferSIDBeforeHandlingTheNextMessage(t *testing.T) {
 	bob.dialMu.Unlock()
 	if !claimed {
 		t.Fatal("the offer's SID was not claimed before the reader moved on; ICE arriving now would be dropped")
+	}
+}
+
+// TestHalfOpenOffersAreTornDownByTheWatchdog covers the leak's other half. The
+// tests above spray malformed offers, which fail at SetRemoteDescription and
+// take handleOffer's explicit error path. This is the shape that actually
+// threatens the process: well-formed offers, answered normally, from a peer that
+// then never completes the negotiation. Nothing on the error path fires, so only
+// the watchdog releases them.
+func TestHalfOpenOffersAreTornDownByTheWatchdog(t *testing.T) {
+	signaler := NewSignaler()
+	bob := NewWebRTCTransport("bob", nil, signaler, nil, testLogger(t))
+	bob.setupTimeout = 300 * time.Millisecond
+	defer bob.Close()
+	bob.Listen(t.Context(), func(*dataChannelConn) {})
+
+	// Bob's answers must be deliverable, or the send-failure path would tear the
+	// negotiation down and the watchdog would never be what released it. Give
+	// mallory a mailbox and drain it into the void — mallory never replies.
+	mallorybox := signaler.Register("mallory")
+	go func() {
+		for range mallorybox {
+		}
+	}()
+
+	offerSDP := wellFormedOffer(t)
+	const offers = 10
+	for i := 0; i < offers; i++ {
+		signaler.Send(SignalMsg{From: "mallory", To: "bob", Type: "offer", SID: "halfopen-" + itoa(i), SDP: offerSDP})
+	}
+
+	// They must be live first, or a drained map would prove nothing.
+	if !waitForDialCount(t, bob, func(n int) bool { return n > 0 }, 5*time.Second) {
+		t.Fatal("no negotiation was ever registered; the spray did not reach handleOffer")
+	}
+	if !waitForDialCount(t, bob, func(n int) bool { return n == 0 }, 15*time.Second) {
+		bob.dialMu.Lock()
+		n := len(bob.dial)
+		bob.dialMu.Unlock()
+		t.Fatalf("%d of %d half-open negotiations survived the watchdog", n, offers)
+	}
+}
+
+// TestAnswererReleasesTheNegotiationWhenTheConnIsClosed covers the path the
+// watchdog hands off to once a channel is established, and the reason that path
+// is not dc.OnClose.
+//
+// The channel is detached, so pion reports the far end going away as an EOF to
+// the reader — OnClose does not fire. An earlier version of this fix relied on
+// OnClose and left every established answerer negotiation held indefinitely;
+// this test is what caught it. Release now follows the conn, exactly as
+// Manager.Start drives it: serve until the peer is done, then Close.
+func TestAnswererReleasesTheNegotiationWhenTheConnIsClosed(t *testing.T) {
+	alice := newSignalProcess(t, "alice")
+	bob := newSignalProcess(t, "bob")
+	alice.knows(bob)
+	bob.knows(alice)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Mirror Manager.Start: read until the peer goes away, then close.
+	served := make(chan struct{}, 1)
+	bob.transport.Listen(ctx, func(c *dataChannelConn) {
+		go func() {
+			defer func() {
+				c.Close()
+				select {
+				case served <- struct{}{}:
+				default:
+				}
+			}()
+			buf := make([]byte, 64)
+			for {
+				if _, err := c.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+	})
+
+	conn, err := alice.transport.Dial(ctx, "bob")
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	if !waitForDialCount(t, bob.transport, func(n int) bool { return n > 0 }, 5*time.Second) {
+		t.Fatal("bob holds no negotiation for an open channel")
+	}
+
+	conn.Close()
+	select {
+	case <-served:
+	case <-time.After(15 * time.Second):
+		t.Fatal("bob's reader never saw the channel close")
+	}
+	if !waitForDialCount(t, bob.transport, func(n int) bool { return n == 0 }, 15*time.Second) {
+		t.Fatal("bob still holds the negotiation after its conn was closed")
+	}
+}
+
+// wellFormedOffer returns a real SDP offer, so handleOffer gets past
+// SetRemoteDescription instead of bailing on its error path.
+func wellFormedOffer(t *testing.T) string {
+	t.Helper()
+	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatalf("offer pc: %v", err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	if _, err := pc.CreateDataChannel("audio", nil); err != nil {
+		t.Fatalf("offer dc: %v", err)
+	}
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		t.Fatalf("create offer: %v", err)
+	}
+	if err := pc.SetLocalDescription(offer); err != nil {
+		t.Fatalf("set local: %v", err)
+	}
+	return offer.SDP
+}
+
+// waitForDialCount polls the in-flight negotiation count until want is satisfied.
+func waitForDialCount(t *testing.T, tr *WebRTCTransport, want func(int) bool, within time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		tr.dialMu.Lock()
+		n := len(tr.dial)
+		tr.dialMu.Unlock()
+		if want(n) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
