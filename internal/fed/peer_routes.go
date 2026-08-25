@@ -8,8 +8,9 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
-// PeerRoutes is the handler served over a direct peer session: this instance's
-// federation routes plus peerVisibleAppRoutes of app. It deliberately does not
+// PeerRoutes is the innermost layer of the direct peer session handler (see
+// PeerSessionHandler): this instance's federation routes plus
+// peerVisibleAppRoutes of app. It deliberately does not
 // mount app at "/" — see peerVisibleAppRoutes for why a catch-all here is a
 // hole rather than a convenience.
 func PeerRoutes(db *sql.DB, app http.Handler) http.Handler {

@@ -17,8 +17,8 @@ import (
 func TestWebRTCDialerAndAnswererExchangeBytes(t *testing.T) {
 	signaler := NewSignaler()
 
-	alice := NewWebRTCTransport("alice", nil, signaler, testLogger(t))
-	bob := NewWebRTCTransport("bob", nil, signaler, testLogger(t))
+	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
+	bob := NewWebRTCTransport("bob", nil, signaler, nil, testLogger(t))
 	defer alice.Close()
 	defer bob.Close()
 
@@ -66,7 +66,7 @@ func TestWebRTCDialerAndAnswererExchangeBytes(t *testing.T) {
 // (so the resolver can fall back) when the target peer is not listening.
 func TestWebRTCDialTimesOutWhenPeerAbsent(t *testing.T) {
 	signaler := NewSignaler()
-	alice := NewWebRTCTransport("alice", nil, signaler, testLogger(t))
+	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
 	defer alice.Close()
 
 	// Register no mailbox for "bob" → offer Send fails immediately.
@@ -82,8 +82,8 @@ func TestWebRTCDialTimesOutWhenPeerAbsent(t *testing.T) {
 // callbacks. Alice dials Bob, then (independently) Bob dials Alice.
 func TestWebRTCBothPeersCanDial(t *testing.T) {
 	signaler := NewSignaler()
-	alice := NewWebRTCTransport("alice", nil, signaler, testLogger(t))
-	bob := NewWebRTCTransport("bob", nil, signaler, testLogger(t))
+	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
+	bob := NewWebRTCTransport("bob", nil, signaler, nil, testLogger(t))
 	defer alice.Close()
 	defer bob.Close()
 
@@ -173,8 +173,8 @@ func TestWebRTCResolverStreamsAudioWithRange(t *testing.T) {
 	defer backend.Close()
 
 	signaler := NewSignaler()
-	alice := NewWebRTCTransport("alice", nil, signaler, testLogger(t))
-	bob := NewWebRTCTransport("bob", nil, signaler, testLogger(t))
+	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
+	bob := NewWebRTCTransport("bob", nil, signaler, nil, testLogger(t))
 	defer alice.Close()
 	defer bob.Close()
 
@@ -252,7 +252,7 @@ func TestWebRTCFallsBackToYamuxDirectWhenDialFails(t *testing.T) {
 	signaler := NewSignaler()
 	// Alice has a transport, but no bob is listening on the signaler, so WebRTC
 	// dial fails and the resolver must fall back to the yamux-direct Client.
-	alice := NewWebRTCTransport("alice", nil, signaler, testLogger(t))
+	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
 	defer alice.Close()
 
 	reg := NewRegistry()
@@ -282,7 +282,7 @@ func TestWebRTCFallsBackToHubWhenPeerOffline(t *testing.T) {
 	defer hub.Close()
 
 	signaler := NewSignaler()
-	alice := NewWebRTCTransport("alice", nil, signaler, testLogger(t))
+	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
 	defer alice.Close()
 
 	reg := NewRegistry()
