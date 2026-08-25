@@ -78,10 +78,12 @@ func (s *Server) discoverGenres(w http.ResponseWriter, r *http.Request) {
 // time for the same reason.
 func (s *Server) getStationHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, ok, err := store.GetStream(s.db, id); err != nil {
+	_, ok, err := store.GetStream(s.db, id)
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "db error")
 		return
-	} else if !ok {
+	}
+	if !ok {
 		writeErr(w, http.StatusNotFound, "no such stream")
 		return
 	}
