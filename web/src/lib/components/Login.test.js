@@ -43,7 +43,12 @@ describe('Login Svelte MFA wiring', () => {
     expect(functionBody('backToPasswordLogin')).toMatch(/mfaRecoveryCode\s*=\s*''/);
     expect(functionBody('backToPasswordLogin')).toMatch(/error\s*=\s*''/);
 
-    const mfaBranch = source.slice(source.indexOf('{#if mfaTicket}'), source.indexOf('{:else}', source.indexOf('{#if mfaTicket}')));
+    const branchStart = source.indexOf('{#if mfaTicket || mfaPending}');
+    expect(branchStart).toBeGreaterThan(-1);
+    // The branch's own {:else} is the one at column 0; the first {:else} after
+    // branchStart belongs to the nested recovery-code toggle, and slicing to it
+    // would leave most of the branch unread.
+    const mfaBranch = source.slice(branchStart, source.indexOf('\n{:else}', branchStart));
     expect(mfaBranch).not.toContain('Forgot password?');
   });
 });
