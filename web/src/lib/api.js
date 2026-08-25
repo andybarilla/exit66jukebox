@@ -166,9 +166,14 @@ export async function discoverRecommended() {
   const body = await r.json();
   return Array.isArray(body) ? body : [];
 }
+// getStation reads a stream's station. The body is caught like the write paths'
+// are: this route 404s an id with no row (#160), and a proxy answering that with
+// an HTML error page would otherwise reject here — inside the Promise.all that
+// loadDiscover awaits, which the discover tab calls without a catch.
 export async function getStation(streamId) {
   const r = await fetch(`/api/streams/${streamId}/station`);
-  return r.json(); // {stream_id, genre, threshold, batch} or {}
+  // {stream_id, genre, threshold, batch}, or {} for no station and for a 404
+  return r.json().catch(() => ({}));
 }
 export async function startStation(streamId, genre) {
   const r = await fetch(`/api/streams/${streamId}/station`, {
