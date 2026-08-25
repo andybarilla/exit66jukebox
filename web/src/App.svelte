@@ -162,6 +162,11 @@
     // (open_admin_locked) would otherwise drop the bootstrap link into the main
     // app with no signup form.
     if (bootstrapToken) showSignup = showAuth = true;
+    // An OIDC sign-in returns to "/" carrying its result. Show the sign-in
+    // surface whatever the mode, so Login can finish the second factor or
+    // report the failure rather than the result being dropped on the floor.
+    const oidcResult = new URLSearchParams(window.location.search);
+    if (oidcResult.has('oidc_mfa') || oidcResult.has('oidc_error')) showAuth = true;
     // Lightweight auth/config check first; only run heavy loads once access is
     // granted (logged in or guest access on), so they never 401 on the gate.
     await s.bootstrap();
@@ -258,7 +263,8 @@
 {:else if onVerifyPath}
   <VerifyEmail onComplete={() => replaceRoute('/')} />
 {:else if onAdminPath && !s.isAdmin}
-  <Login canSignup={false} onSwitchToSignup={() => (showSignup = false)} onLoggedIn={afterLogin} />
+  <Login canSignup={false} onSwitchToSignup={() => (showSignup = false)} onLoggedIn={afterLogin}
+         oidcEnabled={s.config.oidcEnabled} oidcName={s.config.oidcName} />
 {:else if needsProfileSelection}
   <ProfilePicker onLoggedIn={afterLogin} />
 {:else if needsAccountLogin || showAuth}
@@ -267,6 +273,7 @@
   {:else}
     <Login canSignup={s.config.signupEnabled || s.config.needsBootstrap}
            onSwitchToSignup={() => (showSignup = true)}
+           oidcEnabled={s.config.oidcEnabled} oidcName={s.config.oidcName}
            onLoggedIn={afterLogin} />
   {/if}
 {:else}

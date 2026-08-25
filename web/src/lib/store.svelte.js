@@ -56,6 +56,10 @@ export function createStore() {
     requiresLogin: true,
     signupEnabled: false,
     needsBootstrap: false,
+    // Off until /api/config says a provider is configured, so the sign-in
+    // surface never offers a button that leads to a 404.
+    oidcEnabled: false,
+    oidcName: '',
     authenticated: false,
     maxSharedStreams: 0,
     // Assume none until /api/config says otherwise, so the Personal control
@@ -265,6 +269,8 @@ export function createStore() {
           requiresLogin: !!c.requires_login,
           signupEnabled: !!c.signup_enabled,
           needsBootstrap: !!c.needs_bootstrap,
+          oidcEnabled: !!c.oidc_enabled,
+          oidcName: c.oidc_name || '',
           authenticated: !!c.authenticated,
           maxSharedStreams: Number(c.max_shared_streams) || 0,
           personalStream: !!c.personal_stream,

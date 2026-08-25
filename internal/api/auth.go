@@ -1009,6 +1009,7 @@ func isOpenPath(p string) bool {
 		"/api/auth/mfa/complete",
 		"/api/auth/me", "/api/auth/invite/accept",
 		"/api/auth/profiles", "/api/auth/profiles/select",
+		"/api/auth/oidc/start", oidcCallbackPath,
 		"/api/auth/verify-email",
 		"/api/auth/password-reset/forgot", "/api/auth/password-reset/redeem",
 		"/api/config":

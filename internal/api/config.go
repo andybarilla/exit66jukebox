@@ -27,6 +27,11 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 		"requires_login":     mode == store.SecurityModeFullLogin && (!authed || isPasswordlessProfile),
 		"signup_enabled":     mode == store.SecurityModeFullLogin && store.SignupEnabled(s.db),
 		"needs_bootstrap":    countUsersZero(s.db),
+		// Whether the sign-in surface should offer the provider, and what to
+		// call it. Off unless a provider is configured AND its redirect URI
+		// resolved at startup (see SetOIDC).
+		"oidc_enabled":       s.oidcEnabled(),
+		"oidc_name":          s.oidcButtonLabel(),
 		"max_shared_streams": store.MaxSharedStreams,
 		// Whether this caller has a personal stream at all: false in the two
 		// open modes, where there is no user to key one on, so the client hides

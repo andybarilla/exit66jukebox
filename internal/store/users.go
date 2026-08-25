@@ -10,6 +10,15 @@ import (
 
 const PasswordlessPasswordHash = "passwordless"
 
+// OIDCPasswordHash is the password_hash of an account created by an OIDC
+// sign-in. It is not a hash of anything: auth.VerifyPassword rejects any string
+// that is not four "$"-separated pbkdf2 fields, so no password can ever match
+// it. Such an account reaches a password by the ordinary reset flow, which
+// mails the address the provider vouched for. It is deliberately NOT
+// PasswordlessPasswordHash — that value belongs to household profiles, whose
+// is_passwordless_profile flag changes which security modes admit the session.
+const OIDCPasswordHash = "oidc"
+
 // ErrBootstrapAlreadyClaimed reports that CreateFirstAdmin lost the race: a user
 // row already existed, so no admin was inserted.
 var ErrBootstrapAlreadyClaimed = errors.New("bootstrap already claimed")

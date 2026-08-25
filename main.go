@@ -178,6 +178,14 @@ func main() {
 	if token, ok := bootstrapToken(db); ok {
 		log.Printf("First admin bootstrap URL: %s", srv.SetBootstrapToken(token))
 	}
+	// After SetListenAddr/SetPublicOrigin: the OIDC redirect URI is built from
+	// the public origin, and a configured provider without one stays off for the
+	// life of the process rather than failing at each sign-in.
+	if err := srv.SetOIDC(cfg.OIDC); err != nil {
+		log.Printf("OIDC sign-in disabled: %v — set EXIT66_PUBLIC_ORIGIN so the redirect URI can be built", err)
+	} else if cfg.OIDC.Configured() {
+		log.Printf("OIDC sign-in enabled for issuer %s", cfg.OIDC.Issuer)
+	}
 	srv.SetMuteLocalOnCast(cfg.MuteLocalOnCast)
 	srv.SetSigningSecret(signingSecret)
 	srv.SetScanWorkers(cfg.ScanWorkers)
