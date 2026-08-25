@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/andybarilla/exit66jukebox/internal/config"
 	"github.com/andybarilla/exit66jukebox/internal/external"
+	"github.com/andybarilla/exit66jukebox/internal/fed"
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
@@ -200,5 +203,45 @@ func TestMainDoesNotProvisionAPersonalStreamAtBoot(t *testing.T) {
 	}
 	if strings.Contains(string(source), "store.EnsurePrivateStream(db,") {
 		t.Fatal("main.go must not provision a personal stream at boot: the id is per-user and boot has no user")
+	}
+}
+
+// TestFedSessionHandlersRefuseApplicationRoutes pins the wiring rather than the
+// allowlist itself (internal/fed and internal/api cover that): both handlers
+// main serves over a federation session must go through fed.AppRoutes, so a
+// stream or admin route never reaches the application handler.
+func TestFedSessionHandlersRefuseApplicationRoutes(t *testing.T) {
+	reached := ""
+	app := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	})
+	member, peer := fedSessionHandlers(fed.Capabilities{}, nil, app)
+
+	for name, h := range map[string]http.Handler{"member": member, "peer": peer} {
+		for _, r := range []struct{ method, path string }{
+			{http.MethodPost, "/api/streams/house/requests"},
+			{http.MethodDelete, "/api/streams/house/requests"},
+			{http.MethodPost, "/api/streams/house/next"},
+			{http.MethodGet, "/api/streams/house"},
+			{http.MethodGet, "/api/admin/settings"},
+		} {
+			reached = ""
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(r.method, r.path, nil))
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("%s %s %s: status = %d, want 404", name, r.method, r.path, rec.Code)
+			}
+			if reached != "" {
+				t.Fatalf("%s: %s reached the application handler", name, reached)
+			}
+		}
+		// The one allowlisted application route still gets through.
+		reached = ""
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tracks/7/audio", nil))
+		if rec.Code != http.StatusOK || reached != "GET /api/tracks/7/audio" {
+			t.Fatalf("%s track audio: status %d, reached %q", name, rec.Code, reached)
+		}
 	}
 }
