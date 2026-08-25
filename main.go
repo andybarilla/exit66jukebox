@@ -86,14 +86,14 @@ func main() {
 		log.Print("ListenBrainz scrobbling enabled")
 	}
 	// Last.fm is enabled only when configured AND a session key was persisted by
-	// `exit66 lastfm-auth`; otherwise the client is nil (disabled / pending auth).
+	// `exit66jukebox lastfm-auth`; otherwise the client is nil (disabled / pending auth).
 	lfm := newLastfm(extClient, db, cfg.Services)
 	if lfm != nil {
 		submitters["lastfm"] = lfm
 		nowPlayers = append(nowPlayers, lfm)
 		log.Print("Last.fm scrobbling enabled")
 	} else if cfg.Services.LastfmConfigured() {
-		log.Print("Last.fm configured but not authorized; run `exit66 lastfm-auth`")
+		log.Print("Last.fm configured but not authorized; run `exit66jukebox lastfm-auth`")
 	}
 
 	// Initial scan in the background so the server comes up immediately. The
@@ -417,7 +417,7 @@ type nowPlayer interface {
 
 // newLastfm builds a Last.fm client only when it is both configured (env creds)
 // and authorized (a persisted session key). It returns nil otherwise — disabled
-// or pending `exit66 lastfm-auth`. On an invalid session at runtime the client
+// or pending `exit66jukebox lastfm-auth`. On an invalid session at runtime the client
 // clears its service_auth row, reverting cleanly to pending-auth.
 func newLastfm(c *external.Client, db *sql.DB, svc config.Services) *external.Lastfm {
 	if !svc.LastfmConfigured() {
