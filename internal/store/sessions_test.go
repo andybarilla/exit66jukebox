@@ -4,7 +4,7 @@ import "testing"
 
 func TestSessionLifecycle(t *testing.T) {
 	db := mustOpenMem(t)
-	uid, _ := CreateUser(db, "a@b.com", "A", "h", true)
+	uid, _ := CreateUser(db, "a@b.com", "A", "h", true, true)
 	if err := CreateSession(db, "hash-token", uid, 4_000_000_000); err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestSessionLifecycle(t *testing.T) {
 
 func TestExpiredSessionRejected(t *testing.T) {
 	db := mustOpenMem(t)
-	uid, _ := CreateUser(db, "a@b.com", "A", "h", false)
+	uid, _ := CreateUser(db, "a@b.com", "A", "h", false, true)
 	if err := CreateSession(db, "old", uid, 100); err != nil {
 		t.Fatal(err)
 	}

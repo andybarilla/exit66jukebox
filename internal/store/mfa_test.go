@@ -9,7 +9,7 @@ import (
 
 func mustCreateMFAUser(t *testing.T, db *sql.DB, email string) int64 {
 	t.Helper()
-	userID, err := CreateUser(db, email, "MFA User", "hash", false)
+	userID, err := CreateUser(db, email, "MFA User", "hash", false, true)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}

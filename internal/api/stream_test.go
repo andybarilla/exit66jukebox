@@ -57,7 +57,7 @@ func TestStreamAllowsSignedURL(t *testing.T) {
 
 func TestStreamAllowsSession(t *testing.T) {
 	s, db := newTestServer(t)
-	uid, _ := store.CreateUser(db, "a@b.com", "A", "h", false)
+	uid, _ := store.CreateUser(db, "a@b.com", "A", "h", false, true)
 	raw, _ := auth.GenerateToken()
 	store.CreateSession(db, auth.HashToken(raw), uid, 4_000_000_000)
 	rec := httptest.NewRecorder()

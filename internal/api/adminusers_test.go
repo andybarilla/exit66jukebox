@@ -37,7 +37,7 @@ func setupAPITestDB(t *testing.T) *sql.DB {
 
 func adminSessionWithEmail(t *testing.T, db *sql.DB, email string) (int64, *http.Cookie) {
 	t.Helper()
-	uid, err := store.CreateUser(db, email, "Ad", "h", true)
+	uid, err := store.CreateUser(db, email, "Ad", "h", true, true)
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
@@ -68,7 +68,7 @@ func upsertMFAFactor(t *testing.T, db *sql.DB, userID int64, enabledAt int64) {
 func TestAdminCreatePasswordResetReturnsLink(t *testing.T) {
 	s, db := newTestServer(t)
 	h, _ := auth.HashPassword("oldpassword")
-	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", h, false)
+	userID, _ := store.CreateUser(db, "reset@example.com", "Reset", h, false, true)
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, adminReq(t, db, "POST", "/api/admin/users/"+strconv.FormatInt(userID, 10)+"/password-reset", ""))
 	if rec.Code != http.StatusOK {
@@ -324,7 +324,7 @@ func TestAdminCreateInviteReturnsLink(t *testing.T) {
 
 func TestAdminNonAdminForbidden(t *testing.T) {
 	s, db := newTestServer(t)
-	uid, _ := store.CreateUser(db, "u@b.com", "U", "h", false) // not admin
+	uid, _ := store.CreateUser(db, "u@b.com", "U", "h", false, true) // not admin
 	raw, _ := auth.GenerateToken()
 	store.CreateSession(db, auth.HashToken(raw), uid, 4_000_000_000)
 	req := httptest.NewRequest("GET", "/api/admin/users", nil)
@@ -385,7 +385,7 @@ func TestRequireAdminAllowsAdminWithMFAWhenRequired(t *testing.T) {
 // nonAdminCookie seeds a non-admin account + session and returns its cookie.
 func nonAdminCookie(t *testing.T, db *sql.DB) *http.Cookie {
 	t.Helper()
-	uid, _ := store.CreateUser(db, "user@b.com", "U", "h", false)
+	uid, _ := store.CreateUser(db, "user@b.com", "U", "h", false, true)
 	raw, _ := auth.GenerateToken()
 	store.CreateSession(db, auth.HashToken(raw), uid, 4_000_000_000)
 	return &http.Cookie{Name: sessionCookie, Value: raw}
@@ -457,15 +457,15 @@ func TestEnrichPostRequiresAdmin(t *testing.T) {
 
 func TestListUsersIncludesMFAEnabled(t *testing.T) {
 	s, db := newTestServer(t)
-	noMFAID, err := store.CreateUser(db, "no-mfa@example.com", "No MFA", "h", false)
+	noMFAID, err := store.CreateUser(db, "no-mfa@example.com", "No MFA", "h", false, true)
 	if err != nil {
 		t.Fatalf("create no mfa user: %v", err)
 	}
-	pendingMFAID, err := store.CreateUser(db, "pending-mfa@example.com", "Pending MFA", "h", false)
+	pendingMFAID, err := store.CreateUser(db, "pending-mfa@example.com", "Pending MFA", "h", false, true)
 	if err != nil {
 		t.Fatalf("create pending mfa user: %v", err)
 	}
-	enabledMFAID, err := store.CreateUser(db, "enabled-mfa@example.com", "Enabled MFA", "h", false)
+	enabledMFAID, err := store.CreateUser(db, "enabled-mfa@example.com", "Enabled MFA", "h", false, true)
 	if err != nil {
 		t.Fatalf("create enabled mfa user: %v", err)
 	}

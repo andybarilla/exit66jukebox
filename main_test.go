@@ -146,7 +146,7 @@ func TestBootstrapTokenOnlyGeneratedForEmptyUserTable(t *testing.T) {
 	if !ok || second == "" || second == first {
 		t.Fatalf("new startup should get a fresh token, first=%q second=%q ok=%v", first, second, ok)
 	}
-	if _, err := store.CreateUser(db, "admin@example.com", "Admin", "h", true); err != nil {
+	if _, err := store.CreateUser(db, "admin@example.com", "Admin", "h", true, true); err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
 	if token, ok := bootstrapToken(db); ok || token != "" {

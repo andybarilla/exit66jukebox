@@ -11,7 +11,7 @@ func TestPasswordResetTokenIsSingleUseAndExpires(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
-	userID, err := CreateUser(db, "reset@example.com", "Reset", "old-hash", false)
+	userID, err := CreateUser(db, "reset@example.com", "Reset", "old-hash", false, true)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestConsumePasswordResetTokenIsConditionalSingleUse(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
-	userID, err := CreateUser(db, "reset@example.com", "Reset", "old-hash", false)
+	userID, err := CreateUser(db, "reset@example.com", "Reset", "old-hash", false, true)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}

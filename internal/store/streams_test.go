@@ -214,11 +214,11 @@ func TestPersonalStreamIDsAreDistinctAndNamespaced(t *testing.T) {
 // stranded with queue rows behind a foreign key.
 func TestDeleteUserRemovesTheirPersonalStream(t *testing.T) {
 	db := openTestDB(t)
-	uid, err := CreateUser(db, "bob@example.com", "Bob", "h", false)
+	uid, err := CreateUser(db, "bob@example.com", "Bob", "h", false, true)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	other, err := CreateUser(db, "alice@example.com", "Alice", "h", false)
+	other, err := CreateUser(db, "alice@example.com", "Alice", "h", false, true)
 	if err != nil {
 		t.Fatalf("create other user: %v", err)
 	}
