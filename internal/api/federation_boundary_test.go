@@ -31,12 +31,14 @@ var fedRefusedRoutes = []struct{ method, path string }{
 }
 
 // fedHandlers returns the two handlers main.go serves over a federation
-// session, built the same way it builds them.
+// session. It calls the same constructors main.go calls rather than repeating
+// their composition, so this test cannot drift into pinning a handler shape
+// production no longer builds.
 func fedHandlers(srv *Server, db *sql.DB) map[string]http.Handler {
 	caps := fed.Capabilities{DirectWebRTC: true}
 	return map[string]http.Handler{
-		"member": fed.WithCapsRoute(caps, fed.AppRoutes(srv.Handler())),
-		"peer":   fed.WithCapsRoute(caps, fed.WithSignalRelay(fed.NewSignaler(), fed.PeerRoutes(db, srv.Handler()))),
+		"member": fed.MemberSessionHandler(caps, srv.Handler()),
+		"peer":   fed.PeerSessionHandler(caps, fed.NewSignaler(), db, srv.Handler()),
 	}
 }
 

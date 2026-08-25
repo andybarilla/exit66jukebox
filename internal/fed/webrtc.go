@@ -3,6 +3,8 @@ package fed
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,14 +35,21 @@ import (
 // reachable candidate pair, negotiation fails and the resolver falls back to the
 // yamux-direct then hub-relay tiers — playback is never broken.
 //
-// Signaling rides the peer's own authenticated federation session: SDP
-// offer/answer and trickle ICE candidates are POSTed to the recipient's
-// /fed/signal/{to} endpoint over the session established by the token
-// handshake, and land in that process's Signaler mailbox (see sendSignal). Only
-// peers that are in the registry — i.e. token-authenticated and on the accepted
-// federation_peer list — can be signalled, preserving the federation's
-// SSRF-safety property. Correlation across an offer/answer/ICE exchange is by
-// SID (see SignalMsg).
+// Signaling rides the peer's own federation session: SDP offer/answer and
+// trickle ICE candidates are POSTed to the recipient's /fed/signal/{to} endpoint
+// over the session established by the token handshake, and land in that
+// process's Signaler mailbox (see sendSignal). An outbound signal is addressed
+// through the Registry, so it can only travel over an existing session and never
+// to an arbitrary host.
+//
+// What that does NOT establish is who is on the far end. The handshake checks a
+// single federation-wide token and takes the peer id from the claim the dialer
+// makes, so a token holder chooses the id it is registered under. Signals are
+// therefore authenticated as "some token holder", not as a particular peer, and
+// SignalMsg.From is a claim rather than a credential — which is why routeToDial
+// matches the sender against the negotiation's own peer and why newSID is
+// random. Correlation across an offer/answer/ICE exchange is by SID (see
+// SignalMsg).
 //
 // Two peers that have no session to each other cannot signal at all; hub-relayed
 // signaling for that case is not built (issue #158).
@@ -70,13 +79,10 @@ type WebRTCTransport struct {
 	mu    sync.Mutex
 	cache map[string]*dataChannelConn // peerID -> live channel
 
-	// sidSeq mints per-negotiation correlation ids for outbound offers.
-	sidSeq uint64
-
-	// dial maps an in-flight Dial's SID to the channel that receives answers and
-	// ICE candidates for it. The single mailbox reader routes into these.
+	// dial maps a negotiation's SID to the slot that receives its answers and ICE
+	// candidates. The single mailbox reader routes into these.
 	dialMu sync.Mutex
-	dial   map[string]chan SignalMsg // sid -> inbound messages for this Dial
+	dial   map[string]*dialSlot // sid -> inbound messages for this negotiation
 
 	// onChannel is set by Listen and invoked when an inbound offer establishes a
 	// data channel (the answerer side).
@@ -109,7 +115,7 @@ func NewWebRTCTransport(selfID string, iceServers []webrtc.ICEServer, signaler *
 		log:        logger,
 		api:        webrtc.NewAPI(webrtc.WithSettingEngine(se)),
 		cache:      make(map[string]*dataChannelConn),
-		dial:       make(map[string]chan SignalMsg),
+		dial:       make(map[string]*dialSlot),
 		readerDone: make(chan struct{}),
 	}
 }
@@ -129,7 +135,16 @@ func (t *WebRTCTransport) startedReader() {
 				if onCh == nil {
 					continue // not listening for inbound channels; ignore
 				}
-				go t.handleOffer(msg, onCh)
+				// Claim the SID here, on the reader goroutine, before dispatching.
+				// The offerer begins gathering at its own SetLocalDescription,
+				// which is before it sends the offer, so its first ICE can be
+				// close behind — and over the wire the two are independent
+				// requests with no ordering guarantee. Registering inside
+				// handleOffer would leave a window in which routeToDial silently
+				// drops those candidates. Doing it here means any ICE the reader
+				// sees after the offer has a slot waiting.
+				iceIn, iceDone := t.registerDial(msg.SID, msg.From)
+				go t.handleOffer(msg, onCh, iceIn, iceDone)
 			case "answer", "ice":
 				t.routeToDial(msg)
 			}
@@ -159,37 +174,82 @@ func (t *WebRTCTransport) Listen(_ context.Context, onChannel func(*dataChannelC
 	t.ensureReader()
 }
 
-// newSID returns a unique correlation id for an outbound offer.
+// newSID returns an unpredictable correlation id for an outbound offer.
+//
+// It must be unguessable, not merely unique. A SID is the routing key for
+// inbound answers and ICE, and signaling now arrives from the wire: an id of the
+// form selfID-1, selfID-2, ... lets any peer that can reach this instance's
+// /fed/signal/ endpoint spray the whole small keyspace and land a message in an
+// in-flight Dial. Randomness is the second of the two guards on that, the first
+// being routeToDial's check that the sender is the peer the Dial is for.
 func (t *WebRTCTransport) newSID() string {
-	return fmt.Sprintf("%s-%d", t.selfID, atomic.AddUint64(&t.sidSeq, 1))
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand cannot fail on any supported platform; if it somehow does,
+		// refuse to mint a guessable id — Dial fails and the resolver falls back
+		// a tier rather than negotiating on a spoofable correlation key.
+		return ""
+	}
+	return hex.EncodeToString(b[:])
 }
 
-// registerDial creates an inbound channel for messages matching sid and returns
-// it plus a teardown func.
-func (t *WebRTCTransport) registerDial(sid string) (<-chan SignalMsg, func()) {
-	ch := make(chan SignalMsg, 16)
+// dialSlot is one in-flight negotiation's inbound queue. peerID is the only peer
+// permitted to feed it: a SignalMsg claiming a different sender is refused even
+// when it carries the right SID.
+type dialSlot struct {
+	peerID string
+	ch     chan SignalMsg
+}
+
+// registerDial creates an inbound channel for messages matching sid from peerID,
+// and returns it plus a teardown func.
+//
+// Teardown closes the channel as well as unmapping it, so whoever is ranging
+// over it returns. It used to only unmap, which left that goroutine — and, on
+// the answerer side, the PeerConnection it feeds — alive for the process's
+// lifetime. Inbound SIDs are attacker-chosen strings, so anything retained per
+// negotiation is retained per request.
+//
+// Sends happen under dialMu (see routeToDial) so the close can never race one.
+func (t *WebRTCTransport) registerDial(sid, peerID string) (<-chan SignalMsg, func()) {
+	slot := &dialSlot{peerID: peerID, ch: make(chan SignalMsg, 16)}
 	t.dialMu.Lock()
-	t.dial[sid] = ch
+	t.dial[sid] = slot
 	t.dialMu.Unlock()
-	return ch, func() {
+	return slot.ch, func() {
 		t.dialMu.Lock()
-		if cur, ok := t.dial[sid]; ok && cur == ch {
+		if cur, ok := t.dial[sid]; ok && cur == slot {
 			delete(t.dial, sid)
+			close(slot.ch)
 		}
 		t.dialMu.Unlock()
 	}
 }
 
-// routeToDial forwards an answer/ICE message to the waiting Dial (if any).
+// routeToDial forwards an answer/ICE message to the negotiation that minted its
+// SID, if the message came from that negotiation's peer.
+//
+// The sender check is load-bearing. SignalMsg.From is not authenticated — any
+// peer that can reach this instance's /fed/signal/ endpoint sets it freely — so
+// without this a third peer that guesses or observes an in-flight SID can inject
+// its own answer. The first SetRemoteDescription to land wins and the loser's
+// error is discarded, and the resulting channel is cached under the peer the
+// Dial was for, not the peer that answered: the caller would then fetch audio
+// from the injector believing it to be the intended peer. Matching against the
+// slot's own peerID refuses that.
+//
+// The send is done under dialMu because teardown closes the channel under the
+// same lock; taking the value out and sending outside the lock would race the
+// close. The send is non-blocking, so holding the lock across it is bounded.
 func (t *WebRTCTransport) routeToDial(msg SignalMsg) {
 	t.dialMu.Lock()
-	ch, ok := t.dial[msg.SID]
-	t.dialMu.Unlock()
-	if !ok {
+	defer t.dialMu.Unlock()
+	slot, ok := t.dial[msg.SID]
+	if !ok || msg.From != slot.peerID {
 		return
 	}
 	select {
-	case ch <- msg:
+	case slot.ch <- msg:
 	default:
 	}
 }
@@ -217,9 +277,11 @@ func (t *WebRTCTransport) sendSignal(msg SignalMsg) bool {
 // process's mailbox. It returns false when the peer has no live session — the
 // caller treats that as a negotiation failure and falls back a tier.
 //
-// The session is the authorization: reg only holds peers that completed the
-// token handshake and are on the accepted federation_peer list, so this cannot
-// address an arbitrary host.
+// Routing through reg is what keeps this off arbitrary hosts: reg holds peers
+// that completed the token handshake and have a live session, and p.Client is a
+// SessionClient bound to that session, so baseURL only names the peer — it
+// never selects a destination. It is not proof of who the peer is; the handshake
+// does not verify the id a token holder claims.
 func (t *WebRTCTransport) postSignal(msg SignalMsg) bool {
 	if t.reg == nil {
 		return false
@@ -259,7 +321,7 @@ func (t *WebRTCTransport) postSignal(msg SignalMsg) bool {
 }
 
 // Dial is the offerer side: create a PeerConnection + data channel, exchange
-// offer/answer and ICE with the peer via the signaler, and wait for the channel
+// offer/answer and ICE with the peer via sendSignal, and wait for the channel
 // to open. Returns a cached or fresh *dataChannelConn. On any failure returns an
 // error so the resolver falls back to the next transport tier.
 func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannelConn, error) {
@@ -271,7 +333,10 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 	defer cancel()
 
 	sid := t.newSID()
-	in, teardown := t.registerDial(sid)
+	if sid == "" {
+		return nil, fmt.Errorf("webrtc dial: no randomness for correlation id")
+	}
+	in, teardown := t.registerDial(sid, peerID)
 	defer teardown()
 
 	pc, err := t.api.NewPeerConnection(t.config)
@@ -373,51 +438,36 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 }
 
 // handleOffer builds the answering PeerConnection for an inbound offer.
-func (t *WebRTCTransport) handleOffer(offer SignalMsg, onChannel func(*dataChannelConn)) {
+//
+// The caller registers the inbound-ICE slot and hands over iceIn/iceDone; every
+// exit path here must release them along with the PeerConnection and the ICE
+// pump goroutine. This runs once per inbound offer, and an offer is one POST to
+// /fed/signal/{to} carrying an attacker-chosen SID, so anything left behind
+// accumulates per request rather than per peer.
+func (t *WebRTCTransport) handleOffer(offer SignalMsg, onChannel func(*dataChannelConn), iceIn <-chan SignalMsg, iceDone func()) {
 	pc, err := t.api.NewPeerConnection(t.config)
 	if err != nil {
 		t.log.Printf("webrtc answer: new pc: %v", err)
+		iceDone()
 		return
 	}
-	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
-		dc.OnOpen(func() {
-			rwc, derr := dc.Detach()
-			if derr != nil {
-				t.log.Printf("webrtc answer: detach: %v", derr)
-				return
-			}
-			onChannel(newDataChannelConn(offer.From, dc, rwc))
-		})
-	})
-	// Trickle our candidates back to the offerer under the same SID.
-	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c == nil {
+
+	// torn makes teardown idempotent and reentrant-safe: pion may invoke a
+	// close/state callback synchronously from inside pc.Close().
+	var torn atomic.Bool
+	teardown := func() {
+		if torn.Swap(true) {
 			return
 		}
-		b, _ := json.Marshal(c.ToJSON())
-		t.sendSignal(SignalMsg{From: t.selfID, To: offer.From, Type: "ice", SID: offer.SID, ICECandidate: string(b)})
-	})
-	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offer.SDP}); err != nil {
-		t.log.Printf("webrtc answer: set remote: %v", err)
+		iceDone()
 		_ = pc.Close()
-		return
 	}
-	answer, err := pc.CreateAnswer(nil)
-	if err != nil {
-		t.log.Printf("webrtc answer: create: %v", err)
-		_ = pc.Close()
-		return
-	}
-	if err := pc.SetLocalDescription(answer); err != nil {
-		t.log.Printf("webrtc answer: set local: %v", err)
-		_ = pc.Close()
-		return
-	}
-	// Receive the offerer's trickled ICE under the same SID: register a dial slot
-	// keyed by offer.SID so the reader routes them here.
-	iceIn, iceDone := t.registerDial(offer.SID)
+	// A negotiation that never opens a channel — a peer that vanishes, or an
+	// offer sent purely to allocate one — is torn down on the same deadline the
+	// offerer gives up on.
+	watchdog := time.AfterFunc(webrtcSetupTimeout, teardown)
+
 	go func() {
-		defer iceDone()
 		for msg := range iceIn {
 			if msg.Type == "ice" {
 				var init webrtc.ICECandidateInit
@@ -427,11 +477,62 @@ func (t *WebRTCTransport) handleOffer(offer SignalMsg, onChannel func(*dataChann
 			}
 		}
 	}()
-	t.sendSignal(SignalMsg{From: t.selfID, To: offer.From, Type: "answer", SID: offer.SID, SDP: answer.SDP})
+
+	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
+		dc.OnOpen(func() {
+			rwc, derr := dc.Detach()
+			if derr != nil {
+				t.log.Printf("webrtc answer: detach: %v", derr)
+				teardown()
+				return
+			}
+			// Established: the deadline no longer applies, but the connection
+			// still owns its slot (ICE can trickle for the life of the channel),
+			// so teardown moves to the channel's own close.
+			watchdog.Stop()
+			dc.OnClose(teardown)
+			onChannel(newDataChannelConn(offer.From, dc, rwc))
+		})
+	})
+	pc.OnICEConnectionStateChange(func(st webrtc.ICEConnectionState) {
+		if st == webrtc.ICEConnectionStateFailed || st == webrtc.ICEConnectionStateClosed {
+			teardown()
+		}
+	})
+	// Trickle our candidates back to the offerer under the same SID.
+	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+		if c == nil {
+			return
+		}
+		b, _ := json.Marshal(c.ToJSON())
+		t.sendSignal(SignalMsg{From: t.selfID, To: offer.From, Type: "ice", SID: offer.SID, ICECandidate: string(b)})
+	})
+
+	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offer.SDP}); err != nil {
+		t.log.Printf("webrtc answer: set remote: %v", err)
+		teardown()
+		return
+	}
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		t.log.Printf("webrtc answer: create: %v", err)
+		teardown()
+		return
+	}
+	if err := pc.SetLocalDescription(answer); err != nil {
+		t.log.Printf("webrtc answer: set local: %v", err)
+		teardown()
+		return
+	}
+	if !t.sendSignal(SignalMsg{From: t.selfID, To: offer.From, Type: "answer", SID: offer.SID, SDP: answer.SDP}) {
+		t.log.Printf("webrtc answer: %s unreachable", offer.From)
+		teardown()
+	}
 }
 
-// Close unregisters the mailbox and waits for the reader to exit, releasing the
-// mailbox name. It does not close cached data channels (callers Close them).
+// Close unregisters the mailbox, which closes it and so ends the reader loop.
+// It does not wait for the reader to return, and it does not close cached data
+// channels (callers Close them).
 func (t *WebRTCTransport) Close() {
 	t.signaler.Unregister(t.selfID, t.mailbox)
 }

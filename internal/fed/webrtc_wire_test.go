@@ -1,7 +1,9 @@
 package fed
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +28,12 @@ type signalProcess struct {
 	// route, so a test can assert the negotiation really crossed the wire rather
 	// than taking a shortcut through a shared Signaler.
 	signalsIn atomic.Int64
+	// onSignal, when set, is handed a copy of every SignalMsg arriving at this
+	// process before it is relayed. holdOffers, when non-nil, blocks inbound
+	// offers until it is closed — which lets a test open the window in which a
+	// negotiation is in flight and no answer has arrived yet.
+	onSignal   func(SignalMsg)
+	holdOffers chan struct{}
 }
 
 // newSignalProcess builds one instance. The session handler is composed exactly
@@ -41,6 +49,18 @@ func newSignalProcess(t *testing.T, peerID string) *signalProcess {
 	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/fed/signal/") {
 			p.signalsIn.Add(1)
+			// Read the body to inspect it, then put it back for the real handler.
+			body, _ := io.ReadAll(r.Body)
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			var msg SignalMsg
+			if json.Unmarshal(body, &msg) == nil {
+				if p.onSignal != nil {
+					p.onSignal(msg)
+				}
+				if msg.Type == "offer" && p.holdOffers != nil {
+					<-p.holdOffers
+				}
+			}
 		}
 		session.ServeHTTP(w, r)
 	}))

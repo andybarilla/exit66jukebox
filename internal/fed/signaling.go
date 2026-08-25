@@ -34,6 +34,10 @@ const signalTimeout = 5 * time.Second
 // accumulate unbounded signaling traffic.
 const signalMailboxSize = 64
 
+// maxSignalBody bounds a relayed SignalMsg. The route is reachable by anything
+// holding a federation session, and a signal is never large.
+const maxSignalBody = 64 << 10
+
 // Signaler holds the WebRTC signaling mailboxes of this process. Every instance
 // running the peer role has one; its WebRTC transport registers a single mailbox
 // under the instance's own peer id (startedReader) and drains it. Messages
@@ -136,8 +140,10 @@ func WithSignalRelay(s *Signaler, next http.Handler) http.Handler {
 // to a peer (the path value "to") and relays it through s. The sender's id is
 // taken from the body, falling back to the "from" query value. It is served only
 // over a federation session, so reaching it already required the token
-// handshake; From is not otherwise verified, and a peer may claim another peer's
-// id in it (see the PR for #152).
+// handshake. From is not verified here and a sender may claim any id in it; what
+// refuses a forged one is routeToDial, which matches it against the peer the
+// negotiation belongs to. This handler only decides which mailbox the message
+// lands in, which the path already fixes.
 func (s *Signaler) signalRelayHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		to := r.PathValue("to")
@@ -146,7 +152,11 @@ func (s *Signaler) signalRelayHandler() http.Handler {
 			return
 		}
 		var msg SignalMsg
-		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		// A SignalMsg is an SDP or a single ICE candidate; 64 KiB is well clear of
+		// both. Unbounded decoding here would let one request hold a goroutine on
+		// an arbitrarily long body, and Send can then park it for signalTimeout on
+		// a full mailbox, so the two compound.
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSignalBody)).Decode(&msg); err != nil {
 			http.Error(w, "bad signal", http.StatusBadRequest)
 			return
 		}
