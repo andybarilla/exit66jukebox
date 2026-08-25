@@ -197,3 +197,11 @@ CREATE TABLE IF NOT EXISTS email_verification (
 );
 CREATE INDEX IF NOT EXISTS idx_email_verification_user ON email_verification(user_id);
 CREATE INDEX IF NOT EXISTS idx_email_verification_expires ON email_verification(expires_at);
+CREATE TABLE IF NOT EXISTS oidc_identity (
+    issuer     TEXT NOT NULL,
+    subject    TEXT NOT NULL,
+    user_id    INTEGER NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (issuer, subject)
+);
+CREATE INDEX IF NOT EXISTS idx_oidc_identity_user ON oidc_identity(user_id);
