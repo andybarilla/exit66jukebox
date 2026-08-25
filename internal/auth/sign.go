@@ -10,7 +10,7 @@ import (
 
 // SignPath returns a token authorizing GET access to urlPath until expUnix (unix
 // seconds). Format: "<exp>.<sig>", sig = HMAC(secret, urlPath + "." + exp). Used
-// for Sonos casts, which fetch the house stream URL with no cookie.
+// for Sonos casts, which fetch a stream's MP3 URL with no cookie.
 func SignPath(secret []byte, urlPath string, expUnix int64) string {
 	exp := strconv.FormatInt(expUnix, 10)
 	sig := base64.RawURLEncoding.EncodeToString(mac(secret, urlPath+"."+exp))

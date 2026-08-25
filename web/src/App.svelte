@@ -224,11 +224,12 @@
     }
   });
 
-  // Mute the local <audio> while a Sonos cast is active (gated by config).
-  // Muting, not pausing — the timeline keeps running so resuming is seamless and
-  // the volume value is untouched.
+  // Mute the local <audio> while a Sonos is playing the stream this browser is
+  // itself on (gated by config). A cast of a different stream is somebody else's
+  // speaker and leaves this listener alone (#130). Muting, not pausing — the
+  // timeline keeps running so resuming is seamless and the volume is untouched.
   $effect(() => {
-    if (audio) audio.muted = s.muteLocalOnCast && s.castActive;
+    if (audio) audio.muted = s.muteLocalOnCast && s.castingStream(s.stream);
   });
 
   // Load discover data when switching to the discover tab.
@@ -266,7 +267,8 @@
   <TopBar isPhone={s.isPhone} query={s.query} onSearch={(v) => (s.query = v)}
     streamChipLabel={chip} onToggleStream={() => s.toggleStream()} scan={s.scan}
     onToast={(tone, title, msg) => s.pushToast(tone, title, msg)}
-    onCastActive={(v) => s.setCastActive(v)}
+    onCastChange={(ids) => s.setCastStreams(ids)}
+    streams={s.sharedStreams} currentStream={s.stream}
     isAdmin={s.isAdmin} me={s.me} onLogout={() => s.signOut()}
     onOpenSettings={openAdminRoute} onLogin={() => (showAuth = true)} />
 

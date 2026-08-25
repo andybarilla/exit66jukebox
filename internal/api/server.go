@@ -53,7 +53,8 @@ type Server struct {
 	activeFed   store.FederationSettings
 
 	// muteLocalOnCast is exposed via GET /api/config so the frontend can mute the
-	// local <audio> while a Sonos cast is active. Sourced from config (env for now).
+	// local <audio> while a Sonos is casting the stream that browser is playing.
+	// Sourced from config (env for now).
 	muteLocalOnCast bool
 
 	// signingSecret is the HMAC secret used to sign Sonos media URLs; loaded once

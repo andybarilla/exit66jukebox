@@ -44,7 +44,9 @@ export function createStore() {
 
   // Runtime config + cast state. config loads once on init; muteLocalOnCast
   // defaults true so a cast that starts before config resolves still mutes.
-  // castActive is lifted out of CastPanel so App can mute the local <audio>.
+  // castStreams is lifted out of CastPanel so App can mute the local <audio> —
+  // it holds the stream ids speakers are currently playing, because muting is
+  // per stream: a cast of some other stream is not this listener's business.
   let config = $state({
     muteLocalOnCast: true,
     fedPeers: [],
@@ -60,7 +62,7 @@ export function createStore() {
     // never flashes in on a mode that has no personal stream.
     personalStream: false,
   });
-  let castActive = $state(false);
+  let castStreams = $state([]);
 
   // Auth state. me is the current user ({id,email,display_name,is_admin}) or null.
   // authChecked is set true after the first /me round-trip so the UI can gate on
@@ -343,8 +345,11 @@ export function createStore() {
     get config() { return config; },
     get muteLocalOnCast() { return config.muteLocalOnCast; },
     get fedPeers() { return config.fedPeers; },
-    get castActive() { return castActive; },
-    setCastActive(v) { castActive = v; },
+    get castStreams() { return castStreams; },
+    setCastStreams(ids) { castStreams = Array.isArray(ids) ? ids : []; },
+    // castingStream reports whether a speaker is playing this particular
+    // stream, which is what the local-audio mute keys off.
+    castingStream(id) { return castStreams.includes(id); },
 
     get me() { return me; },
     get authChecked() { return authChecked; },
