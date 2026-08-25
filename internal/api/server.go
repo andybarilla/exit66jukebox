@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
+
 	"github.com/andybarilla/exit66jukebox/internal/auth"
 	"github.com/andybarilla/exit66jukebox/internal/enrich"
 	"github.com/andybarilla/exit66jukebox/internal/fed"
@@ -61,6 +63,13 @@ type Server struct {
 	// at startup from the store (store.MediaSigningSecret).
 	signingSecret []byte
 	mfaKey        []byte
+
+	// oidc is the enabled sign-in provider, nil when OIDC is off (see SetOIDC).
+	// oidcDiscovered caches the provider's discovery document, fetched on first
+	// sign-in rather than at startup and guarded by oidcMu.
+	oidc           *oidcConfig
+	oidcMu         sync.Mutex
+	oidcDiscovered *oidc.Provider
 	// bootstrapTokenHash is the armed first-admin bootstrap token, hashed;
 	// empty once claimed. Read by concurrent signups, cleared by the winner.
 	bootstrapMu        sync.RWMutex
@@ -289,6 +298,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/profiles", s.listPasswordlessProfiles)
 	mux.HandleFunc("POST /api/auth/profiles", s.createPasswordlessProfile)
 	mux.HandleFunc("POST /api/auth/profiles/select", s.selectPasswordlessProfile)
+	mux.HandleFunc("GET /api/auth/oidc/start", s.oidcStart)
+	mux.HandleFunc("GET "+oidcCallbackPath, s.oidcCallback)
 	mux.HandleFunc("POST /api/auth/logout", s.logout)
 	mux.HandleFunc("GET /api/auth/me", s.me)
 	mux.HandleFunc("POST /api/auth/invite/accept", s.inviteAccept)

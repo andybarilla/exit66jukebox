@@ -22,6 +22,7 @@ type Config struct {
 	Services      Services
 	Federation    Federation
 	SMTP          SMTP
+	OIDC          OIDC
 	PublicOrigin  string
 	MFAKey        []byte
 
@@ -49,6 +50,44 @@ func smtpFromEnv() SMTP {
 		User: os.Getenv("EXIT66_SMTP_USER"),
 		Pass: os.Getenv("EXIT66_SMTP_PASS"),
 		From: os.Getenv("EXIT66_SMTP_FROM"),
+	}
+}
+
+// OIDC holds the optional single-sign-on provider (env only, like Services: the
+// client secret must not reach the process list). All three of Issuer, ClientID
+// and ClientSecret are needed; anything less leaves sign-in password-only.
+// ButtonLabel is what the sign-in surface calls the provider.
+type OIDC struct {
+	Issuer       string
+	ClientID     string
+	ClientSecret string
+	ButtonLabel  string
+}
+
+// DefaultOIDCButtonLabel names the provider on the sign-in surface when the
+// operator has not chosen a name.
+const DefaultOIDCButtonLabel = "single sign-on"
+
+// Configured reports whether a provider is fully specified. A partial config is
+// deliberately "off" rather than an error: the same treatment Services gets, so
+// a half-filled env file can never take password login down with it.
+func (o OIDC) Configured() bool {
+	return o.Issuer != "" && o.ClientID != "" && o.ClientSecret != ""
+}
+
+func oidcFromEnv() OIDC {
+	label := strings.TrimSpace(os.Getenv("EXIT66_OIDC_NAME"))
+	if label == "" {
+		label = DefaultOIDCButtonLabel
+	}
+	return OIDC{
+		// Whitespace only. A trailing slash is NOT trimmed: discovery requires
+		// the issuer claim to equal this string exactly, and some providers
+		// (Auth0 among them) really do publish one with the slash.
+		Issuer:       strings.TrimSpace(os.Getenv("EXIT66_OIDC_ISSUER")),
+		ClientID:     os.Getenv("EXIT66_OIDC_CLIENT_ID"),
+		ClientSecret: os.Getenv("EXIT66_OIDC_CLIENT_SECRET"),
+		ButtonLabel:  label,
 	}
 }
 
@@ -184,6 +223,7 @@ func Parse(args []string) (Config, error) {
 	c.Services = servicesFromEnv()
 	c.Federation = federationFromEnv()
 	c.SMTP = smtpFromEnv()
+	c.OIDC = oidcFromEnv()
 	c.PublicOrigin = os.Getenv("EXIT66_PUBLIC_ORIGIN")
 	mfaKey, err := LoadMFAKey(os.Getenv("EXIT66_MFA_KEY"))
 	if err != nil {

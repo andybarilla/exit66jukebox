@@ -61,6 +61,10 @@ arrives on. So with this unset on a default install, all of these fail with
   `verification email is not configured` instead, setting this will not fix it
 - forgot-password
 
+OIDC sign-in is refused too, but differently: it is disabled once at startup with
+a line in the log rather than failing per request, because the redirect URI has
+to be settled before anyone can be sent to the provider. See below.
+
 The first-admin bootstrap URL is exempt: it is logged locally, so a wildcard
 bind is rewritten to `127.0.0.1` for that one link.
 
@@ -77,6 +81,10 @@ not validated — omitting the scheme silently produces links that do not work.
 | `EXIT66_PUBLIC_ORIGIN` | — | invites, resets, verification, signup — see above |
 | `EXIT66_MFA_KEY` | — | TOTP enrolment and verification. 32 raw bytes as base64 or hex — generate with `openssl rand -base64 32`. Missing and malformed fail differently: see below |
 | `EXIT66_MUTE_LOCAL_ON_CAST` | `true` | silence the browser's local audio during a Sonos cast |
+| `EXIT66_OIDC_ISSUER` | — | OIDC sign-in. The provider's issuer URL, used verbatim for discovery — copy it exactly, trailing slash included if the provider publishes one. **All three of issuer, client id and client secret are needed**; anything less leaves sign-in password-only with no error |
+| `EXIT66_OIDC_CLIENT_ID` | — | OIDC sign-in; see above |
+| `EXIT66_OIDC_CLIENT_SECRET` | — | OIDC sign-in; see above |
+| `EXIT66_OIDC_NAME` | `single sign-on` | what the login screen calls the provider, e.g. `Corp SSO` |
 | `EXIT66_SMTP_HOST` | — | **all outgoing mail — this alone switches SMTP on.** Empty means nothing is sent, and self-service signup then fails with a *separate* `503 verification email is not configured`, checked before the public origin is. The admin-triggered invite, reset and verification calls still return their link for you to pass on by hand |
 | `EXIT66_SMTP_PORT` | `587` | optional; never validated |
 | `EXIT66_SMTP_USER` | — | optional; empty sends **unauthenticated**, it does not disable sending |
@@ -110,6 +118,43 @@ two ways that surfaces are not symmetric:
 
 If signups are failing, check the log for the send error before suspecting the
 account itself.
+
+#### OIDC sign-in
+
+Optional, and off unless configured. With a provider set, the login screen gains
+a *Continue with …* button; nothing else about password login, MFA, invites or
+the security modes changes, and a session from the provider is the same session a
+password login issues.
+
+Register this redirect URI with the provider:
+
+    <EXIT66_PUBLIC_ORIGIN>/api/auth/oidc/callback
+
+It is fixed and cannot be configured. Because it is built from
+`EXIT66_PUBLIC_ORIGIN`, a provider configured without that variable set (on
+anything but a loopback `-addr`) is **disabled at startup** — the log says
+`OIDC sign-in disabled: …` and the button never appears. The server still runs
+and password login is unaffected.
+
+The account rules are deliberate, and each one can lock a user out if it is not
+what you expected:
+
+- An account is matched on the provider's issuer **and subject**, never the
+  email. Renaming someone's address at the provider keeps them signed in to the
+  same account.
+- If the provider asserts an email that already has a local account, the sign-in
+  is **refused**, not linked. Auto-linking on a matching address would hand that
+  account to whoever the provider currently lets sign in as it. Linking an
+  existing account is not yet possible from the UI.
+- A first-time provider sign-in creates an account only under the same gates as
+  self-service signup: `full_login` mode with the signup toggle on, and only when
+  at least one account already exists (the first admin must come from the
+  bootstrap link). The provider must also assert a **verified** email address.
+- An account created this way has no password. Its owner can obtain one through
+  forgot-password, which mails the address the provider vouched for.
+- TOTP still applies. An account with MFA enabled is asked for its code after the
+  provider returns, exactly as after a password login. The pending ticket travels
+  in a short-lived `HttpOnly` cookie, never in the URL.
 
 #### `EXIT66_MFA_KEY` fails two different ways
 

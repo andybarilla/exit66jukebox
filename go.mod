@@ -3,14 +3,17 @@ module github.com/andybarilla/exit66jukebox
 go 1.26.4
 
 require (
+	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/hashicorp/yamux v0.1.2
 	github.com/pion/webrtc/v4 v4.2.16
+	golang.org/x/oauth2 v0.36.0
 	modernc.org/sqlite v1.52.0
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
