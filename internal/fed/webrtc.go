@@ -353,6 +353,10 @@ func (t *WebRTCTransport) postSignal(msg SignalMsg) bool {
 // offer/answer and ICE with the peer via sendSignal, and wait for the channel
 // to open. Returns a cached or fresh *dataChannelConn. On any failure returns an
 // error so the resolver falls back to the next transport tier.
+//
+// The conn returned is not always the cache's: an overlapping dial to the same
+// peer may already hold the entry, in which case this one belongs to the caller
+// alone and only the caller's releaseConn will close it (#189).
 func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannelConn, error) {
 	if existing := t.get(peerID); existing != nil {
 		return existing, nil
@@ -383,11 +387,13 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 	// cached is that conn, and the eviction is identity-scoped for the same
 	// reason evictConn is. Dials to one peer overlap — serveWebRTC dials per HTTP
 	// request and nothing serializes them per peer — so the cache entry under
-	// peerID may belong to a concurrent dial that succeeded. Deleting by peer id
-	// would unmap that live conn, and since a conn is now discarded by get()
-	// pruning a MAPPED entry, an unmapped one is never pruned and its
-	// PeerConnection strands. This defer only runs when the dial failed, so an
-	// unscoped delete could never remove anything but another dial's entry.
+	// peerID may belong to a concurrent dial that succeeded, and since put
+	// refuses to displace an open incumbent (#189) it may never have been this
+	// dial's at all. Deleting by peer id would unmap that live conn, and since a
+	// conn is discarded by get() pruning a MAPPED entry, an unmapped one is never
+	// pruned and its PeerConnection strands. This defer only runs when the dial
+	// failed, so an unscoped delete could never remove anything but another
+	// dial's entry.
 	success := false
 	var cached atomic.Pointer[dataChannelConn]
 	var torn atomic.Bool
@@ -660,18 +666,70 @@ func (t *WebRTCTransport) get(peerID string) *dataChannelConn {
 	return nil
 }
 
-func (t *WebRTCTransport) put(c *dataChannelConn) {
+// put caches c as the live channel for its peer and reports whether the cache
+// took it.
+//
+// An open incumbent wins. Dials to one peer overlap — serveWebRTC dials per HTTP
+// request and nothing serializes them per peer — and both can succeed, so this
+// is reached with a conn already mapped and a request streaming over it.
+// Overwriting would leave that incumbent unmapped while it is in use, and an
+// unmapped conn is never pruned (get() prunes a MAPPED entry), so its
+// PeerConnection would strand for the process's lifetime (#189). Closing it
+// instead is not open either: serveAudioRequest cannot fall back a tier once
+// headers are written, so it would truncate a response somebody is listening to.
+// Refusing leaves the incumbent alone and leaves the loser to its own request,
+// which closes it on the way out (see releaseConn).
+//
+// Refusing is what keeps that request's ownership decidable: a conn the cache
+// took can no longer be displaced by another dial, so "not the cache entry"
+// means "nobody else's" for as long as the request runs.
+//
+// A cached conn that is no longer open is replaced rather than refused, and
+// closed for the reason get() closes what it prunes: nothing else holds a
+// reference. Its eviction is identity-guarded, so it cannot unmap c.
+func (t *WebRTCTransport) put(c *dataChannelConn) bool {
 	t.mu.Lock()
+	prev, cached := t.cache[c.peerID]
+	if cached && prev.open() {
+		t.mu.Unlock()
+		return false
+	}
 	t.cache[c.peerID] = c
 	t.mu.Unlock()
+	if cached {
+		_ = prev.Close() // after mu is released: Close re-enters evictConn
+	}
+	return true
+}
+
+// releaseConn ends one request's use of c. A conn the cache is not holding has
+// no other owner, so this is the only thing that will ever close it.
+//
+// serveWebRTC does not close what Dial hands it, and cannot itself tell whether
+// it owns it: put refuses a conn when an overlapping dial to the same peer got
+// there first, and that loser is then referenced by nothing but the request
+// streaming over it (#189). Deciding by identity here covers that and leaves the
+// ordinary case alone — the cached conn stays open for the next request, which
+// is what the cache is for.
+//
+// The close runs after mu is released because it re-enters evictConn.
+func (t *WebRTCTransport) releaseConn(c *dataChannelConn) {
+	t.mu.Lock()
+	cur, cached := t.cache[c.peerID]
+	t.mu.Unlock()
+	if !cached || cur != c {
+		_ = c.Close()
+	}
 }
 
 // evictConn drops c from the cache, but only while c is still the cached conn
-// for its peer. Another dial may already have replaced it, and an unguarded
-// delete would then drop that live entry — the next request would renegotiate
-// and, because a conn is discarded by get() pruning a MAPPED entry, the unmapped
-// one would never be pruned and its PeerConnection would strand. Every eviction
-// in this file goes through here; there is no delete by peer id.
+// for its peer. The entry may be another conn's: put refuses to displace an open
+// incumbent, so a dial that overlapped one leaves with a conn that was never
+// cached, and that conn's close lands here (#189). An unguarded delete would
+// drop the incumbent — the next request would renegotiate and, because a conn is
+// discarded by get() pruning a MAPPED entry, the unmapped one would never be
+// pruned and its PeerConnection would strand. Every eviction in this file goes
+// through here; there is no delete by peer id.
 func (t *WebRTCTransport) evictConn(c *dataChannelConn) {
 	t.mu.Lock()
 	if cur, ok := t.cache[c.peerID]; ok && cur == c {
