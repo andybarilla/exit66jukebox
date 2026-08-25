@@ -185,7 +185,9 @@ type castDevice struct {
 // withStreams pairs each device with what it is playing, read off the devices
 // themselves. The reads run concurrently because each one is a round trip to a
 // speaker that may be asleep or gone, and a slow one must not add its timeout
-// to every other device's.
+// to every other device's. Each goroutine writes its own index of out and each
+// closes over its own d — loop variables are per-iteration since Go 1.22 — so
+// no lock is needed.
 func (s *Server) withStreams(devices []sonos.Device) []castDevice {
 	out := make([]castDevice, len(devices))
 	var wg sync.WaitGroup
@@ -224,6 +226,7 @@ func (s *Server) stopSpeakersPlaying(streamID string) {
 	}
 	s.sonosMu.Unlock()
 
+	// ip is per-iteration (Go 1.22+), so each goroutine stops its own speaker.
 	var wg sync.WaitGroup
 	for _, ip := range ips {
 		wg.Add(1)

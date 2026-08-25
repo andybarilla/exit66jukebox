@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -341,5 +342,43 @@ func TestDeleteStreamSurvivesAnUnreachableSpeaker(t *testing.T) {
 	}
 	if _, ok, _ := store.GetStream(db, "party01"); ok {
 		t.Errorf("stream row should be gone after the delete")
+	}
+}
+
+// The device reads must actually overlap: each one is a round trip to a speaker
+// that may be asleep, and four sequential 4-second timeouts would be a
+// sixteen-second device list. The barrier makes serialized reads fail rather
+// than merely be slow — no read can return until every read has started.
+func TestDeviceListReadsSpeakersConcurrently(t *testing.T) {
+	srv, _ := newTestServer(t)
+	const n = 4
+	devs := make([]sonos.Device, n)
+	for i := range devs {
+		devs[i] = sonos.Device{Name: fmt.Sprintf("Speaker %d", i), IP: fmt.Sprintf("192.168.1.5%d", i)}
+	}
+	srv.sonosDiscover = func() ([]sonos.Device, error) { return devs, nil }
+
+	arrived := make(chan struct{}, n)
+	release := make(chan struct{})
+	go func() {
+		for i := 0; i < n; i++ {
+			<-arrived
+		}
+		close(release)
+	}()
+	srv.deviceURI = func(string) (string, bool, error) {
+		arrived <- struct{}{}
+		select {
+		case <-release:
+		case <-time.After(5 * time.Second):
+			return "", false, fmt.Errorf("read did not overlap the others: the device reads are serialized")
+		}
+		return "http://192.168.1.10:8066/stream/house.mp3?sig=1.a", true, nil
+	}
+
+	for _, d := range castDevicesJSON(t, srv) {
+		if d["stream"] != "house" {
+			t.Fatalf("device %v stream = %v, want house", d["ip"], d["stream"])
+		}
 	}
 }
