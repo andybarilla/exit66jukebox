@@ -1,6 +1,7 @@
 package fed
 
 import (
+	"context"
 	"errors"
 	"io"
 	"runtime"
@@ -34,6 +35,11 @@ func TestOutboundDialsDoNotAccumulatePeerConnections(t *testing.T) {
 	signaler := NewSignaler()
 	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
 	bob := NewWebRTCTransport("bob", nil, signaler, nil, testLogger(t))
+	// A far end that holds its conn open never reacts to the channel close, so
+	// the release falls to the linger. Production waits webrtcCloseLinger for
+	// that; this test does not need to. The setup deadline is left alone —
+	// shortening it would bound the dials themselves.
+	alice.closeLinger = 2 * time.Second
 	defer alice.Close()
 	defer bob.Close()
 
@@ -66,7 +72,11 @@ func TestOutboundDialsDoNotAccumulatePeerConnections(t *testing.T) {
 		}
 	}
 
-	if !waitForGoroutines(t, before, 20, 30*time.Second) {
+	// Converge rather than snapshot: the release is asynchronous by design, and
+	// pion unwinds a PeerConnection's goroutines asynchronously on top of that.
+	// The deadline is generous because a slow machine must not make this fail;
+	// what it cannot mask is the leak itself, which never converges at all.
+	if !waitForGoroutines(t, before, 20, 90*time.Second) {
 		t.Fatalf("goroutines grew by %d after %d successful dials that were closed; "+
 			"each dial leaked its PeerConnection and ICE agent",
 			runtime.NumGoroutine()-before, dials)
@@ -112,11 +122,22 @@ func TestClosingAnOutboundConnDropsItFromTheCache(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	alice.mu.Lock()
-	n := len(alice.cache)
-	alice.mu.Unlock()
-	if n != 0 {
-		t.Fatalf("cache holds %d entries after the conn was closed, want 0", n)
+	// The eviction is synchronous inside Close, but this converges rather than
+	// snapshots: a count read at one instant is a test that can fail for reasons
+	// that have nothing to do with the code, and the leak it guards does not
+	// converge at all, so a deadline cannot mask it.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		alice.mu.Lock()
+		n := len(alice.cache)
+		alice.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cache holds %d entries after the conn was closed, want 0", n)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -176,7 +197,7 @@ func TestStaleCachedConnIsClosedNotJustDropped(t *testing.T) {
 	}
 
 	rwc := &recordingRWC{}
-	conn := newDataChannelConn("bob", dc, rwc)
+	conn := newDataChannelConn("bob", pc, dc, rwc)
 	released := false
 	conn.onClose = func() { released = true }
 	tr.put(conn)
@@ -208,4 +229,141 @@ func (r *recordingRWC) Close() error {
 	}
 	r.closed = true
 	return nil
+}
+
+// TestFailedDialLeavesAConcurrentDialsConnCached covers the hazard the doc on
+// evictConn describes, on the one path that used to bypass it: Dial's deferred
+// failure teardown deleted by peer id.
+//
+// serveWebRTC dials per HTTP request and nothing serializes dials to one peer,
+// so a failing dial's teardown ran while a successful dial's conn was cached
+// under that same id. The unscoped delete unmapped it. Nothing then closes it —
+// serveWebRTC does not, and get() only prunes entries it still finds in the map
+// — so its PeerConnection strands for the process's lifetime. The defer only
+// runs when the dial FAILED, so it could never delete anything but another
+// dial's entry.
+func TestFailedDialLeavesAConcurrentDialsConnCached(t *testing.T) {
+	signaler := NewSignaler()
+	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
+	alice.setupTimeout = time.Second
+	defer alice.Close()
+
+	// Bob has a mailbox but never answers, so this dial fails on the setup
+	// deadline. Reading the offer out of that mailbox is the ordering guarantee
+	// the test needs: once it arrives, the dial is past its own cache lookup and
+	// is waiting, which is exactly the window a concurrent dial completes in.
+	bobbox := signaler.Register("bob")
+
+	failed := make(chan error, 1)
+	go func() {
+		_, err := alice.Dial(context.Background(), "bob")
+		failed <- err
+	}()
+
+	select {
+	case msg := <-bobbox:
+		if msg.Type != "offer" {
+			t.Fatalf("first signal was %q, want an offer", msg.Type)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the dial never sent an offer")
+	}
+
+	// Stand in for the conn a concurrent, successful dial to the same peer just
+	// cached. Which entry the teardown deletes is decided by identity alone, so
+	// the conn needs no channel behind it — nothing reads its state, and the
+	// failing dial has already done its lookup.
+	live := &dataChannelConn{peerID: "bob"}
+	alice.put(live)
+
+	select {
+	case err := <-failed:
+		if err == nil {
+			t.Fatal("the dial succeeded; this test needs the failure path")
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("the dial never gave up")
+	}
+
+	alice.mu.Lock()
+	got := alice.cache["bob"]
+	alice.mu.Unlock()
+	if got != live {
+		t.Fatalf("a failed dial evicted a concurrent dial's live conn (got %p want %p); "+
+			"nothing prunes an unmapped conn, so its PeerConnection is stranded", got, live)
+	}
+}
+
+// TestClosingAnOutboundConnLetsTheFarEndSeeTheCloseFirst is the guard on HOW the
+// PeerConnection is released, which is as load-bearing as that it is released.
+//
+// The far end of a detached channel learns we are done only from the SCTP stream
+// reset Close sends, and that reset rides this PeerConnection. Closing it inline
+// with the conn denies the far end its EOF — and #163 built the answerer's whole
+// release on that EOF, so doing it that way traded our leak for theirs. Measured
+// under load: TestAnswererReleasesTheNegotiationWhenTheConnIsClosed failed 6 of
+// 10 runs with the release inline, and 0 of 10 with it armed.
+//
+// That test is the end-to-end statement of it but it needs load to fail. This is
+// the same rule with no timing in it: the PeerConnection is still up when Close
+// returns, and it goes down on its own afterwards.
+func TestClosingAnOutboundConnLetsTheFarEndSeeTheCloseFirst(t *testing.T) {
+	signaler := NewSignaler()
+	alice := NewWebRTCTransport("alice", nil, signaler, nil, testLogger(t))
+	bob := NewWebRTCTransport("bob", nil, signaler, nil, testLogger(t))
+	alice.closeLinger = 2 * time.Second
+	defer alice.Close()
+	defer bob.Close()
+
+	// Bob reads until the channel goes away, which is what Manager.Start does.
+	sawEOF := make(chan struct{}, 1)
+	bob.Listen(t.Context(), func(c *dataChannelConn) {
+		go func() {
+			buf := make([]byte, 64)
+			for {
+				if _, err := c.Read(buf); err != nil {
+					select {
+					case sawEOF <- struct{}{}:
+					default:
+					}
+					return
+				}
+			}
+		}()
+	})
+
+	conn, err := alice.Dial(t.Context(), "bob")
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	if conn.pc == nil {
+		t.Fatal("the conn does not know its PeerConnection; the rest of this test proves nothing")
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// pc.Close is synchronous, so an inline release is visible the instant Close
+	// returns — no sleep and no load needed to catch it.
+	if st := conn.pc.ConnectionState(); st == webrtc.PeerConnectionStateClosed {
+		t.Fatal("the PeerConnection was closed inline with the conn; the stream reset " +
+			"the far end reads as EOF cannot survive its own transport being torn down")
+	}
+
+	select {
+	case <-sawEOF:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the far end never saw the close")
+	}
+
+	// Armed, not abandoned: the linger releases it even though this far end never
+	// closed its own conn in response.
+	deadline := time.Now().Add(30 * time.Second)
+	for conn.pc.ConnectionState() != webrtc.PeerConnectionStateClosed {
+		if time.Now().After(deadline) {
+			t.Fatalf("PeerConnection is %s well past the %v linger; the release was never armed",
+				conn.pc.ConnectionState(), alice.closeLinger)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
