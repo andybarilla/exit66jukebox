@@ -235,3 +235,39 @@ describe('a stream read whose body is not JSON (#142)', () => {
     store.teardown();
   });
 });
+
+// #160: GET /api/streams/{id}/station now 404s an id with no row, where it used
+// to answer 200 {} for any id. loadDiscover awaits that read inside a
+// Promise.all and the discover tab calls loadDiscover without a catch, so a
+// rejection there would abandon the tab's load with nothing shown to the user
+// and leave a stale station on screen. A proxy answering the 404 with an HTML
+// error page is how the body stops being JSON.
+describe('a station read whose body is not JSON (#160)', () => {
+  const stationURL = `/api/streams/${HOUSE}/station`;
+
+  function mockDiscover(stationResponse) {
+    global.fetch = vi.fn(async (url) => {
+      const u = String(url);
+      if (u === stationURL) return stationResponse();
+      if (u.startsWith('/api/discover/rediscover')) return { ok: true, json: async () => [{ id: 7, title: 'Rediscovered' }] };
+      return { ok: true, json: async () => [] };
+    });
+  }
+
+  it('clears the station and still loads the tab', async () => {
+    // Seed a live station first, so the null below is a value this code put
+    // back rather than the state the store starts in.
+    mockDiscover(() => ({ ok: true, json: async () => ({ stream_id: HOUSE, genre: 'Rock', threshold: 3, batch: 10 }) }));
+    const s = createStore();
+    await s.loadDiscover();
+    expect(s.discoverStation?.genre).toBe('Rock');
+
+    mockDiscover(() => ({ ok: false, status: 404, json: async () => { throw new SyntaxError('Unexpected token <'); } }));
+
+    await s.loadDiscover();
+
+    expect(s.discoverStation).toBe(null);
+    expect(s.discoverRediscover.map((t) => t.title)).toEqual(['Rediscovered']);
+    expect(s.toasts).toEqual([]);
+  });
+});
