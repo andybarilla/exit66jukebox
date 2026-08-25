@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -149,5 +151,36 @@ func TestTokenNotAFlag(t *testing.T) {
 	_, err := Parse([]string{"-listenbrainz-token", "x"})
 	if err == nil {
 		t.Fatal("expected -listenbrainz-token to be rejected as an unknown flag")
+	}
+}
+
+// TestEnvExampleHasNoTrailingComments guards the installed sample against
+// systemd's EnvironmentFile rule: `#` starts a comment only at the beginning of
+// a line, so anything after `=` -- including a hint the operator was never meant
+// to keep -- becomes part of the value. The unit interpolates $EXIT66_ARGS
+// unquoted, so those words arrive as extra argv, where flag.Parse stops at the
+// first non-flag and drops them without a word.
+//
+// This covers commented-out samples too: their hazard is realised the moment an
+// operator uncomments the line.
+func TestEnvExampleHasNoTrailingComments(t *testing.T) {
+	sample, err := os.ReadFile("../../packaging/exit66.env.example")
+	if err != nil {
+		t.Fatalf("read env sample: %v", err)
+	}
+	assignment := regexp.MustCompile(`^#?[A-Z0-9_]+=`)
+	checked := 0
+	for i, line := range strings.Split(string(sample), "\n") {
+		if !assignment.MatchString(line) {
+			continue
+		}
+		checked++
+		_, value, _ := strings.Cut(line, "=")
+		if strings.Contains(value, "#") {
+			t.Errorf("line %d: %q carries a trailing comment; systemd keeps it as part of the value", i+1, line)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("matched no assignment lines in the env sample; the test is not reading what it thinks it is")
 	}
 }
