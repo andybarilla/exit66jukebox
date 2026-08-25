@@ -439,3 +439,51 @@ func dialAsPeer(t *testing.T, addr, peerID string) *yamux.Session {
 	t.Cleanup(func() { sess.Close() })
 	return sess
 }
+
+// The hub scopes on the session's identity ONLY. An untagged request has no
+// viewer, so once groups exist it discovers nothing — the same fail-closed rule
+// PeerRoutes follows. An earlier version fell back to the path value here, which
+// would have scoped the request against a name its caller chose.
+func TestHubMergedCatalogDeniesAnUnidentifiedSession(t *testing.T) {
+	db := groupDB(t)
+	joinGroup(t, db, "family", "home", "office")
+	relay := NewRelay(NewRegistry(), db)
+	pushCatalog(t, relay, "office", rowsFor("OfficeSong"))
+
+	rec := httptest.NewRecorder()
+	relay.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fed/catalog/home/merged", nil))
+
+	var merged MergedCatalog
+	if err := json.Unmarshal(rec.Body.Bytes(), &merged); err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.Catalogs["office"]) != 0 {
+		t.Fatalf("untagged request got office's catalog by naming home in the path: %#v", merged.Catalogs["office"])
+	}
+}
+
+// deniedAcceptedPeers is the backstop for a denied peer the hub holds no rows
+// for — offline since the hub restarted, so the main loop never names it and the
+// member would keep the rows forever. It reads federation_peer, which on a hub
+// is populated by an admin adding peers through the API.
+func TestHubMergedCatalogEmptiesADeniedPeerItHasNoRowsFor(t *testing.T) {
+	db := groupDB(t)
+	joinGroup(t, db, "family", "home")
+	if err := store.SaveFederationPeer(db, store.FederationPeer{
+		PeerID: "office", Address: "office:9000", Status: store.PeerStatusAccepted, TokenAuthenticated: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing pushed: the hub's in-memory cache holds no rows for office.
+	relay := NewRelay(NewRegistry(), db)
+
+	merged := fetchMerged(t, relay, "home")
+
+	rows, named := merged.Catalogs["office"]
+	if !named {
+		t.Fatal("a denied peer with no cached rows must still be named, or the member never deletes its copy")
+	}
+	if len(rows) != 0 {
+		t.Fatalf("catalog = %#v, want empty", rows)
+	}
+}

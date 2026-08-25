@@ -285,13 +285,19 @@ type MergedCatalog struct {
 // is the one case that must be named explicitly (with an empty catalog), so
 // revoking membership deletes what a peer already cached.
 func (h *Relay) serveMerged(w http.ResponseWriter, r *http.Request) {
-	// The session's handshake id wins over the one in the path: both are only
-	// claimed (#167), but the path is chosen per request, so scoping on it would
-	// let any member read another group's catalogs by asking for them by name.
+	// Two different questions, deliberately answered from two different sources.
+	//
+	// exclude — whose own rows to leave out of the payload — may come from the
+	// path: spoofing it only hides your own catalog from yourself.
+	//
+	// viewer — whose group membership decides what is visible — comes ONLY from
+	// the session handshake. Both ids are merely claimed (#167), but the path is
+	// chosen per request, so scoping on it would let any member read another
+	// group's catalogs by asking for them by name. An untagged request has no
+	// viewer and is denied once groups exist, matching PeerRoutes; the fallback
+	// this replaces would have scoped it against a name the caller picked.
 	exclude := r.PathValue("peer")
-	if sessionPeer := RequestPeerID(r); sessionPeer != "" {
-		exclude = sessionPeer
-	}
+	viewer := RequestPeerID(r)
 	h.mu.Lock()
 	cached := make(map[string][]store.CatalogRow, len(h.catalogs))
 	for peer, rows := range h.catalogs {
@@ -312,7 +318,7 @@ func (h *Relay) serveMerged(w http.ResponseWriter, r *http.Request) {
 		if peer == exclude {
 			continue
 		}
-		if catalogVisible(h.db, peer, exclude) {
+		if catalogVisible(h.db, peer, viewer) {
 			cats[peer] = rows
 			continue
 		}
@@ -320,7 +326,7 @@ func (h *Relay) serveMerged(w http.ResponseWriter, r *http.Request) {
 	}
 	// A denied peer the hub holds no rows for (offline since the hub restarted)
 	// would otherwise be omitted, leaving the member's cached rows in place.
-	for _, peer := range h.deniedAcceptedPeers(exclude) {
+	for _, peer := range h.deniedAcceptedPeers(viewer) {
 		if _, named := cats[peer]; !named {
 			cats[peer] = []store.CatalogRow{}
 		}

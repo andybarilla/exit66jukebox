@@ -24,6 +24,11 @@ import (
 // A denied peer is answered with an EMPTY catalog rather than an error, so
 // revoking membership deletes the rows a peer already cached: ApplyCatalog with
 // no rows falls through to DeleteRemoteTracks. An error would leave them.
+//
+// Both surfaces fail CLOSED on a request that carries no session identity: once
+// groups exist an untagged request shares no group with anyone, so it discovers
+// nothing. Production always tags (servePeerConn, dialPeer, serveHubConn), so
+// this only matters if a future path forgets to.
 
 type peerIDKey struct{}
 
