@@ -362,6 +362,18 @@ func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg
 	// the token-authenticated session after the handshake. The WebRTC transport
 	// is only meaningful for the peer role with direct P2P enabled.
 	caps := fed.Capabilities{DirectWebRTC: s.Role == "peer" && s.DirectP2P}
+	// Migrate an install that federated before listening groups existed: its
+	// already-accepted peers join one default group so they stay visible to each
+	// other. Runs at most once, and seeds nothing on an install with no accepted
+	// peers, which leaves groups dormant. The peer id comes from settings rather
+	// than the DB because federationSettings falls back to the environment when
+	// no row has been saved.
+	// db is nil in the wiring test that observes the handlers this builds.
+	if db != nil {
+		if err := store.SeedDefaultFederationGroup(db, s.PeerID); err != nil {
+			log.Printf("fed group migration: %v", err)
+		}
+	}
 	fm := &fed.Manager{
 		Role:          s.Role,
 		Token:         s.Token,
@@ -377,14 +389,14 @@ func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg
 	switch s.Role {
 	case "hub":
 		// One relay instance shared by the session handler and the resolver so the
-		// hub's own browse sees remote tracks (catalog ingest lands here in a later
-		// task). It holds the registry and the hub's DB.
+		// hub's own browse sees remote tracks. It holds the registry and the hub's
+		// DB, which is also where the listening groups it scopes fan-out by live.
 		relay := fed.NewRelay(reg, db)
 		relay.SetSelf(s.PeerID)
 		fm.Relay = relay
 		fm.HubHandler = fed.HubSessionHandler(caps, signaler, relay)
 	case "peer":
-		fm.PeerHandler = fed.PeerSessionHandler(caps, signaler, db, app)
+		fm.PeerHandler = fed.PeerSessionHandler(caps, signaler, db, s.PeerID, app)
 		// Direct P2P (WebRTC) transport: NAT-traversing audio path that bypasses
 		// the hub when both peers advertise support and ICE connects. Disabled by
 		// setting; falls back to the yamux-direct then hub-relay tiers on any

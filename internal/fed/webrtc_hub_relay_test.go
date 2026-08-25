@@ -466,7 +466,7 @@ func TestPeerSessionDoesNotForwardSignals(t *testing.T) {
 
 	body, _ := json.Marshal(SignalMsg{From: "alice", To: "other", Type: "offer", SID: "s", SDP: "x"})
 	for name, h := range map[string]http.Handler{
-		"peer":   PeerSessionHandler(Capabilities{}, NewSignaler(), nil, nil),
+		"peer":   PeerSessionHandler(Capabilities{}, NewSignaler(), nil, "self", nil),
 		"member": MemberSessionHandler(Capabilities{}, NewSignaler(), nil),
 	} {
 		rec := httptest.NewRecorder()

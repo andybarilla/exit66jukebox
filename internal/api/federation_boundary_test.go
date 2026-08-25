@@ -27,6 +27,7 @@ var fedRefusedRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/tracks"},
 	{http.MethodGet, "/api/admin/settings"},
 	{http.MethodGet, "/api/admin/federation/peers"},
+	{http.MethodGet, "/api/admin/federation/groups"},
 	{http.MethodPost, "/api/admin/invites"},
 }
 
@@ -39,7 +40,7 @@ func fedHandlers(srv *Server, db *sql.DB) map[string]http.Handler {
 	relay := fed.NewRelay(fed.NewRegistry(), db)
 	return map[string]http.Handler{
 		"member": fed.MemberSessionHandler(caps, fed.NewSignaler(), srv.Handler()),
-		"peer":   fed.PeerSessionHandler(caps, fed.NewSignaler(), db, srv.Handler()),
+		"peer":   fed.PeerSessionHandler(caps, fed.NewSignaler(), db, "self", srv.Handler()),
 		"hub":    fed.HubSessionHandler(caps, fed.NewSignaler(), relay),
 	}
 }

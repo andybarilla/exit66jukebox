@@ -31,6 +31,8 @@ var refusedRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/admin/settings"},
 	{http.MethodPost, "/api/admin/settings"},
 	{http.MethodGet, "/api/admin/federation/peers"},
+	{http.MethodGet, "/api/admin/federation/groups"},
+	{http.MethodPost, "/api/admin/federation/groups"},
 	{http.MethodGet, "/api/tracks"},
 	{http.MethodGet, "/api/auth/me"},
 	{http.MethodGet, "/"},
@@ -99,7 +101,7 @@ func TestPeerRoutesServesTrackAudioAndRefusesEverythingElse(t *testing.T) {
 	spy := &spyHandler{}
 	rec := httptest.NewRecorder()
 
-	PeerRoutes(nil, spy).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tracks/5/audio", nil))
+	PeerRoutes(nil, "self", spy).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tracks/5/audio", nil))
 
 	if rec.Code != http.StatusOK || len(spy.hits) != 1 {
 		t.Fatalf("track audio over peer routes: status %d, hits %v", rec.Code, spy.hits)
@@ -109,7 +111,7 @@ func TestPeerRoutesServesTrackAudioAndRefusesEverythingElse(t *testing.T) {
 			spy := &spyHandler{}
 			rec := httptest.NewRecorder()
 
-			PeerRoutes(nil, spy).ServeHTTP(rec, httptest.NewRequest(r.method, r.path, nil))
+			PeerRoutes(nil, "self", spy).ServeHTTP(rec, httptest.NewRequest(r.method, r.path, nil))
 
 			if rec.Code != http.StatusNotFound {
 				t.Fatalf("status = %d, want 404", rec.Code)
@@ -128,7 +130,7 @@ func TestPeerRoutesServesTrackAudioAndRefusesEverythingElse(t *testing.T) {
 // mux still matches it.
 func TestWebRTCAudioReachesAppThroughAllowlist(t *testing.T) {
 	spy := &spyHandler{}
-	peerHandler := WithCapsRoute(Capabilities{DirectWebRTC: true}, PeerRoutes(nil, spy))
+	peerHandler := WithCapsRoute(Capabilities{DirectWebRTC: true}, PeerRoutes(nil, "self", spy))
 
 	conn := &framedConn{}
 	if err := writeFrame(&conn.in, audioRequest{TrackID: 42, Range: "bytes=0-9"}); err != nil {

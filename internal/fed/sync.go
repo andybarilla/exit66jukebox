@@ -15,6 +15,11 @@ import (
 // track's local id STABLE across syncs — a blanket delete+reinsert would mint a
 // fresh autoincrement id every sync cycle, 404ing ids a client already holds
 // (browse→play) and orphaning queue rows.
+//
+// An EMPTY catalog deletes everything cached for peer. Listening groups rely on
+// that: a peer denied by group membership is answered with an empty catalog
+// rather than an error, which is what makes revoking membership remove the rows
+// it already holds (#88).
 func ApplyCatalog(db *sql.DB, peer string, rows []store.CatalogRow) error {
 	if len(rows) == 0 {
 		return store.DeleteRemoteTracks(db, peer)

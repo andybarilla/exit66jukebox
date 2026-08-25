@@ -44,7 +44,7 @@ func newSignalProcess(t *testing.T, peerID string) *signalProcess {
 	p := &signalProcess{peerID: peerID, signaler: NewSignaler(), reg: NewRegistry()}
 	session := WithCapsRoute(
 		Capabilities{DirectWebRTC: true},
-		WithSignalRelay(p.signaler, nil, PeerRoutes(nil, nil)),
+		WithSignalRelay(p.signaler, nil, PeerRoutes(nil, "self", nil)),
 	)
 	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/fed/signal/") {
@@ -203,7 +203,7 @@ func TestWebRTCResolverStreamsAudioAcrossProcesses(t *testing.T) {
 
 	resolver := &directResolver{reg: alice.reg, webrtc: alice.transport}
 
-	// bob's session handler mounts no application (PeerRoutes(nil, nil)), so
+	// bob's session handler mounts no application (PeerRoutes(nil, "self", nil)), so
 	// tier 2 — a plain GET for the track over that same session — answers 404.
 	// That is what makes the 206 below attributable: only the WebRTC tier, whose
 	// answerer serves against the backend handler, can produce it.

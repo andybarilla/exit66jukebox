@@ -20,7 +20,7 @@ import (
 //	WithSignalRelay  POST /fed/signal/{to}, the inbound half of WebRTC signaling
 //	                 (plus, on the hub only, the onward half)
 //	AppRoutes        the peerVisibleAppRoutes allowlist and nothing else
-//	PeerRoutes       /fed/catalog plus that same allowlist
+//	PeerRoutes       /fed/catalog (group-scoped) plus that same allowlist
 //
 // None of them mounts app at "/" — see peerVisibleAppRoutes.
 
@@ -61,6 +61,11 @@ func HubSessionHandler(caps Capabilities, signaler *Signaler, relay *Relay) http
 // arrive at and the tier never engages (#152). It takes no forwarder: a peer
 // relays to itself only, which is what stops a hub-forwarded message being
 // forwarded again.
-func PeerSessionHandler(caps Capabilities, signaler *Signaler, db *sql.DB, app http.Handler) http.Handler {
-	return WithCapsRoute(caps, WithSignalRelay(signaler, nil, PeerRoutes(db, app)))
+//
+// selfPeerID is this instance's own peer id, which PeerRoutes needs to decide
+// whether the requesting peer shares a listening group with it (#88). Callers
+// must serve the result per session through WithSessionPeer, or /fed/catalog has
+// no requester to scope against; Manager.servePeerConn and dialPeer do.
+func PeerSessionHandler(caps Capabilities, signaler *Signaler, db *sql.DB, selfPeerID string, app http.Handler) http.Handler {
+	return WithCapsRoute(caps, WithSignalRelay(signaler, nil, PeerRoutes(db, selfPeerID, app)))
 }

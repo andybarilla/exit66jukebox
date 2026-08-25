@@ -205,3 +205,14 @@ CREATE TABLE IF NOT EXISTS oidc_identity (
     PRIMARY KEY (issuer, subject)
 );
 CREATE INDEX IF NOT EXISTS idx_oidc_identity_user ON oidc_identity(user_id);
+CREATE TABLE IF NOT EXISTS federation_group (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS federation_group_member (
+    group_id INTEGER NOT NULL REFERENCES federation_group(id) ON DELETE CASCADE,
+    peer_id  TEXT NOT NULL,
+    PRIMARY KEY (group_id, peer_id)
+);
+CREATE INDEX IF NOT EXISTS idx_federation_group_member_peer ON federation_group_member(peer_id, group_id);
