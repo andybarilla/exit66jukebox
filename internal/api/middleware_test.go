@@ -57,7 +57,7 @@ func TestMiddlewareAllowsStaticAndStream(t *testing.T) {
 
 func TestMiddlewareAllowsSessionAndSignedURL(t *testing.T) {
 	s, db := newTestServer(t)
-	uid, _ := store.CreateUser(db, "a@b.com", "A", "h", false)
+	uid, _ := store.CreateUser(db, "a@b.com", "A", "h", false, true)
 	raw, _ := auth.GenerateToken()
 	store.CreateSession(db, auth.HashToken(raw), uid, 4_000_000_000)
 	h := s.RequireAuthMiddleware(okHandler())
@@ -108,7 +108,7 @@ func TestMiddlewareRejectsPasswordAccountSessionInHouseholdProfiles(t *testing.T
 	if err := store.SetSecurityMode(db, store.SecurityModeHouseholdProfiles); err != nil {
 		t.Fatalf("SetSecurityMode: %v", err)
 	}
-	userID, err := store.CreateUser(db, "account@example.com", "Account", "h", false)
+	userID, err := store.CreateUser(db, "account@example.com", "Account", "h", false, true)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestMiddlewareAllowsPasswordAdminAPIInHouseholdProfiles(t *testing.T) {
 	if err := store.SetSecurityMode(db, store.SecurityModeHouseholdProfiles); err != nil {
 		t.Fatalf("SetSecurityMode: %v", err)
 	}
-	adminID, err := store.CreateUser(db, "admin@example.com", "Admin", "h", true)
+	adminID, err := store.CreateUser(db, "admin@example.com", "Admin", "h", true, true)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestMiddlewareAllowsPasswordAdminHouseControlsInHouseholdProfiles(t *testin
 	if err := store.SetSecurityMode(db, store.SecurityModeHouseholdProfiles); err != nil {
 		t.Fatalf("SetSecurityMode: %v", err)
 	}
-	adminID, err := store.CreateUser(db, "admin@example.com", "Admin", "h", true)
+	adminID, err := store.CreateUser(db, "admin@example.com", "Admin", "h", true, true)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}

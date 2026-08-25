@@ -183,7 +183,7 @@ func TestConfigEntryFlowUsesSessionUserKind(t *testing.T) {
 
 func createConfigPasswordUser(t *testing.T, db *sql.DB) int64 {
 	t.Helper()
-	userID, err := store.CreateUser(db, "account@example.com", "Account", "h", false)
+	userID, err := store.CreateUser(db, "account@example.com", "Account", "h", false, true)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}

@@ -18,7 +18,7 @@ import (
 // admin-gated routes can be exercised for their handler-level validation.
 func adminSession(t *testing.T, db *sql.DB) *http.Cookie {
 	t.Helper()
-	uid, _ := store.CreateUser(db, "admin@test", "Admin", "h", true)
+	uid, _ := store.CreateUser(db, "admin@test", "Admin", "h", true, true)
 	raw, _ := auth.GenerateToken()
 	store.CreateSession(db, auth.HashToken(raw), uid, 4_000_000_000)
 	return &http.Cookie{Name: sessionCookie, Value: raw}
