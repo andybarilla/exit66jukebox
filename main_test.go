@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/andybarilla/exit66jukebox/internal/config"
 	"github.com/andybarilla/exit66jukebox/internal/external"
+	"github.com/andybarilla/exit66jukebox/internal/fed"
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
@@ -200,5 +203,42 @@ func TestMainDoesNotProvisionAPersonalStreamAtBoot(t *testing.T) {
 	}
 	if strings.Contains(string(source), "store.EnsurePrivateStream(db,") {
 		t.Fatal("main.go must not provision a personal stream at boot: the id is per-user and boot has no user")
+	}
+}
+
+// TestFedManagerHandlersRefuseApplicationRoutes observes the handlers as
+// newFedManager attaches them, so a member- or peer-side assignment that
+// bypassed fed.AppRoutes would fail here. The allowlist's own behaviour is
+// covered in internal/fed and internal/api; this pins the wiring.
+func TestFedManagerHandlersRefuseApplicationRoutes(t *testing.T) {
+	reached := ""
+	app := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	})
+	fm := newFedManager(
+		store.FederationSettings{Enabled: true, Role: "peer", PeerID: "p1", DirectP2P: true},
+		nil, app, fed.NewRegistry(), fed.NewSignaler())
+
+	for name, h := range map[string]http.Handler{"member": fm.MemberHandler, "peer": fm.PeerHandler} {
+		if h == nil {
+			t.Fatalf("%s handler not attached", name)
+		}
+		reached = ""
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/streams/house/requests", nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404", name, rec.Code)
+		}
+		if reached != "" {
+			t.Fatalf("%s: %s reached the application handler", name, reached)
+		}
+		// The one allowlisted application route still gets through.
+		reached = ""
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tracks/7/audio", nil))
+		if rec.Code != http.StatusOK || reached != "GET /api/tracks/7/audio" {
+			t.Fatalf("%s track audio: status %d, reached %q", name, rec.Code, reached)
+		}
 	}
 }

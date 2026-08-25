@@ -235,47 +235,12 @@ func main() {
 	}
 
 	// Federation: dial/listen for peers and resolve remote-track audio through the
-	// relay. MemberHandler exposes this instance's API over the session so a hub
-	// can fetch /api/tracks/{id}/audio from it.
+	// relay.
 	if fedSettings.Enabled {
-		reg := fed.NewRegistry()
-		signaler := fed.NewSignaler()
-		// Caps describe the transports this instance advertises to peers. They ride
-		// the token-authenticated session after the handshake. The WebRTC transport
-		// is only meaningful for the peer role with direct P2P enabled.
-		caps := fed.Capabilities{DirectWebRTC: fedSettings.Role == "peer" && fedSettings.DirectP2P}
-		fm := &fed.Manager{
-			Role:          fedSettings.Role,
-			Token:         fedSettings.Token,
-			PeerID:        fedSettings.PeerID,
-			HubAddr:       fedSettings.HubAddr, // member: hub to dial
-			HubListen:     fedSettings.Listen,  // hub/peer: local listen addr
-			MemberHandler: fed.WithCapsRoute(caps, srv.Handler()),
-			Registry:      reg,
-			DB:            db,
-			Caps:          caps,
-			Signaler:      signaler,
-		}
+		fm := newFedManager(fedSettings, db, srv.Handler(), fed.NewRegistry(), fed.NewSignaler())
 		fm.SetContext(rootCtx)
-		if fedSettings.Role == "hub" {
-			// One relay instance shared by the session handler and the resolver so
-			// the hub's own browse sees remote tracks (catalog ingest lands here in a
-			// later task). It holds the registry and the hub's DB.
-			relay := fed.NewRelay(reg, db)
-			relay.SetSelf(fedSettings.PeerID)
-			fm.Relay = relay
-			fm.HubHandler = fed.WithCapsRoute(caps, fed.WithSignalRelay(signaler, relay.Routes()))
-		}
 		if fedSettings.Role == "peer" {
-			fm.PeerHandler = fed.WithCapsRoute(caps, fed.PeerRoutes(db, srv.Handler()))
 			fed.StartLANDiscovery(rootCtx, db, fedSettings.PeerID, fedSettings.PeerID, fedSettings.Listen)
-			// Direct P2P (WebRTC) transport: NAT-traversing audio path that bypasses
-			// the hub when both peers advertise support and ICE connects. Disabled by
-			// setting; falls back to the yamux-direct then hub-relay tiers on any
-			// failure, so playback is never broken.
-			if fedSettings.DirectP2P {
-				fm.WebRTC = fed.NewWebRTCTransport(fedSettings.PeerID, fedICEServers(fedSettings), signaler, nil)
-			}
 		}
 		fm.Start()
 		srv.SetFedResolver(fed.NewResolverFor(fm))
@@ -376,6 +341,51 @@ func federationSettings(db *sql.DB, env config.Federation) (store.FederationSett
 		STUNServers: env.STUNServers,
 		TURNURL:     env.TURNURL,
 	}, nil
+}
+
+// newFedManager builds the federation manager for the configured role, with the
+// handler served over each kind of session already attached. Everything with a
+// lifetime — the context, LAN discovery, Start — stays with the caller.
+//
+// No handler here mounts app at "/": what a session sees of the application is
+// the allowlist in internal/fed and nothing more (#136).
+func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg *fed.Registry, signaler *fed.Signaler) *fed.Manager {
+	// Caps describe the transports this instance advertises to peers. They ride
+	// the token-authenticated session after the handshake. The WebRTC transport
+	// is only meaningful for the peer role with direct P2P enabled.
+	caps := fed.Capabilities{DirectWebRTC: s.Role == "peer" && s.DirectP2P}
+	fm := &fed.Manager{
+		Role:          s.Role,
+		Token:         s.Token,
+		PeerID:        s.PeerID,
+		HubAddr:       s.HubAddr, // member: hub to dial
+		HubListen:     s.Listen,  // hub/peer: local listen addr
+		MemberHandler: fed.WithCapsRoute(caps, fed.AppRoutes(app)),
+		Registry:      reg,
+		DB:            db,
+		Caps:          caps,
+		Signaler:      signaler,
+	}
+	switch s.Role {
+	case "hub":
+		// One relay instance shared by the session handler and the resolver so the
+		// hub's own browse sees remote tracks (catalog ingest lands here in a later
+		// task). It holds the registry and the hub's DB.
+		relay := fed.NewRelay(reg, db)
+		relay.SetSelf(s.PeerID)
+		fm.Relay = relay
+		fm.HubHandler = fed.WithCapsRoute(caps, fed.WithSignalRelay(signaler, relay.Routes()))
+	case "peer":
+		fm.PeerHandler = fed.WithCapsRoute(caps, fed.PeerRoutes(db, app))
+		// Direct P2P (WebRTC) transport: NAT-traversing audio path that bypasses
+		// the hub when both peers advertise support and ICE connects. Disabled by
+		// setting; falls back to the yamux-direct then hub-relay tiers on any
+		// failure, so playback is never broken.
+		if s.DirectP2P {
+			fm.WebRTC = fed.NewWebRTCTransport(s.PeerID, fedICEServers(s), signaler, nil)
+		}
+	}
+	return fm
 }
 
 // fedICEServers builds the webrtc.ICEServer list from settings: at least one

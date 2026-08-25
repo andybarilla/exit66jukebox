@@ -8,6 +8,10 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
+// PeerRoutes is the handler served over a direct peer session: this instance's
+// federation routes plus peerVisibleAppRoutes of app. It deliberately does not
+// mount app at "/" — see peerVisibleAppRoutes for why a catch-all here is a
+// hole rather than a convenience.
 func PeerRoutes(db *sql.DB, app http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /fed/catalog", func(w http.ResponseWriter, r *http.Request) {
@@ -19,9 +23,7 @@ func PeerRoutes(db *sql.DB, app http.Handler) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(rows)
 	})
-	if app != nil {
-		mux.Handle("/", app)
-	}
+	mountAppRoutes(mux, app)
 	return mux
 }
 
