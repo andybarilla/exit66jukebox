@@ -185,3 +185,36 @@ describe('personal stream availability (#128)', () => {
     expect(s.stream).toBe(before);
   });
 });
+
+// #142: GET /api/streams/{id} now 404s an id with no row, where it used to
+// answer 200 with an empty queue. start() awaits that read inside a
+// Promise.all and opens the SSE connection on the line after, so a rejection
+// there would cost the session its live updates with nothing shown to the
+// user. A proxy answering the 404 with an HTML error page is how the body
+// stops being JSON.
+describe('a stream read whose body is not JSON (#142)', () => {
+  it('still lets start() subscribe to the stream', async () => {
+    let opened = 0;
+    vi.stubGlobal('EventSource', class {
+      constructor() { opened++; }
+      close() {}
+    });
+    global.fetch = vi.fn(async (url) => {
+      if (String(url) === '/api/streams/house') {
+        return { ok: false, status: 404, json: async () => { throw new SyntaxError('Unexpected token <'); } };
+      }
+      if (String(url).startsWith('/api/config')) {
+        return { ok: true, json: async () => ({ security_mode: 'open', guest_access: true, authenticated: false }) };
+      }
+      return { ok: true, headers: { get: () => null }, json: async () => [] };
+    });
+    const store = createStore();
+
+    await store.start();
+
+    expect(opened).toBe(1);
+    expect(store.queue).toEqual([]);
+    expect(store.toasts).toEqual([]);
+    store.teardown();
+  });
+});
