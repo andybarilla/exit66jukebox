@@ -9,9 +9,9 @@ import (
 )
 
 // PeerRoutes is the handler served over a direct peer session: this instance's
-// federation routes plus the allowlisted application routes of app (see
-// peerVisibleAppRoutes). It deliberately does not mount app at "/" — a peer has
-// no browser session, so a catch-all would hand it the whole API ungated.
+// federation routes plus peerVisibleAppRoutes of app. It deliberately does not
+// mount app at "/" — see peerVisibleAppRoutes for why a catch-all here is a
+// hole rather than a convenience.
 func PeerRoutes(db *sql.DB, app http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /fed/catalog", func(w http.ResponseWriter, r *http.Request) {

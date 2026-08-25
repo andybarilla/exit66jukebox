@@ -988,9 +988,8 @@ func (s *Server) signedOK(r *http.Request) bool {
 // session, the guest toggle, or a valid signed token for its path (a shared
 // stream's ffmpeg source fetches /api/tracks/{id}/audio this way). This is the production
 // gate; it wraps ONLY the public http.Server, never the federation MemberHandler.
-// A peer carries no browser session, so this gate cannot protect the federation
-// path — what limits a peer is fed.AppRoutes, the allowlist of application
-// routes a federation session sees at all (#136).
+// It cannot protect a federation session at all — what limits a peer is the
+// allowlist in internal/fed, which documents why (#136).
 func (s *Server) RequireAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/") || isOpenPath(r.URL.Path) || s.adminRouteAllowed(r) || s.mediaAllowed(r) || s.signedOK(r) {

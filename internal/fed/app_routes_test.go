@@ -7,18 +7,19 @@ import (
 	"testing"
 )
 
-// spyHandler records the requests that reached the application handler.
-type spyHandler struct{ hits []string }
+// spyHandler records the requests that reached the application handler, and the
+// allowlist pattern each one matched on the way.
+type spyHandler struct{ hits, patterns []string }
 
 func (s *spyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.hits = append(s.hits, r.Method+" "+r.URL.Path)
+	s.patterns = append(s.patterns, r.Pattern)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("app"))
 }
 
 // refusedRoutes are application routes a peer must not reach over a federation
-// session. Every one of them relies on the browser auth middleware for its
-// protection, which never runs on a peer session.
+// session.
 var refusedRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/streams/house"},
 	{http.MethodPost, "/api/streams/house/requests"},
@@ -104,17 +105,19 @@ func TestPeerRoutesServesTrackAudioAndRefusesEverythingElse(t *testing.T) {
 		t.Fatalf("track audio over peer routes: status %d, hits %v", rec.Code, spy.hits)
 	}
 	for _, r := range refusedRoutes {
-		spy := &spyHandler{}
-		rec := httptest.NewRecorder()
+		t.Run(r.method+" "+r.path, func(t *testing.T) {
+			spy := &spyHandler{}
+			rec := httptest.NewRecorder()
 
-		PeerRoutes(nil, spy).ServeHTTP(rec, httptest.NewRequest(r.method, r.path, nil))
+			PeerRoutes(nil, spy).ServeHTTP(rec, httptest.NewRequest(r.method, r.path, nil))
 
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s %s: status = %d, want 404", r.method, r.path, rec.Code)
-		}
-		if len(spy.hits) != 0 {
-			t.Fatalf("%s %s reached the application handler", r.method, r.path)
-		}
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404", rec.Code)
+			}
+			if len(spy.hits) != 0 {
+				t.Fatalf("request reached the application handler: %v", spy.hits)
+			}
+		})
 	}
 }
 
@@ -153,3 +156,43 @@ type framedConn struct{ in, out bytes.Buffer }
 
 func (c *framedConn) Read(p []byte) (int, error)  { return c.in.Read(p) }
 func (c *framedConn) Write(p []byte) (int, error) { return c.out.Write(p) }
+
+// encodedPaths are paths that survive percent-decoding or path cleaning into
+// something that names another route. Go's {id} wildcard matches an encoded
+// slash as a literal, so several of these do match the allowlist pattern — see
+// the second-mechanism note on peerVisibleAppRoutes.
+var encodedPaths = []string{
+	"/api/tracks/1%2fx/audio",
+	"/api/tracks/..%2f..%2fapi%2fstreams%2fhouse/audio",
+	"/api/tracks/..%2f..%2fapi%2fadmin%2fsettings/audio",
+	"/api/tracks/1/../../streams/house/audio",
+	"/api/tracks/..%2f..%2f..%2f..%2fetc%2fpasswd/audio",
+	"/api/%73treams/house",
+	"/api/streams/house%2frequests",
+	"//api/streams/house",
+	"/api/tracks//audio",
+}
+
+// TestAppRoutesEncodedPathsMatchOnlyTheAllowlistedPattern is the mux half of the
+// boundary: however a path is encoded, the only pattern the allowlist ever
+// dispatches on is the track-audio one. What the application then does with a
+// junk {id} is asserted in internal/api.
+func TestAppRoutesEncodedPathsMatchOnlyTheAllowlistedPattern(t *testing.T) {
+	for _, path := range encodedPaths {
+		t.Run(path, func(t *testing.T) {
+			spy := &spyHandler{}
+			rec := httptest.NewRecorder()
+
+			AppRoutes(spy).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+			for _, got := range spy.patterns {
+				if got != peerVisibleAppRoutes[0] {
+					t.Fatalf("dispatched on pattern %q, want only %q", got, peerVisibleAppRoutes[0])
+				}
+			}
+			if len(spy.patterns) == 0 && rec.Code == http.StatusOK {
+				t.Fatalf("status 200 without reaching the application")
+			}
+		})
+	}
+}

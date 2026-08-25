@@ -206,39 +206,36 @@ func TestMainDoesNotProvisionAPersonalStreamAtBoot(t *testing.T) {
 	}
 }
 
-// TestFedSessionHandlersRefuseApplicationRoutes pins the wiring rather than the
-// allowlist itself (internal/fed and internal/api cover that): both handlers
-// main serves over a federation session must go through fed.AppRoutes, so a
-// stream or admin route never reaches the application handler.
-func TestFedSessionHandlersRefuseApplicationRoutes(t *testing.T) {
+// TestFedManagerHandlersRefuseApplicationRoutes observes the handlers as
+// newFedManager attaches them, so a member- or peer-side assignment that
+// bypassed fed.AppRoutes would fail here. The allowlist's own behaviour is
+// covered in internal/fed and internal/api; this pins the wiring.
+func TestFedManagerHandlersRefuseApplicationRoutes(t *testing.T) {
 	reached := ""
 	app := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = r.Method + " " + r.URL.Path
 		w.WriteHeader(http.StatusOK)
 	})
-	member, peer := fedSessionHandlers(fed.Capabilities{}, nil, app)
+	fm := newFedManager(
+		store.FederationSettings{Enabled: true, Role: "peer", PeerID: "p1", DirectP2P: true},
+		nil, app, fed.NewRegistry(), fed.NewSignaler())
 
-	for name, h := range map[string]http.Handler{"member": member, "peer": peer} {
-		for _, r := range []struct{ method, path string }{
-			{http.MethodPost, "/api/streams/house/requests"},
-			{http.MethodDelete, "/api/streams/house/requests"},
-			{http.MethodPost, "/api/streams/house/next"},
-			{http.MethodGet, "/api/streams/house"},
-			{http.MethodGet, "/api/admin/settings"},
-		} {
-			reached = ""
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, httptest.NewRequest(r.method, r.path, nil))
-			if rec.Code != http.StatusNotFound {
-				t.Fatalf("%s %s %s: status = %d, want 404", name, r.method, r.path, rec.Code)
-			}
-			if reached != "" {
-				t.Fatalf("%s: %s reached the application handler", name, reached)
-			}
+	for name, h := range map[string]http.Handler{"member": fm.MemberHandler, "peer": fm.PeerHandler} {
+		if h == nil {
+			t.Fatalf("%s handler not attached", name)
+		}
+		reached = ""
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/streams/house/requests", nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404", name, rec.Code)
+		}
+		if reached != "" {
+			t.Fatalf("%s: %s reached the application handler", name, reached)
 		}
 		// The one allowlisted application route still gets through.
 		reached = ""
-		rec := httptest.NewRecorder()
+		rec = httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/tracks/7/audio", nil))
 		if rec.Code != http.StatusOK || reached != "GET /api/tracks/7/audio" {
 			t.Fatalf("%s track audio: status %d, reached %q", name, rec.Code, reached)

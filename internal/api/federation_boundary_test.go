@@ -16,9 +16,7 @@ import (
 )
 
 // fedRefusedRoutes are application routes that must not be reachable over a
-// federation session. Each is protected on the public listener by
-// RequireAuthMiddleware (or by an admin check that reads the session cookie),
-// neither of which runs on a peer session.
+// federation session.
 var fedRefusedRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/streams/house"},
 	{http.MethodPost, "/api/streams/house/requests"},
@@ -132,6 +130,71 @@ func TestFederationSessionKeepsFedRoutes(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status = %d, want 200 (body %q)", path, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+	}
+}
+
+// TestFederationSessionEncodedPathsReachNoOtherHandler covers the paths that get
+// past the allowlist mux. Go's {id} wildcard matches an encoded slash as a
+// literal, so /api/tracks/..%2f..%2fapi%2fstreams%2fhouse/audio does match the
+// allowlisted pattern and does reach the application — where trackAudio's
+// strconv.ParseInt refuses the id. The boundary holds by two mechanisms, and
+// this is the one the mux does not provide.
+func TestFederationSessionEncodedPathsReachNoOtherHandler(t *testing.T) {
+	srv, db := newTestServer(t)
+	cases := []struct {
+		path string
+		want int
+		why  string
+	}{
+		{"/api/tracks/1%2fx/audio", http.StatusBadRequest, "matches the pattern; ParseInt refuses the id"},
+		{"/api/tracks/..%2f..%2fapi%2fstreams%2fhouse/audio", http.StatusBadRequest, "matches the pattern; ParseInt refuses the id"},
+		{"/api/tracks/..%2f..%2fapi%2fadmin%2fsettings/audio", http.StatusBadRequest, "matches the pattern; ParseInt refuses the id"},
+		{"/api/%73treams/house", http.StatusNotFound, "decodes to a stream route, which is not allowlisted"},
+		{"/api/streams/house%2frequests", http.StatusNotFound, "encoded slash does not conjure a pattern that is not there"},
+	}
+	for name, h := range fedHandlers(srv, db) {
+		for _, c := range cases {
+			t.Run(name+" "+c.path, func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, c.path, nil))
+				if rec.Code != c.want {
+					t.Fatalf("status = %d, want %d (%s) (body %q)", rec.Code, c.want, c.why, strings.TrimSpace(rec.Body.String()))
+				}
+			})
+		}
+	}
+}
+
+// TestFederationSessionRedirectsLeadNowhere covers the other way a path can
+// change identity: ServeMux cleans a dot segment and answers 307. Following the
+// redirect must not land on a route the allowlist does not serve.
+func TestFederationSessionRedirectsLeadNowhere(t *testing.T) {
+	srv, db := newTestServer(t)
+	for name, h := range fedHandlers(srv, db) {
+		for _, path := range []string{
+			"/api/tracks/1/../../streams/house/audio",
+			"/api/tracks/1/../../../api/admin/settings",
+			"/api/tracks//audio",
+			"//api/streams/house",
+		} {
+			t.Run(name+" "+path, func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+				loc := rec.Header().Get("Location")
+				if rec.Code != http.StatusTemporaryRedirect {
+					if rec.Code != http.StatusNotFound {
+						t.Fatalf("status = %d, want 307 or 404 (body %q)", rec.Code, strings.TrimSpace(rec.Body.String()))
+					}
+					return
+				}
+				// Follow it: the cleaned path goes back to the same handler.
+				rec2 := httptest.NewRecorder()
+				h.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, loc, nil))
+				if rec2.Code != http.StatusNotFound {
+					t.Fatalf("redirect to %s answered %d, want 404 (body %q)", loc, rec2.Code, strings.TrimSpace(rec2.Body.String()))
+				}
+			})
 		}
 	}
 }
