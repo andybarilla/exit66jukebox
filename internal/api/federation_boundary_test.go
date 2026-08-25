@@ -39,7 +39,7 @@ func fedHandlers(srv *Server, db *sql.DB) map[string]http.Handler {
 	relay := fed.NewRelay(fed.NewRegistry(), db)
 	return map[string]http.Handler{
 		"member": fed.MemberSessionHandler(caps, srv.Handler()),
-		"peer":   fed.PeerSessionHandler(caps, fed.NewSignaler(), db, srv.Handler()),
+		"peer":   fed.PeerSessionHandler(caps, fed.NewSignaler(), db, "self", srv.Handler()),
 		"hub":    fed.HubSessionHandler(caps, fed.NewSignaler(), relay),
 	}
 }

@@ -376,7 +376,7 @@ func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg
 		fm.Relay = relay
 		fm.HubHandler = fed.HubSessionHandler(caps, signaler, relay)
 	case "peer":
-		fm.PeerHandler = fed.PeerSessionHandler(caps, signaler, db, app)
+		fm.PeerHandler = fed.PeerSessionHandler(caps, signaler, db, s.PeerID, app)
 		// Direct P2P (WebRTC) transport: NAT-traversing audio path that bypasses
 		// the hub when both peers advertise support and ICE connects. Disabled by
 		// setting; falls back to the yamux-direct then hub-relay tiers on any

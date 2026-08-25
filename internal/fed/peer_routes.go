@@ -13,13 +13,21 @@ import (
 // peerVisibleAppRoutes of app. It deliberately does not
 // mount app at "/" — see peerVisibleAppRoutes for why a catch-all here is a
 // hole rather than a convenience.
-func PeerRoutes(db *sql.DB, app http.Handler) http.Handler {
+//
+// selfPeerID is this instance's own peer id, which /fed/catalog needs to decide
+// whether the requesting peer shares a listening group with it. The audio route
+// mounted alongside carries no such check — see the note in groups.go.
+func PeerRoutes(db *sql.DB, selfPeerID string, app http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /fed/catalog", func(w http.ResponseWriter, r *http.Request) {
-		rows, err := store.ExportCatalog(db)
-		if err != nil {
-			http.Error(w, "export catalog", http.StatusInternalServerError)
-			return
+		rows := []store.CatalogRow{}
+		if catalogVisible(db, selfPeerID, RequestPeerID(r)) {
+			var err error
+			rows, err = store.ExportCatalog(db)
+			if err != nil {
+				http.Error(w, "export catalog", http.StatusInternalServerError)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(rows)

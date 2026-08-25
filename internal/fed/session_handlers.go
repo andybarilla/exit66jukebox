@@ -19,7 +19,7 @@ import (
 //	WithCapsRoute    /fed/caps, so a peer can discover transports post-handshake
 //	WithSignalRelay  POST /fed/signal/{to}, the inbound half of WebRTC signaling
 //	AppRoutes        the peerVisibleAppRoutes allowlist and nothing else
-//	PeerRoutes       /fed/catalog plus that same allowlist
+//	PeerRoutes       /fed/catalog (group-scoped) plus that same allowlist
 //
 // None of them mounts app at "/" — see peerVisibleAppRoutes.
 
@@ -38,6 +38,6 @@ func HubSessionHandler(caps Capabilities, signaler *Signaler, relay *Relay) http
 // signal relay is what lets a remote peer's WebRTC negotiation reach this
 // process's mailbox; without it the transport's outbound POST has nothing to
 // arrive at and the tier never engages (#152).
-func PeerSessionHandler(caps Capabilities, signaler *Signaler, db *sql.DB, app http.Handler) http.Handler {
-	return WithCapsRoute(caps, WithSignalRelay(signaler, PeerRoutes(db, app)))
+func PeerSessionHandler(caps Capabilities, signaler *Signaler, db *sql.DB, selfPeerID string, app http.Handler) http.Handler {
+	return WithCapsRoute(caps, WithSignalRelay(signaler, PeerRoutes(db, selfPeerID, app)))
 }

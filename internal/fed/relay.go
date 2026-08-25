@@ -244,8 +244,16 @@ func (h *Relay) receiveCatalog(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.catalogs[peer] = rows
 	h.mu.Unlock()
-	// The hub is a peer too: apply to its own DB so its browse shows remote tracks.
+	// The hub is a peer too: apply to its own DB so its browse shows remote
+	// tracks — but only for a peer it shares a listening group with. The rows
+	// still go into h.catalogs above, because the hub fans them out to members
+	// whose own membership is decided separately in serveMerged.
 	if h.db != nil {
+		if !catalogVisible(h.db, peer, h.selfID) {
+			// Applying nothing would leave rows cached while the group still
+			// permitted them; ApplyCatalog with no rows deletes them instead.
+			rows = nil
+		}
 		if err := ApplyCatalog(h.db, peer, rows); err != nil {
 			http.Error(w, "apply catalog", http.StatusInternalServerError)
 			return
@@ -262,27 +270,81 @@ type MergedCatalog struct {
 	Online   []string                      `json:"online"`
 }
 
+// serveMerged fans the hub's cached catalogs out to one member, scoped to the
+// listening groups the HUB stores: in a hub topology the hub is the authority on
+// who discovers whom, since members never talk to each other directly.
+//
+// A peer the hub holds no rows for is omitted, not emptied — the cache is
+// in-memory, so after a hub restart every peer is absent until it re-pushes and
+// a member that deleted on absence would wipe its whole remote library. Denial
+// is the one case that must be named explicitly (with an empty catalog), so
+// revoking membership deletes what a peer already cached.
 func (h *Relay) serveMerged(w http.ResponseWriter, r *http.Request) {
+	// The session's handshake id wins over the one in the path: both are only
+	// claimed (#167), but the path is chosen per request, so scoping on it would
+	// let any member read another group's catalogs by asking for them by name.
 	exclude := r.PathValue("peer")
+	if sessionPeer := RequestPeerID(r); sessionPeer != "" {
+		exclude = sessionPeer
+	}
 	h.mu.Lock()
-	cats := make(map[string][]store.CatalogRow)
+	cached := make(map[string][]store.CatalogRow, len(h.catalogs))
 	for peer, rows := range h.catalogs {
-		if peer != exclude {
-			cats[peer] = rows
-		}
+		cached[peer] = rows
 	}
 	h.mu.Unlock()
 	online := h.reg.IDs()
 	if h.selfID != "" {
 		online = append(online, h.selfID)
-		if h.selfID != exclude && h.db != nil {
+		if h.db != nil {
 			if rows, err := store.ExportCatalog(h.db); err == nil && len(rows) > 0 {
-				cats[h.selfID] = rows
+				cached[h.selfID] = rows
 			}
+		}
+	}
+	cats := make(map[string][]store.CatalogRow, len(cached))
+	for peer, rows := range cached {
+		if peer == exclude {
+			continue
+		}
+		if catalogVisible(h.db, peer, exclude) {
+			cats[peer] = rows
+			continue
+		}
+		cats[peer] = []store.CatalogRow{}
+	}
+	// A denied peer the hub holds no rows for (offline since the hub restarted)
+	// would otherwise be omitted, leaving the member's cached rows in place.
+	for _, peer := range h.deniedAcceptedPeers(exclude) {
+		if _, named := cats[peer]; !named {
+			cats[peer] = []store.CatalogRow{}
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(MergedCatalog{Catalogs: cats, Online: online})
+}
+
+// deniedAcceptedPeers returns the accepted peers viewer shares no group with.
+// It is only a backstop for peers absent from the in-memory cache; peers that
+// are online repopulate it on their next push and are denied by the main loop.
+func (h *Relay) deniedAcceptedPeers(viewer string) []string {
+	if h.db == nil {
+		return nil
+	}
+	peers, err := store.ListFederationPeers(h.db, store.PeerStatusAccepted)
+	if err != nil {
+		return nil
+	}
+	var denied []string
+	for _, p := range peers {
+		if p.PeerID == viewer {
+			continue
+		}
+		if !catalogVisible(h.db, p.PeerID, viewer) {
+			denied = append(denied, p.PeerID)
+		}
+	}
+	return denied
 }
 
 // Routes returns the hub's federation mux (served over the session to members).

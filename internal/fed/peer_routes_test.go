@@ -19,7 +19,7 @@ func TestPeerRoutesExportsLocalCatalog(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/fed/catalog", nil)
 
-	PeerRoutes(db, nil).ServeHTTP(rec, req)
+	PeerRoutes(db, "self", nil).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("catalog status = %d (%s)", rec.Code, rec.Body)

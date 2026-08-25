@@ -156,7 +156,9 @@ func (m *Manager) servePeerConn(conn net.Conn) {
 	m.learnCaps(p)
 	go m.startDirectSyncLoop(p, p.Session.CloseChan())
 	if m.PeerHandler != nil {
-		_ = http.Serve(p.Session, m.PeerHandler)
+		// Tag every request with the id this peer claimed at the handshake, so
+		// /fed/catalog can scope its answer to shared listening groups (#88).
+		_ = http.Serve(p.Session, withPeerID(m.PeerHandler, p.ID))
 		return
 	}
 	<-p.Session.CloseChan()
@@ -197,7 +199,7 @@ func (m *Manager) dialPeer(peerID, addr string) {
 	m.learnCaps(p)
 	go m.startDirectSyncLoop(p, sess.CloseChan())
 	if m.PeerHandler != nil {
-		_ = http.Serve(sess, m.PeerHandler)
+		_ = http.Serve(sess, withPeerID(m.PeerHandler, m.PeerID))
 	} else {
 		<-sess.CloseChan()
 	}
@@ -264,7 +266,7 @@ func (m *Manager) serveHubConn(conn net.Conn) {
 	}
 	defer m.Registry.remove(p.ID, p)
 	if m.HubHandler != nil {
-		_ = http.Serve(p.Session, m.HubHandler)
+		_ = http.Serve(p.Session, withPeerID(m.HubHandler, p.ID))
 	} else {
 		<-p.Session.CloseChan()
 	}
