@@ -22,6 +22,32 @@ const emailVerificationTTL = 24 * time.Hour
 
 const mfaTicketTTL = 5 * time.Minute
 
+// mfaTicketCookie carries a pending MFA ticket for a sign-in that reached the
+// second step by redirect rather than by fetch — today only OIDC. Path-scoped to
+// the endpoint that spends it, so it is not attached to every request.
+const mfaTicketCookie = "exit66_mfa_ticket"
+
+const mfaTicketCookiePath = "/api/auth/mfa/"
+
+func setMFATicketCookie(w http.ResponseWriter, r *http.Request, ticket string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     mfaTicketCookie,
+		Value:    ticket,
+		Path:     mfaTicketCookiePath,
+		HttpOnly: true,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(mfaTicketTTL / time.Second),
+	})
+}
+
+func clearMFATicketCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name: mfaTicketCookie, Value: "", Path: mfaTicketCookiePath, HttpOnly: true,
+		Secure: isHTTPS(r), SameSite: http.SameSiteLaxMode, MaxAge: -1,
+	})
+}
+
 var errVerificationEmailerUnavailable = errors.New("verification emailer unavailable")
 
 // requireAuth gates browser API routes. Anonymous browser access passes only in
@@ -443,6 +469,17 @@ func (s *Server) mfaComplete(w http.ResponseWriter, r *http.Request) {
 	req.Ticket = strings.TrimSpace(req.Ticket)
 	req.Code = strings.TrimSpace(req.Code)
 	req.RecoveryCode = strings.TrimSpace(req.RecoveryCode)
+	// A password login receives its ticket in a JSON body and sends it back the
+	// same way. An OIDC sign-in cannot: it returns the user by redirect, so its
+	// ticket rides in a cookie the browser holds but no script reads. The body
+	// still wins when it carries one, so nothing about the password path moves.
+	fromCookie := false
+	if req.Ticket == "" {
+		if c, err := r.Cookie(mfaTicketCookie); err == nil {
+			req.Ticket = strings.TrimSpace(c.Value)
+			fromCookie = req.Ticket != ""
+		}
+	}
 	if req.Ticket == "" || (req.Code == "" && req.RecoveryCode == "") {
 		writeErr(w, http.StatusBadRequest, "ticket and code are required")
 		return
@@ -451,6 +488,12 @@ func (s *Server) mfaComplete(w http.ResponseWriter, r *http.Request) {
 	if !s.allowAttempt("mfa-ip:"+clientIP(r)) || !s.allowAttempt("mfa-ticket:"+ticketHash) {
 		writeErr(w, http.StatusTooManyRequests, "too many attempts; wait a minute")
 		return
+	}
+	// Past the point of no return: the ticket is spent whether or not the code
+	// that follows is right, so the cookie holding it is expired here rather
+	// than on the way out, where an error path could leave it behind.
+	if fromCookie {
+		clearMFATicketCookie(w, r)
 	}
 	userID, ok, err := store.ConsumeMFATicket(s.db, ticketHash)
 	if err != nil {

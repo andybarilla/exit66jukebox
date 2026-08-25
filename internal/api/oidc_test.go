@@ -61,28 +61,41 @@ func allowSignup(t *testing.T, db *sql.DB) {
 	}
 }
 
-// signIn drives one complete sign-in: /start to mint the transaction, then the
-// provider's callback carrying the state the server just issued.
-func signIn(t *testing.T, s *Server, idp *fakeIDP) *httptest.ResponseRecorder {
+// beginSignIn runs the /start leg and hands back what the provider would send
+// to the callback: the state it was given, and the transaction cookie the
+// browser is holding. It also points the fake provider at the nonce, which is
+// what the ID token has to echo.
+func beginSignIn(t *testing.T, s *Server, idp *fakeIDP) (state string, tx *http.Cookie) {
 	t.Helper()
-	start := httptest.NewRecorder()
-	s.oidcStart(start, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/start", nil))
-	if start.Code != http.StatusFound {
-		t.Fatalf("start: want 302, got %d (%s)", start.Code, start.Body)
+	rec := httptest.NewRecorder()
+	s.oidcStart(rec, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/start", nil))
+	if rec.Code != http.StatusFound {
+		t.Fatalf("start: want 302, got %d (%s)", rec.Code, rec.Body)
 	}
-	authURL, err := url.Parse(start.Header().Get("Location"))
+	authURL, err := url.Parse(rec.Header().Get("Location"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	idp.nonce = authURL.Query().Get("nonce")
-	tx := mustCookie(t, start.Result(), oidcTxCookie)
+	return authURL.Query().Get("state"), mustCookie(t, rec.Result(), oidcTxCookie)
+}
 
+// completeSignIn runs the callback leg for a transaction beginSignIn started.
+func completeSignIn(t *testing.T, s *Server, state string, tx *http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodGet,
-		oidcCallbackPath+"?code=auth-code&state="+url.QueryEscape(authURL.Query().Get("state")), nil)
+		oidcCallbackPath+"?code=auth-code&state="+url.QueryEscape(state), nil)
 	req.AddCookie(tx)
 	rec := httptest.NewRecorder()
 	s.oidcCallback(rec, req)
 	return rec
+}
+
+// signIn drives one complete sign-in, both legs.
+func signIn(t *testing.T, s *Server, idp *fakeIDP) *httptest.ResponseRecorder {
+	t.Helper()
+	state, tx := beginSignIn(t, s, idp)
+	return completeSignIn(t, s, state, tx)
 }
 
 // sessionUser resolves the session cookie a response set back to its account,
@@ -540,28 +553,17 @@ func TestOIDCTransactionCookieIsClearedOnCallback(t *testing.T) {
 // same MFA ticket a password login gets, and no session until they complete it.
 func TestOIDCHonoursEnabledMFA(t *testing.T) {
 	s, db, idp := newOIDCServer(t)
-	allowSignup(t, db)
-	hash, _ := auth.HashPassword("localpassword")
-	uid, _ := store.CreateUser(db, idp.email, "MFA User", hash, false, true)
-	if err := store.LinkOIDCIdentity(db, idp.issuer, idp.subject, uid); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertMFAFactor(db, store.MFAFactor{
-		UserID: uid, SecretCiphertext: []byte("c"), SecretNonce: []byte("n"),
-		KeyVersion: 1, EnabledAt: time.Now().Unix(), LastAcceptedStep: -1,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	uid := linkedMFAUser(t, db, idp)
 
 	rec := signIn(t, s, idp)
 	if _, ok := sessionUser(t, db, rec); ok {
 		t.Fatal("MFA was bypassed: the callback issued a session outright")
 	}
-	ticket := redirectQuery(t, rec).Get("oidc_mfa")
-	if ticket == "" {
+	c := cookieNamed(rec.Result(), mfaTicketCookie)
+	if c == nil {
 		t.Fatal("no MFA ticket handed to the sign-in surface")
 	}
-	got, ok, err := store.ConsumeMFATicket(db, auth.HashToken(ticket))
+	got, ok, err := store.ConsumeMFATicket(db, auth.HashToken(c.Value))
 	if err != nil || !ok || got != uid {
 		t.Fatalf("ticket does not resolve to the user: id=%d ok=%v err=%v", got, ok, err)
 	}
@@ -572,15 +574,36 @@ func TestOIDCHonoursEnabledMFA(t *testing.T) {
 func TestOIDCCallbackIsThrottled(t *testing.T) {
 	s, db, idp := newOIDCServer(t)
 	allowSignup(t, db)
+	// One start, replayed callbacks: the start leg has its own budget, so this
+	// can only be the callback's own throttle tripping.
+	state, tx := beginSignIn(t, s, idp)
 	var last *httptest.ResponseRecorder
 	for i := 0; i < 12; i++ {
-		last = signIn(t, s, idp)
+		last = completeSignIn(t, s, state, tx)
 	}
 	if got := redirectQuery(t, last).Get("oidc_error"); got != "throttled" {
 		t.Fatalf("oidc_error after 12 callbacks = %q, want throttled", got)
 	}
 	if _, ok := sessionUser(t, db, last); ok {
 		t.Error("a throttled callback still issued a session")
+	}
+}
+
+// /start writes no row, but it is unauthenticated, it can reach the provider,
+// and it mints two random tokens per call. Throttled on its own key.
+func TestOIDCStartIsThrottled(t *testing.T) {
+	s, db, _ := newOIDCServer(t)
+	allowSignup(t, db)
+	var last *httptest.ResponseRecorder
+	for i := 0; i < 12; i++ {
+		last = httptest.NewRecorder()
+		s.oidcStart(last, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/start", nil))
+	}
+	if last.Code != http.StatusTooManyRequests {
+		t.Fatalf("start after 12 calls = %d (%s), want 429", last.Code, last.Body)
+	}
+	if cookieNamed(last.Result(), oidcTxCookie) != nil {
+		t.Error("a throttled start still handed out a transaction cookie")
 	}
 }
 
@@ -592,6 +615,169 @@ func TestOIDCRoutesAreOpenToAnonymousCallers(t *testing.T) {
 			t.Errorf("%s is behind the auth middleware, so sign-in can never begin", p)
 		}
 	}
+}
+
+// A hostile or compromised provider can advertise whatever it likes in its
+// discovery document. These are the two classic downgrades, run for real
+// end to end rather than reasoned about: an unsigned token, and one signed with
+// HMAC keyed on the RSA public key anybody can fetch from the JWKS. Both must be
+// refused however the provider advertises itself. This pins a library behaviour
+// nothing else in this repo asserts, so a future bump that loosened it fails
+// here instead of silently.
+func TestOIDCRejectsDowngradedSigningAlgorithms(t *testing.T) {
+	for _, alg := range []string{"none", "HS256"} {
+		t.Run(alg, func(t *testing.T) {
+			s, db, idp := newOIDCServer(t)
+			allowSignup(t, db)
+			// Before the first /start: discovery is fetched lazily and cached,
+			// so the provider must already be advertising this algorithm.
+			idp.alg = alg
+			before, _ := store.CountUsers(db)
+
+			rec := signIn(t, s, idp)
+			if _, ok := sessionUser(t, db, rec); ok {
+				t.Fatalf("alg=%s was accepted and issued a session", alg)
+			}
+			if got := redirectQuery(t, rec).Get("oidc_error"); got != "token" {
+				t.Errorf("oidc_error = %q, want token", got)
+			}
+			if after, _ := store.CountUsers(db); after != before {
+				t.Errorf("account count %d → %d; alg=%s created an account", before, after, alg)
+			}
+		})
+	}
+}
+
+// The ticket must not reach the address bar: it goes back in an HttpOnly cookie
+// and the redirect carries only a flag.
+func TestOIDCMFATicketTravelsInACookieNotTheURL(t *testing.T) {
+	s, db, idp := newOIDCServer(t)
+	uid := linkedMFAUser(t, db, idp)
+
+	rec := signIn(t, s, idp)
+	loc := rec.Header().Get("Location")
+	if loc != "/?oidc_mfa=1" {
+		t.Fatalf("Location = %q, want /?oidc_mfa=1", loc)
+	}
+	c := mustCookie(t, rec.Result(), mfaTicketCookie)
+	if !c.HttpOnly || c.SameSite != http.SameSiteLaxMode || c.Path != mfaTicketCookiePath {
+		t.Errorf("ticket cookie = %+v; want HttpOnly, SameSite=Lax, path %q", c, mfaTicketCookiePath)
+	}
+	if strings.Contains(loc, c.Value) {
+		t.Fatal("the ticket is in the redirect URL as well as the cookie")
+	}
+	got, ok, err := store.ConsumeMFATicket(db, auth.HashToken(c.Value))
+	if err != nil || !ok || got != uid {
+		t.Fatalf("cookie ticket does not resolve to the user: id=%d ok=%v err=%v", got, ok, err)
+	}
+}
+
+// The cookie is a fallback, not a replacement: a body ticket still wins, which
+// is the whole of the password login path and must not have moved.
+func TestMFACompleteReadsTicketFromBodyOrCookie(t *testing.T) {
+	// "both" is the case that pins the precedence: a stale cookie alongside a
+	// good body ticket must not be the one that gets spent.
+	for _, via := range []string{"body", "cookie", "both"} {
+		t.Run(via, func(t *testing.T) {
+			s, db, idp := newOIDCServer(t)
+			uid := linkedMFAUser(t, db, idp)
+			secret := enableRealTOTP(t, s, db, uid)
+
+			ticket := mustCookie(t, signIn(t, s, idp).Result(), mfaTicketCookie).Value
+			code, err := auth.TOTPCode(secret, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			body := `{"code":"` + code + `"}`
+			if via != "cookie" {
+				body = `{"ticket":"` + ticket + `","code":"` + code + `"}`
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/auth/mfa/complete", strings.NewReader(body))
+			switch via {
+			case "cookie":
+				req.AddCookie(&http.Cookie{Name: mfaTicketCookie, Value: ticket})
+			case "both":
+				// A ticket that was never issued: if the cookie is consulted at
+				// all here, the request fails.
+				req.AddCookie(&http.Cookie{Name: mfaTicketCookie, Value: "stale-ticket-that-was-never-issued"})
+			}
+			rec := httptest.NewRecorder()
+			s.mfaComplete(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("mfa complete via %s: %d (%s)", via, rec.Code, rec.Body)
+			}
+			user, ok := sessionUser(t, db, rec)
+			if !ok || user.ID != uid {
+				t.Fatalf("via %s: no session for the user (ok=%v id=%d)", via, ok, user.ID)
+			}
+		})
+	}
+}
+
+// The cookie is spent on the attempt, right or wrong, because the ticket behind
+// it is. Leaving it set would have the next request replay a dead ticket.
+func TestMFATicketCookieIsClearedOnUse(t *testing.T) {
+	s, db, idp := newOIDCServer(t)
+	uid := linkedMFAUser(t, db, idp)
+	enableRealTOTP(t, s, db, uid)
+	ticket := mustCookie(t, signIn(t, s, idp).Result(), mfaTicketCookie).Value
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/mfa/complete", strings.NewReader(`{"code":"000000"}`))
+	req.AddCookie(&http.Cookie{Name: mfaTicketCookie, Value: ticket})
+	rec := httptest.NewRecorder()
+	s.mfaComplete(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatal("a wrong code completed MFA")
+	}
+	c := mustCookie(t, rec.Result(), mfaTicketCookie)
+	if c.MaxAge >= 0 || c.Value != "" {
+		t.Fatalf("ticket cookie survived a spent attempt: %+v", c)
+	}
+}
+
+// linkedMFAUser is an account that already holds the provider identity and has
+// an MFA factor enabled, so a sign-in reaches the second step.
+func linkedMFAUser(t *testing.T, db *sql.DB, idp *fakeIDP) int64 {
+	t.Helper()
+	hash, _ := auth.HashPassword("localpassword")
+	uid, err := store.CreateUser(db, idp.email, "MFA User", hash, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.LinkOIDCIdentity(db, idp.issuer, idp.subject, uid); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertMFAFactor(db, store.MFAFactor{
+		UserID: uid, SecretCiphertext: []byte("c"), SecretNonce: []byte("n"),
+		KeyVersion: 1, EnabledAt: time.Now().Unix(), LastAcceptedStep: -1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return uid
+}
+
+// enableRealTOTP replaces the placeholder factor with one whose secret the test
+// knows, so a genuine code can be presented.
+func enableRealTOTP(t *testing.T, s *Server, db *sql.DB, uid int64) string {
+	t.Helper()
+	s.SetMFAKey(make([]byte, 32))
+	secret, err := auth.GenerateTOTPSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := auth.EncryptTOTPSecret(s.mfaKey, secret, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertMFAFactor(db, store.MFAFactor{
+		UserID: uid, SecretCiphertext: enc.Ciphertext, SecretNonce: enc.Nonce,
+		KeyVersion: enc.KeyVersion, EnabledAt: time.Now().Unix(), LastAcceptedStep: -1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return secret
 }
 
 func TestOIDCConfigAdvertisesTheProviderWhenEnabled(t *testing.T) {

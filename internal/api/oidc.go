@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"net/url"
@@ -118,6 +119,14 @@ func (s *Server) oidcStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, errOIDCDisabled.Error())
 		return
 	}
+	// Throttled like the callback, on its own key so one leg cannot exhaust the
+	// other's budget. Nothing here writes a row, but discovery can reach the
+	// provider and every call mints two random tokens, and a sign-in surface
+	// that is hit ten times a minute from one address is not a person.
+	if !s.allowAttempt("oidc-start-ip:" + clientIP(r)) {
+		writeErr(w, http.StatusTooManyRequests, "too many attempts; wait a minute")
+		return
+	}
 	provider, err := s.oidcProvider(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, "oidc provider is unreachable")
@@ -188,7 +197,11 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	clearOIDCTx(w, r)
 	// The state check comes before anything that costs a round trip, so an
 	// unsolicited callback can't make this server talk to the provider.
-	if !ok || r.URL.Query().Get("state") == "" || r.URL.Query().Get("state") != tx.state {
+	// Constant-time, as everywhere else this repo compares a token: neither
+	// value is guessable per attempt, so this is consistency rather than a
+	// break being closed.
+	state := r.URL.Query().Get("state")
+	if !ok || state == "" || subtle.ConstantTimeCompare([]byte(state), []byte(tx.state)) != 1 {
 		s.oidcFail(w, r, "state")
 		return
 	}
@@ -229,7 +242,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		s.oidcFail(w, r, "token")
 		return
 	}
-	if idToken.Nonce != tx.nonce {
+	if subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(tx.nonce)) != 1 {
 		s.oidcFail(w, r, "token")
 		return
 	}
@@ -320,9 +333,10 @@ func (s *Server) oidcResolveUser(issuer, subject, email string, emailVerified bo
 // oidcFinishSignIn issues the session through the same path a password login
 // uses, so cookie flags, expiry and every security-mode gate behave identically
 // afterwards. An account with TOTP enabled still has to present it: the ticket
-// goes to the sign-in surface in the redirect, which then posts it to the
-// existing /api/auth/mfa/complete. The ticket alone is not a credential — it is
-// single-use, expires in five minutes, and is useless without the second factor.
+// goes back in an HttpOnly cookie and the redirect carries only a flag saying a
+// code is wanted, so the ticket never lands in the address bar or in history.
+// The sign-in surface then posts the code to the existing
+// /api/auth/mfa/complete, which reads the cookie when the body has no ticket.
 func (s *Server) oidcFinishSignIn(w http.ResponseWriter, r *http.Request, user store.User) {
 	factor, hasFactor, err := store.GetMFAFactor(s.db, user.ID)
 	if err != nil {
@@ -339,7 +353,8 @@ func (s *Server) oidcFinishSignIn(w http.ResponseWriter, r *http.Request, user s
 			s.oidcFail(w, r, "server")
 			return
 		}
-		http.Redirect(w, r, "/?oidc_mfa="+url.QueryEscape(ticket), http.StatusFound)
+		setMFATicketCookie(w, r, ticket)
+		http.Redirect(w, r, "/?oidc_mfa=1", http.StatusFound)
 		return
 	}
 	if err := s.setSessionCookie(w, r, user.ID); err != nil {

@@ -4,13 +4,19 @@
   let { onLoggedIn, canSignup = false, onSwitchToSignup, oidcEnabled = false, oidcName = '' } = $props();
 
   // An OIDC sign-in returns the browser here with its result in the query: a
-  // failure reason, or an MFA ticket when the account has TOTP enabled, which
-  // drops straight into the same second-step form a password login uses.
+  // failure reason, or oidc_mfa=1 when the account has TOTP enabled, which drops
+  // straight into the same second-step form a password login uses. The ticket
+  // itself is NOT in the query — it is in an HttpOnly cookie the server reads
+  // when the request body carries none, so it never reaches history or a script.
   const oidcResult = new URLSearchParams(window.location.search);
 
   let email = $state('');
   let password = $state('');
-  let mfaTicket = $state(oidcResult.get('oidc_mfa') || '');
+  let mfaTicket = $state('');
+  // Set when the second step is owed to a cookie-held ticket rather than to one
+  // this component is holding, which is what makes the MFA form render with
+  // mfaTicket still empty.
+  let mfaPending = $state(oidcResult.get('oidc_mfa') === '1');
   let mfaCode = $state('');
   let mfaRecoveryCode = $state('');
   let useRecoveryCode = $state(false);
@@ -83,6 +89,7 @@
 
   function backToPasswordLogin() {
     mfaTicket = '';
+    mfaPending = false;
     mfaCode = '';
     mfaRecoveryCode = '';
     useRecoveryCode = false;
@@ -103,7 +110,7 @@
   }
 </script>
 
-{#if mfaTicket}
+{#if mfaTicket || mfaPending}
   <form class="auth" onsubmit={submitMfa}>
     <h1>Exit 66 Jukebox</h1>
     <p class="prompt">Enter your authenticator code{email ? ` for ${email}` : ''}.</p>

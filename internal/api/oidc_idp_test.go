@@ -2,9 +2,11 @@ package api
 
 import (
 	"crypto"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"math/big"
@@ -37,6 +39,12 @@ type fakeIDP struct {
 
 	// signWrong signs with a key that is not in the published JWKS.
 	signWrong bool
+
+	// alg is the algorithm this provider advertises in discovery AND signs with.
+	// Empty means RS256. "none" and "HS256" exist so the two classic downgrade
+	// attacks can be run for real: a hostile or compromised provider advertising
+	// an algorithm we must never accept, however loudly it advertises it.
+	alg string
 
 	// gotVerifier is the PKCE code_verifier the token request carried.
 	gotVerifier string
@@ -73,7 +81,7 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 			"authorization_endpoint":                idp.issuer + "/authorize",
 			"token_endpoint":                        idp.issuer + "/token",
 			"jwks_uri":                              idp.issuer + "/jwks",
-			"id_token_signing_alg_values_supported": []string{"RS256"},
+			"id_token_signing_alg_values_supported": []string{idp.signingAlg()},
 		})
 	})
 	mux.HandleFunc("GET /jwks", func(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +114,15 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 	return idp
 }
 
+// signingAlg is what this provider claims to sign with, RS256 unless a test
+// says otherwise.
+func (f *fakeIDP) signingAlg() string {
+	if f.alg == "" {
+		return "RS256"
+	}
+	return f.alg
+}
+
 // idToken mints an RS256 JWS by hand rather than pulling in a JOSE library:
 // header and payload are base64url JSON, and the signature is PKCS#1 v1.5 over
 // their SHA-256. Only the test signs tokens; the code under test never does.
@@ -128,9 +145,26 @@ func (f *fakeIDP) idToken() string {
 		"nonce": f.nonce,
 	}
 	b64 := base64.RawURLEncoding.EncodeToString
-	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT", "kid": "test-key"})
+	header, _ := json.Marshal(map[string]string{"alg": f.signingAlg(), "typ": "JWT", "kid": "test-key"})
 	payload, _ := json.Marshal(claims)
 	signingInput := b64(header) + "." + b64(payload)
+	switch f.signingAlg() {
+	case "none":
+		// An unsigned token, the shape alg=none asks a verifier to accept.
+		return signingInput + "."
+	case "HS256":
+		// Algorithm confusion: the published RSA public key, which anyone can
+		// fetch from the JWKS, used as an HMAC secret. A verifier that picks its
+		// algorithm from the header rather than from its own allowlist accepts
+		// this from anybody.
+		pub, err := x509.MarshalPKIXPublicKey(&idpKeys()[0].PublicKey)
+		if err != nil {
+			panic(err)
+		}
+		mac := hmac.New(sha256.New, pub)
+		mac.Write([]byte(signingInput))
+		return signingInput + "." + b64(mac.Sum(nil))
+	}
 	key := idpKeys()[0]
 	if f.signWrong {
 		key = idpKeys()[1]

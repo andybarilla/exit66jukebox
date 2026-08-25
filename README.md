@@ -153,7 +153,8 @@ what you expected:
 - An account created this way has no password. Its owner can obtain one through
   forgot-password, which mails the address the provider vouched for.
 - TOTP still applies. An account with MFA enabled is asked for its code after the
-  provider returns, exactly as after a password login.
+  provider returns, exactly as after a password login. The pending ticket travels
+  in a short-lived `HttpOnly` cookie, never in the URL.
 
 #### `EXIT66_MFA_KEY` fails two different ways
 
