@@ -76,3 +76,38 @@ func TestSignalRelayHandlerRejectsOfflineRecipient(t *testing.T) {
 		t.Fatalf("status = %d want 503", rec.Code)
 	}
 }
+
+// TestSignalRelayRejectsOversizedBody bounds the decode. The route is reachable
+// by anything holding a federation session, and an unbounded body would let one
+// request hold a goroutine for as long as it cared to keep sending.
+func TestSignalRelayRejectsOversizedBody(t *testing.T) {
+	s := NewSignaler()
+	ch := s.Register("bob")
+	h := WithSignalRelay(s, http.NewServeMux())
+
+	body := `{"type":"offer","sdp":"` + strings.Repeat("A", maxSignalBody+1) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/fed/signal/bob", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an oversized signal", rec.Code)
+	}
+	select {
+	case msg := <-ch:
+		t.Fatalf("an oversized body was relayed anyway: %d bytes of SDP", len(msg.SDP))
+	default:
+	}
+
+	// Positive control: a normal signal on the same route still gets through, so
+	// the 400 above is the size limit rather than a broken handler.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/bob",
+		strings.NewReader(`{"type":"offer","sdp":"v=0"}`)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("normal signal status = %d, want 202", rec.Code)
+	}
+	if msg := <-ch; msg.SDP != "v=0" {
+		t.Fatalf("relayed SDP = %q", msg.SDP)
+	}
+}

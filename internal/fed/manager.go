@@ -68,6 +68,10 @@ func (m *Manager) Start() {
 		}
 		m.WebRTC.Listen(ctx, func(conn *dataChannelConn) {
 			go func() {
+				// Closing when the peer is done is what releases the answering
+				// PeerConnection and its signaling slot; a detached data channel
+				// reports the far end going away as an EOF here and nowhere else.
+				defer conn.Close()
 				if err := ServeAudioOverConn(conn, appHandler, ""); err != nil {
 					log.Printf("fed webrtc serve %s: %v", conn.peerID, err)
 				}

@@ -91,9 +91,13 @@ export async function deleteStream(streamId) {
   return r.ok ? { ok: true } : { ok: false, error: body.error || 'could not delete the stream' };
 }
 
+// getQueue reads a stream. The body is caught like the write paths' are: this
+// route 404s an id with no row (#142), and a proxy answering that with an HTML
+// error page would otherwise reject here — inside the Promise.all that start()
+// awaits before it opens the SSE connection.
 export async function getQueue(streamId) {
   const r = await fetch(`/api/streams/${streamId}`);
-  return r.json(); // { id, queue: [...] }
+  return r.json().catch(() => ({})); // { id, queue: [...] }
 }
 
 // streamAudioURL is the continuous MP3 feed for a shared stream.

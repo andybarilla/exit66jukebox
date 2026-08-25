@@ -220,7 +220,9 @@ func ListPasswordlessProfiles(db *sql.DB) ([]User, error) {
 // foreign key with no API path left to reach them.
 //
 // history rows for that stream are deliberately left, matching DeleteStream:
-// they carry no foreign key, and the fairness window and Discovery read them.
+// they carry no foreign key, and the fairness window still reads them. Discovery
+// no longer does — it counts a play only on a stream row that still exists, so a
+// deleted user's plays stop shaping anyone's rediscover ranking (#151).
 func DeleteUser(db *sql.DB, id int64) error {
 	tx, err := db.Begin()
 	if err != nil {
