@@ -9,11 +9,28 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
-// getStream reports a stream's queue and live state. It is a read: an unknown
-// id reports an empty stream rather than creating a row, so a GET can no longer
-// be used to mint streams.
+// getStream reports a stream's queue and live state. It is a read: it creates
+// no row, so a GET cannot be used to mint streams.
+//
+// An id with no row is refused rather than answered with an empty stream. It
+// used to be answered, reporting a kind nothing had stored — "private", which
+// since #128 names one particular user's queue. 404 is what request and
+// streamGate already answer for an unknown id, so the read and the mutating
+// routes now agree. It also closes an oracle: resolvePersonalStream 404s a
+// private row precisely so the answer does not reveal that it exists, and a
+// 200 here gave that away by contrast, since only an id with no row got one
+// (#142).
 func (s *Server) getStream(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	st, ok, err := store.GetStream(s.db, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if !ok {
+		writeErr(w, http.StatusNotFound, "no such stream")
+		return
+	}
 	q, err := s.jb.Queue(id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -22,14 +39,10 @@ func (s *Server) getStream(w http.ResponseWriter, r *http.Request) {
 	if q == nil {
 		q = []jukebox.QueuedTrack{}
 	}
-	name, kind := "", store.KindPrivate
-	if st, ok, err := store.GetStream(s.db, id); err == nil && ok {
-		name, kind = st.Name, st.Kind
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":          id,
-		"name":        name,
-		"kind":        kind,
+		"name":        st.Name,
+		"kind":        st.Kind,
 		"queue":       q,
 		"listeners":   s.listenerCount(id),
 		"now_playing": s.nowPlayingPayload(id),

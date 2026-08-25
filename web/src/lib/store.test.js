@@ -185,3 +185,22 @@ describe('personal stream availability (#128)', () => {
     expect(s.stream).toBe(before);
   });
 });
+
+// #142: GET /api/streams/{id} now 404s an id with no row, where it used to
+// answer 200 with an empty queue. The store reads that endpoint at first paint,
+// so the 404 body must land as an empty stream rather than an error state.
+describe('a 404 from the stream read (#142)', () => {
+  it('leaves an empty queue and no toast', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: 'no such stream' }),
+    }));
+    const store = createStore();
+    await store.refreshQueue('house');
+    expect(store.queue).toEqual([]);
+    expect(store.nowPlaying).toBe(null);
+    expect(store.listeners).toBe(0);
+    expect(store.toasts).toEqual([]);
+  });
+});
