@@ -29,10 +29,10 @@ type SignalMsg struct {
 }
 
 // signalTimeout bounds both ways a single signal can stall: how long Send waits
-// for a registered peer to drain its mailbox, and how long
-// WebRTCTransport.postSignal waits on the HTTP request to a remote peer. A peer
-// that is slow to consume, or a session that has gone quiet, should not stall
-// the sender's negotiation beyond this.
+// for a registered peer to drain its mailbox, and how long postSignal waits on
+// the HTTP request to the next hop. A peer that is slow to consume, or a session
+// that has gone quiet, should not stall the sender's negotiation beyond this —
+// nor, on a forwarding hub, hold a goroutine per relayed message.
 const signalTimeout = 5 * time.Second
 
 // signalMailboxSize bounds per-peer buffered messages so a stalled peer cannot

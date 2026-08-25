@@ -38,8 +38,10 @@ func TestSignalerRejectsUnregisteredRecipient(t *testing.T) {
 	}
 }
 
-// TestSignalRelayHandlerAcceptsAndRelays verifies the HTTP handler mounted on
-// the hub session: a POST with a JSON body is relayed to the recipient mailbox.
+// TestSignalRelayHandlerAcceptsAndRelays verifies local delivery: a POST with a
+// JSON body lands in the recipient's mailbox in this process. The nil forwarder
+// is the peer-session shape; the hub's onward half is in
+// webrtc_hub_relay_test.go.
 func TestSignalRelayHandlerAcceptsAndRelays(t *testing.T) {
 	s := NewSignaler()
 	mailbox := s.Register("bob")
@@ -64,8 +66,9 @@ func TestSignalRelayHandlerAcceptsAndRelays(t *testing.T) {
 	}
 }
 
-// TestSignalRelayHandlerRejectsOfflineRecipient verifies the handler returns
-// 503 when the recipient peer is not registered.
+// TestSignalRelayHandlerRejectsOfflineRecipient verifies a relay with no
+// forwarder returns 503 when the recipient peer is not registered here. That is
+// every composition but the hub's.
 func TestSignalRelayHandlerRejectsOfflineRecipient(t *testing.T) {
 	s := NewSignaler()
 	h := WithSignalRelay(s, nil, http.NewServeMux())

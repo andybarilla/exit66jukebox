@@ -70,8 +70,9 @@ type WebRTCTransport struct {
 	selfID   string
 	config   webrtc.Configuration
 	signaler *Signaler
-	// reg resolves a peer id to its live federation session, which is how an
-	// outbound signal reaches a peer in another process (see postSignal).
+	// reg resolves the next hop for an outbound signal: the recipient's own
+	// federation session, or the hub's when there is no session to the
+	// recipient (see postSignal).
 	reg *Registry
 	log *log.Logger
 

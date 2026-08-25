@@ -416,24 +416,34 @@ func TestHubRefusesToForwardWithoutSessionIdentity(t *testing.T) {
 }
 
 // TestPeerSessionDoesNotForwardSignals pins the premise the absence of a
-// forwarding loop rests on: only the hub composition carries a forwarder, so a
-// message the hub relays onward cannot be relayed on again by whoever receives
-// it. The peer here holds a live session to someone else and still refuses.
+// forwarding loop rests on: only the hub composition forwards, so a message the
+// hub relays onward cannot be relayed on again by whoever receives it.
+//
+// "other" genuinely hosts a mailbox and is genuinely reachable over HTTP, so a
+// composition that did forward would succeed in reaching it — which is what
+// makes the zero count below mean something rather than merely restating that
+// these handlers were built without a registry to forward through.
 func TestPeerSessionDoesNotForwardSignals(t *testing.T) {
 	other := newSignalProcess(t, "other")
-	reg := NewRegistry()
-	reg.put(&Peer{ID: "other", Client: other.srv.Client(), BaseURL: other.srv.URL})
+	other.transport.ensureReader()
+	if !other.signaler.isRegistered("other") {
+		t.Fatal("other hosts no mailbox; a forwarded signal would be refused at the far end anyway")
+	}
 
-	h := WithSessionPeer("alice", PeerSessionHandler(Capabilities{}, NewSignaler(), nil, nil))
-	body, _ := json.Marshal(SignalMsg{To: "other", Type: "offer", SID: "s", SDP: "x"})
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/other", bytes.NewReader(body)))
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; a peer session must not forward signals onward", rec.Code)
+	body, _ := json.Marshal(SignalMsg{From: "alice", To: "other", Type: "offer", SID: "s", SDP: "x"})
+	for name, h := range map[string]http.Handler{
+		"peer":   PeerSessionHandler(Capabilities{}, NewSignaler(), nil, nil),
+		"member": MemberSessionHandler(Capabilities{}, nil),
+	} {
+		rec := httptest.NewRecorder()
+		WithSessionPeer("alice", h).ServeHTTP(rec,
+			httptest.NewRequest(http.MethodPost, "/fed/signal/other", bytes.NewReader(body)))
+		if rec.Code == http.StatusAccepted {
+			t.Errorf("%s session accepted a signal for a peer it does not host", name)
+		}
 	}
 	if n := other.signalsIn.Load(); n != 0 {
-		t.Fatalf("a peer session forwarded %d signals onward", n)
+		t.Fatalf("a non-hub session forwarded %d signals onward; hub relaying is no longer bounded to one hop", n)
 	}
 }
 
