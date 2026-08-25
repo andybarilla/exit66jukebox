@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -122,5 +123,76 @@ func TestDiscoverRecommendedServesRunnerCache(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("got %d tracks, want 0", len(got))
+	}
+}
+
+// rediscoverTitlesFor calls the rediscover endpoint as the given caller (nil
+// cookie = unauthenticated) and returns the order it served.
+func rediscoverTitlesFor(t *testing.T, srv *Server, cookie *http.Cookie) []string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/discover/rediscover?genre=Rock", nil)
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var got []model.EnrichedTrack
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rec.Body.String())
+	}
+	out := make([]string, len(got))
+	for i, tr := range got {
+		out[i] = tr.Title
+	}
+	return out
+}
+
+func TestRediscoverEndpointIsScopedToTheCaller(t *testing.T) {
+	srv, db := newTestServer(t)
+	ids := map[string]int64{}
+	for _, title := range []string{"Alpha", "Bravo", "Charlie"} {
+		id, err := store.UpsertTrack(srv.db,
+			model.Track{Path: "/m/" + title + ".mp3", Title: title, Genre: "Rock"}, "B", "", "X")
+		if err != nil {
+			t.Fatalf("upsert %s: %v", title, err)
+		}
+		ids[title] = id
+	}
+	aliceID, alice := userSessionWithID(t, srv, "alice@example.com")
+	_, bob := userSessionWithID(t, srv, "bob@example.com")
+	if err := store.EnsurePrivateStream(db, store.PersonalStreamID(aliceID)); err != nil {
+		t.Fatalf("alice stream: %v", err)
+	}
+	// Alice plays Bravo on her own personal stream, and nowhere else.
+	if _, err := db.Exec(`INSERT INTO history(stream_id, track_id, played_at) VALUES(?,?,9999)`,
+		store.PersonalStreamID(aliceID), ids["Bravo"]); err != nil {
+		t.Fatalf("history: %v", err)
+	}
+
+	natural := []string{"Alpha", "Bravo", "Charlie"}
+	demoted := []string{"Alpha", "Charlie", "Bravo"}
+	if got := rediscoverTitlesFor(t, srv, alice); !slices.Equal(got, demoted) {
+		t.Errorf("alice = %v, want %v (her own play demotes Bravo)", got, demoted)
+	}
+	if got := rediscoverTitlesFor(t, srv, bob); !slices.Equal(got, natural) {
+		t.Errorf("bob = %v, want %v (alice's private play must not shape his ranking)", got, natural)
+	}
+	// An unauthenticated caller has no personal stream: shared streams only,
+	// served without error.
+	if got := rediscoverTitlesFor(t, srv, nil); !slices.Equal(got, natural) {
+		t.Errorf("anonymous = %v, want %v", got, natural)
+	}
+	// Neither does a caller in either open mode, even a signed-in one: those
+	// modes have no personal streams at all.
+	for _, mode := range []store.SecurityMode{store.SecurityModeOpen, store.SecurityModeOpenAdminLocked} {
+		if err := store.SetSecurityMode(db, mode); err != nil {
+			t.Fatalf("SetSecurityMode(%s): %v", mode, err)
+		}
+		if got := rediscoverTitlesFor(t, srv, alice); !slices.Equal(got, natural) {
+			t.Errorf("%s = %v, want %v", mode, got, natural)
+		}
 	}
 }

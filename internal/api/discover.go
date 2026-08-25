@@ -9,11 +9,13 @@ import (
 )
 
 func (s *Server) discover(w http.ResponseWriter, r *http.Request, orderBy string) {
+	mine, _ := s.callerPersonalStream(r)
 	list, err := store.DiscoverTracks(s.db, store.DiscoverOpts{
-		Genre:   r.URL.Query().Get("genre"),
-		OrderBy: orderBy,
-		Limit:   queryInt(r, "limit", 50),
-		Offset:  queryInt(r, "offset", 0),
+		Genre:          r.URL.Query().Get("genre"),
+		OrderBy:        orderBy,
+		PersonalStream: mine,
+		Limit:          queryInt(r, "limit", 50),
+		Offset:         queryInt(r, "offset", 0),
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
