@@ -67,8 +67,24 @@ func (s *Server) discoverGenres(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list)
 }
 
+// getStationHandler reports the stream's station. An id with no row in stream
+// is refused rather than answered, matching what POST and DELETE on this same
+// path already answer through streamGate and what the stream read answers since
+// #142. A stream that exists with no station still reads 200 {}: that is an
+// answer about a stream, not about one that does not exist.
+//
+// The row is read here even though resolvePersonalStream has already read it —
+// that middleware only refuses a private row, and streamGate reads it a second
+// time for the same reason.
 func (s *Server) getStationHandler(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	if _, ok, err := store.GetStream(s.db, id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	} else if !ok {
+		writeErr(w, http.StatusNotFound, "no such stream")
+		return
+	}
 	if st, ok := s.jb.GetStation(id); ok {
 		writeJSON(w, http.StatusOK, st)
 		return
