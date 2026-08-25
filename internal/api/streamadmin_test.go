@@ -258,25 +258,11 @@ func TestPrivilegedRoutesDoNotCreateStreams(t *testing.T) {
 	}
 }
 
-// A GET must not mint a stream row either. The refusal it answers with is
-// TestGetStreamUnknownIDIs404's subject; this one is about the row, and
-// checks the status only so a 200 here cannot pass as a refusal.
-func TestGetStreamDoesNotCreateARow(t *testing.T) {
-	srv, _ := newTestServer(t)
-	rec := do(srv, http.MethodGet, "/api/streams/never-seen", "", nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (body %q)", rec.Code, strings.TrimSpace(rec.Body.String()))
-	}
-	if _, ok, _ := store.GetStream(srv.db, "never-seen"); ok {
-		t.Fatal("GET /api/streams/{id} created a stream row")
-	}
-}
-
-// #142: a read of an id with no row 404s rather than reporting a fabricated
-// kind. The kind it used to invent was "private", which since #128 names
-// somebody's personal queue — an answer about a stream that does not exist.
-// 404 is also what request and streamGate answer for an unknown id.
-func TestGetStreamUnknownIDIs404(t *testing.T) {
+// #142: a read of an id with no row 404s, mints no row, and reports no kind.
+// The kind it used to invent was "private", which since #128 names somebody's
+// personal queue — an answer about a stream that does not exist. 404 is also
+// what request and streamGate answer for an unknown id.
+func TestGetStreamUnknownIDIs404AndCreatesNoRow(t *testing.T) {
 	srv, _ := newTestServer(t)
 	rec := do(srv, http.MethodGet, "/api/streams/never-seen", "", nil)
 	if rec.Code != http.StatusNotFound {
@@ -284,6 +270,9 @@ func TestGetStreamUnknownIDIs404(t *testing.T) {
 	}
 	if body := rec.Body.String(); strings.Contains(body, `"kind"`) {
 		t.Fatalf("unknown id reported a kind: %s", body)
+	}
+	if _, ok, _ := store.GetStream(srv.db, "never-seen"); ok {
+		t.Fatal("GET /api/streams/{id} created a stream row")
 	}
 }
 

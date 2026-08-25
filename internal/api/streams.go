@@ -9,17 +9,11 @@ import (
 	"github.com/andybarilla/exit66jukebox/internal/store"
 )
 
-// getStream reports a stream's queue and live state. It is a read: it creates
-// no row, so a GET cannot be used to mint streams.
-//
-// An id with no row is refused rather than answered with an empty stream. It
-// used to be answered, reporting a kind nothing had stored — "private", which
-// since #128 names one particular user's queue. 404 is what request and
-// streamGate already answer for an unknown id, so the read and the mutating
-// routes now agree. It also closes an oracle: resolvePersonalStream 404s a
-// private row precisely so the answer does not reveal that it exists, and a
-// 200 here gave that away by contrast, since only an id with no row got one
-// (#142).
+// getStream reports a stream's queue and live state. It creates no row, and an
+// id that has none is refused rather than answered with a fabricated kind: 404
+// is what request and streamGate answer, and what resolvePersonalStream answers
+// for a private row so as not to reveal that it exists — a 200 here revealed it
+// by contrast (#142).
 func (s *Server) getStream(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	st, ok, err := store.GetStream(s.db, id)
