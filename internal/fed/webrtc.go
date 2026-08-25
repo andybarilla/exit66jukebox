@@ -63,6 +63,16 @@ import (
 
 const webrtcSetupTimeout = 15 * time.Second
 
+// webrtcCloseLinger is how long a closed outbound conn's PeerConnection is held
+// open before it is torn down unconditionally. The far end of a detached channel
+// learns we are done only from the SCTP stream reset the close sends, and that
+// reset travels over this transport, so tearing it down at once denies the far
+// end its EOF (measured: 6 answerer releases missed in 10 runs). A far end that
+// reacts releases us on the state change instead, ~1ms later, so this bound is
+// reached only by one that never reacts — nothing waits on it, and erring long
+// costs a bounded delay while erring short costs the far end its close signal.
+const webrtcCloseLinger = 15 * time.Second
+
 // WebRTCTransport establishes and caches direct WebRTC data channels to peers.
 // The same instance serves both as offerer (Dial) and answerer (the reader
 // dispatches inbound offers via onChannel set by Listen).
@@ -96,6 +106,11 @@ type WebRTCTransport struct {
 	// exists as a field so tests can drive the watchdog without waiting it out.
 	setupTimeout time.Duration
 
+	// closeLinger bounds how long a closed outbound conn's PeerConnection lives
+	// on (see webrtcCloseLinger). It is a field for the same reason, and separate
+	// from setupTimeout because shortening that one shortens Dial itself.
+	closeLinger time.Duration
+
 	readerOnce sync.Once
 	readerDone chan struct{}
 	mailbox    chan SignalMsg // set by startedReader; the channel the mailbox maps to
@@ -121,6 +136,7 @@ func NewWebRTCTransport(selfID string, iceServers []webrtc.ICEServer, signaler *
 		reg:          reg,
 		log:          logger,
 		setupTimeout: webrtcSetupTimeout,
+		closeLinger:  webrtcCloseLinger,
 		api:          webrtc.NewAPI(webrtc.WithSettingEngine(se)),
 		cache:        make(map[string]*dataChannelConn),
 		dial:         make(map[string]*dialSlot),
@@ -361,12 +377,32 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 		return nil, fmt.Errorf("webrtc dial: new pc: %w", err)
 	}
 	// success flips to true only on the open-channel path; otherwise the deferred
-	// teardown closes the half-open PeerConnection and evicts any cached entry.
+	// teardown closes the half-open PeerConnection and unmaps this dial's own
+	// conn if the channel opened but the dial gave up before returning it.
+	//
+	// cached is that conn, and the eviction is identity-scoped for the same
+	// reason evictConn is. Dials to one peer overlap — serveWebRTC dials per HTTP
+	// request and nothing serializes them per peer — so the cache entry under
+	// peerID may belong to a concurrent dial that succeeded. Deleting by peer id
+	// would unmap that live conn, and since a conn is now discarded by get()
+	// pruning a MAPPED entry, an unmapped one is never pruned and its
+	// PeerConnection strands. This defer only runs when the dial failed, so an
+	// unscoped delete could never remove anything but another dial's entry.
 	success := false
+	var cached atomic.Pointer[dataChannelConn]
+	var torn atomic.Bool
+	release := func() {
+		if torn.Swap(true) {
+			return
+		}
+		if c := cached.Load(); c != nil {
+			t.evictConn(c)
+		}
+		_ = pc.Close()
+	}
 	defer func() {
 		if !success {
-			_ = pc.Close()
-			t.evict(peerID)
+			release()
 		}
 	}()
 
@@ -386,8 +422,29 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 			}
 			return
 		}
-		conn := newDataChannelConn(peerID, dc, rwc)
+		conn := newDataChannelConn(peerID, pc, dc, rwc)
+		// Closing the conn ARMS the release; it does not run it. The far end of
+		// a detached channel learns we are done only from the SCTP stream reset
+		// dataChannelConn.Close sends, and closing the PeerConnection destroys
+		// the transport that reset travels over. Measured under load: with the
+		// release run inline, the answerer's reader missed the close 6 times in
+		// 10 and waited out its full setup deadline — #163 builds the answerer's
+		// release on that EOF, so this would have traded our leak for theirs.
+		//
+		// What actually releases us is the state change below, ~1ms after the far
+		// end reacts to the EOF by closing. The timer is only for a far end that
+		// never reacts, which is why its bound is a linger rather than something
+		// tuned: nothing waits on it, and a longer bound gives the far end more
+		// room, never less (see webrtcCloseLinger).
+		//
+		// The cache entry is not on that clock. It goes at once, so no request is
+		// handed a conn that is closing; only the transport lingers.
+		conn.onClose = func() {
+			t.evictConn(conn) // no request may be handed a conn that is closing
+			time.AfterFunc(t.closeLinger, release)
+		}
 		t.put(conn)
+		cached.Store(conn)
 		select {
 		case openCh <- conn:
 		default:
@@ -410,6 +467,16 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 			case iceFailed <- struct{}{}:
 			default:
 			}
+			release()
+		}
+	})
+	// The far end going away releases us here, which is the offerer's half of
+	// what handleOffer already does. torn absorbs the reentrant call this makes
+	// when the state change is our own pc.Close, which pion delivers
+	// synchronously from inside it — the reason for an atomic over a sync.Once.
+	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
+		if s == webrtc.PeerConnectionStateFailed || s == webrtc.PeerConnectionStateClosed {
+			release()
 		}
 	})
 
@@ -515,7 +582,7 @@ func (t *WebRTCTransport) handleOffer(offer SignalMsg, onChannel func(*dataChann
 			// PeerConnection up. Whoever consumes the conn closes it when done
 			// (see Manager.Start), and that is what releases this.
 			watchdog.Stop()
-			conn := newDataChannelConn(offer.From, dc, rwc)
+			conn := newDataChannelConn(offer.From, pc, dc, rwc)
 			conn.onClose = teardown
 			onChannel(conn)
 		})
@@ -571,14 +638,24 @@ func (t *WebRTCTransport) Close() {
 }
 
 // get returns a cached, open channel for peerID, or nil.
+//
+// A cached channel that is no longer open is closed, not merely dropped:
+// nothing else holds a reference once it leaves the cache, so dropping it alone
+// would strand its PeerConnection. The close runs after mu is released because
+// it re-enters evictConn.
 func (t *WebRTCTransport) get(peerID string) *dataChannelConn {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	if c, ok := t.cache[peerID]; ok {
-		if c.open() {
-			return c
-		}
+	c, cached := t.cache[peerID]
+	if cached && c.open() {
+		t.mu.Unlock()
+		return c
+	}
+	if cached {
 		delete(t.cache, peerID)
+	}
+	t.mu.Unlock()
+	if cached {
+		_ = c.Close()
 	}
 	return nil
 }
@@ -589,9 +666,17 @@ func (t *WebRTCTransport) put(c *dataChannelConn) {
 	t.mu.Unlock()
 }
 
-func (t *WebRTCTransport) evict(peerID string) {
+// evictConn drops c from the cache, but only while c is still the cached conn
+// for its peer. Another dial may already have replaced it, and an unguarded
+// delete would then drop that live entry — the next request would renegotiate
+// and, because a conn is discarded by get() pruning a MAPPED entry, the unmapped
+// one would never be pruned and its PeerConnection would strand. Every eviction
+// in this file goes through here; there is no delete by peer id.
+func (t *WebRTCTransport) evictConn(c *dataChannelConn) {
 	t.mu.Lock()
-	delete(t.cache, peerID)
+	if cur, ok := t.cache[c.peerID]; ok && cur == c {
+		delete(t.cache, c.peerID)
+	}
 	t.mu.Unlock()
 }
 
@@ -601,24 +686,41 @@ type dataChannelConn struct {
 	peerID string
 	dc     *webrtc.DataChannel
 	rwc    io.ReadWriteCloser
-	// onClose, when set, releases whatever owns this channel's negotiation. The
-	// answerer sets it because a detached channel gives it no other reliable
-	// signal that the far end is done (see handleOffer).
+	// pc is the PeerConnection this channel rides on. onClose is what releases
+	// it; this is here so the release can be observed rather than inferred.
+	pc *webrtc.PeerConnection
+	// onClose releases whatever owns this channel's negotiation — on both sides,
+	// the PeerConnection the channel rides on. Both set it because a detached
+	// channel gives neither any other reliable signal that this end is done: the
+	// answerer's is its whole negotiation teardown (see handleOffer), the
+	// offerer's closes the PeerConnection Dial handed over (see Dial).
 	onClose func()
 }
 
-func newDataChannelConn(peerID string, dc *webrtc.DataChannel, rwc io.ReadWriteCloser) *dataChannelConn {
-	return &dataChannelConn{peerID: peerID, dc: dc, rwc: rwc}
+func newDataChannelConn(peerID string, pc *webrtc.PeerConnection, dc *webrtc.DataChannel, rwc io.ReadWriteCloser) *dataChannelConn {
+	return &dataChannelConn{peerID: peerID, pc: pc, dc: dc, rwc: rwc}
 }
 
 func (c *dataChannelConn) Read(p []byte) (int, error)  { return c.rwc.Read(p) }
 func (c *dataChannelConn) Write(p []byte) (int, error) { return c.rwc.Write(p) }
+
+// Close shuts the channel down and then releases the negotiation behind it.
+//
+// The order matters. Closing the channel sends the SCTP stream reset the far end
+// reads as an EOF — the only close signal it gets, since a detached channel does
+// not surface one through the API. onClose tears the PeerConnection down, and
+// running it first pulls the transport out from under that reset: the far end
+// then learns nothing until ICE fails, tens of seconds later. That was invisible
+// while only the answerer set onClose, because the answerer is not what the
+// offerer's reader is waiting on; giving the offerer an onClose made it
+// reachable from the side that is.
 func (c *dataChannelConn) Close() error {
+	_ = c.dc.Close()
+	err := c.rwc.Close()
 	if c.onClose != nil {
 		c.onClose()
 	}
-	_ = c.dc.Close()
-	return c.rwc.Close()
+	return err
 }
 
 func (c *dataChannelConn) open() bool {
