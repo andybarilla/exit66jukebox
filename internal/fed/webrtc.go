@@ -405,6 +405,26 @@ func (t *WebRTCTransport) Dial(ctx context.Context, peerID string) (*dataChannel
 			return
 		}
 		conn := newDataChannelConn(peerID, dc, rwc)
+		// Hand the dial's teardown to the conn. The deferred teardown above
+		// spares the PeerConnection on the success path, because the conn has to
+		// outlive Dial; this is what closes it — and its ICE agent — when the
+		// conn is done. Without it a successful dial left both running for the
+		// process's lifetime (issue #168).
+		//
+		// torn makes that idempotent: Close is reachable from a caller and from
+		// get() pruning a stale entry, and both may run. An atomic rather than a
+		// sync.Once because pion can invoke a close callback synchronously from
+		// inside pc.Close(), where a Once deadlocks — that is what reached
+		// handleOffer's teardown, and nothing about this one guarantees it
+		// cannot reach here.
+		var torn atomic.Bool
+		conn.onClose = func() {
+			if torn.Swap(true) {
+				return
+			}
+			t.evictConn(conn)
+			_ = pc.Close()
+		}
 		t.put(conn)
 		select {
 		case openCh <- conn:
@@ -589,14 +609,24 @@ func (t *WebRTCTransport) Close() {
 }
 
 // get returns a cached, open channel for peerID, or nil.
+//
+// A cached channel that is no longer open is closed, not merely dropped:
+// nothing else holds a reference once it leaves the cache, so dropping it alone
+// would strand its PeerConnection. The close runs after mu is released because
+// it re-enters evictConn.
 func (t *WebRTCTransport) get(peerID string) *dataChannelConn {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	if c, ok := t.cache[peerID]; ok {
-		if c.open() {
-			return c
-		}
+	c, cached := t.cache[peerID]
+	if cached && c.open() {
+		t.mu.Unlock()
+		return c
+	}
+	if cached {
 		delete(t.cache, peerID)
+	}
+	t.mu.Unlock()
+	if cached {
+		_ = c.Close()
 	}
 	return nil
 }
@@ -613,15 +643,29 @@ func (t *WebRTCTransport) evict(peerID string) {
 	t.mu.Unlock()
 }
 
+// evictConn drops c from the cache, but only while c is still the cached conn
+// for its peer. A dial that ran after c was cached may already have replaced it,
+// and an unguarded delete would then drop that live entry — the next request
+// would renegotiate and the replacement would never be closed.
+func (t *WebRTCTransport) evictConn(c *dataChannelConn) {
+	t.mu.Lock()
+	if cur, ok := t.cache[c.peerID]; ok && cur == c {
+		delete(t.cache, c.peerID)
+	}
+	t.mu.Unlock()
+}
+
 // dataChannelConn wraps a detached WebRTC data channel as an io.ReadWriteCloser
 // and tracks the owning peer for caching/eviction.
 type dataChannelConn struct {
 	peerID string
 	dc     *webrtc.DataChannel
 	rwc    io.ReadWriteCloser
-	// onClose, when set, releases whatever owns this channel's negotiation. The
-	// answerer sets it because a detached channel gives it no other reliable
-	// signal that the far end is done (see handleOffer).
+	// onClose releases whatever owns this channel's negotiation — on both sides,
+	// the PeerConnection the channel rides on. Both set it because a detached
+	// channel gives neither any other reliable signal that this end is done: the
+	// answerer's is its whole negotiation teardown (see handleOffer), the
+	// offerer's closes the PeerConnection Dial handed over (see Dial).
 	onClose func()
 }
 
