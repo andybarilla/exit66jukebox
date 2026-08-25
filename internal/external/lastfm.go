@@ -237,7 +237,7 @@ func (l *Lastfm) apiError(code int, message string) error {
 // disable flips the client unauthorized and fires onDisabled exactly once.
 func (l *Lastfm) disable() {
 	if l.authorized.Swap(false) {
-		log.Print("lastfm: invalid session key (error 9); disabling until re-auth (run `exit66 lastfm-auth`)")
+		log.Print("lastfm: invalid session key (error 9); disabling until re-auth (run `exit66jukebox lastfm-auth`)")
 		if l.onDisabled != nil {
 			l.onDisabled()
 		}
