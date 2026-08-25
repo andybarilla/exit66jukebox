@@ -163,8 +163,8 @@ func TestUpsertStampsAddedAt(t *testing.T) {
 	}
 }
 
-// play records a play of track on stream at played_at.
-func play(t *testing.T, db *sql.DB, streamID string, trackID int64, at int64) {
+// seedPlay records a play of track on stream at played_at.
+func seedPlay(t *testing.T, db *sql.DB, streamID string, trackID int64, at int64) {
 	t.Helper()
 	if _, err := db.Exec(
 		`INSERT INTO history(stream_id, track_id, played_at) VALUES(?,?,?)`,
@@ -173,8 +173,8 @@ func play(t *testing.T, db *sql.DB, streamID string, trackID int64, at int64) {
 	}
 }
 
-// titles is the discovered order, which is what the ranking tests assert on.
-func titles(got []model.Track) []string {
+// trackTitles is the discovered order, which is what the ranking tests assert on.
+func trackTitles(got []model.Track) []string {
 	out := make([]string, len(got))
 	for i, tr := range got {
 		out[i] = tr.Title
@@ -209,7 +209,7 @@ func rediscoverTitles(t *testing.T, db *sql.DB, personal string) []string {
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}
-	return titles(got)
+	return trackTitles(got)
 }
 
 func TestRediscoverIgnoresAnotherUsersPersonalStream(t *testing.T) {
@@ -218,7 +218,7 @@ func TestRediscoverIgnoresAnotherUsersPersonalStream(t *testing.T) {
 	alice, bob := seedRankingFixture(t, db)
 	var bravo int64
 	db.QueryRow(`SELECT id FROM track WHERE title='Bravo'`).Scan(&bravo)
-	play(t, db, bob, bravo, 9999)
+	seedPlay(t, db, bob, bravo, 9999)
 
 	// Alice never heard it, so her ranking is the natural order.
 	if got := rediscoverTitles(t, db, alice); !slices.Equal(got, []string{"Alpha", "Bravo", "Charlie"}) {
@@ -236,7 +236,7 @@ func TestRediscoverCountsSharedStreamPlaysForEveryone(t *testing.T) {
 	alice, bob := seedRankingFixture(t, db)
 	var bravo int64
 	db.QueryRow(`SELECT id FROM track WHERE title='Bravo'`).Scan(&bravo)
-	play(t, db, "house", bravo, 9999)
+	seedPlay(t, db, "house", bravo, 9999)
 
 	for name, personal := range map[string]string{"alice": alice, "bob": bob, "no personal stream": ""} {
 		if got := rediscoverTitles(t, db, personal); !slices.Equal(got, []string{"Alpha", "Charlie", "Bravo"}) {
@@ -252,10 +252,37 @@ func TestRediscoverWithNoPersonalStreamSeesSharedStreamsOnly(t *testing.T) {
 	var bravo, charlie int64
 	db.QueryRow(`SELECT id FROM track WHERE title='Bravo'`).Scan(&bravo)
 	db.QueryRow(`SELECT id FROM track WHERE title='Charlie'`).Scan(&charlie)
-	play(t, db, bob, bravo, 9999)    // private: never counts
-	play(t, db, "house", charlie, 5) // shared: always counts
+	seedPlay(t, db, bob, bravo, 9999)    // private: never counts
+	seedPlay(t, db, "house", charlie, 5) // shared: always counts
 
 	if got := rediscoverTitles(t, db, ""); !slices.Equal(got, []string{"Alpha", "Bravo", "Charlie"}) {
 		t.Fatalf("order = %v, want only the house play to rank", got)
+	}
+}
+
+// History rows outlive the stream they name: deleteStreamTx drops the stream,
+// queue and station rows and history has no foreign key. The ranking is
+// defined over stream rows that exist, so an orphaned play counts for nobody —
+// including the plays of a shared stream an admin has since deleted, which is
+// the price of stating the rule as "shared, or mine".
+func TestRediscoverIgnoresHistoryWhoseStreamIsGone(t *testing.T) {
+	db, _ := Open(":memory:")
+	defer db.Close()
+	alice, _ := seedRankingFixture(t, db)
+	var bravo int64
+	db.QueryRow(`SELECT id FROM track WHERE title='Bravo'`).Scan(&bravo)
+	if err := EnsureSharedStream(db, "kitchen", "Kitchen"); err != nil {
+		t.Fatalf("kitchen: %v", err)
+	}
+	seedPlay(t, db, "kitchen", bravo, 9999)
+	if got := rediscoverTitles(t, db, alice); !slices.Equal(got, []string{"Alpha", "Charlie", "Bravo"}) {
+		t.Fatalf("order = %v, want the kitchen play to demote Bravo while the stream exists", got)
+	}
+
+	if err := DeleteStream(db, "kitchen"); err != nil {
+		t.Fatalf("delete kitchen: %v", err)
+	}
+	if got := rediscoverTitles(t, db, alice); !slices.Equal(got, []string{"Alpha", "Bravo", "Charlie"}) {
+		t.Fatalf("order = %v, want the orphaned play to stop counting", got)
 	}
 }

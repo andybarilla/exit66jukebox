@@ -185,11 +185,14 @@ func TestRediscoverEndpointIsScopedToTheCaller(t *testing.T) {
 	if got := rediscoverTitlesFor(t, srv, nil); !slices.Equal(got, natural) {
 		t.Errorf("anonymous = %v, want %v", got, natural)
 	}
-	// Neither does a caller in an open mode, even a signed-in one.
-	if err := store.SetSecurityMode(db, store.SecurityModeOpen); err != nil {
-		t.Fatalf("SetSecurityMode: %v", err)
-	}
-	if got := rediscoverTitlesFor(t, srv, alice); !slices.Equal(got, natural) {
-		t.Errorf("open mode = %v, want %v (no personal streams in the open modes)", got, natural)
+	// Neither does a caller in either open mode, even a signed-in one: those
+	// modes have no personal streams at all.
+	for _, mode := range []store.SecurityMode{store.SecurityModeOpen, store.SecurityModeOpenAdminLocked} {
+		if err := store.SetSecurityMode(db, mode); err != nil {
+			t.Fatalf("SetSecurityMode(%s): %v", mode, err)
+		}
+		if got := rediscoverTitlesFor(t, srv, alice); !slices.Equal(got, natural) {
+			t.Errorf("%s = %v, want %v", mode, got, natural)
+		}
 	}
 }
