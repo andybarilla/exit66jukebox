@@ -64,29 +64,57 @@ type hubProcess struct {
 	handler  http.Handler
 
 	mu sync.Mutex
-	// signals counts /fed/signal/ requests arriving on each member's own
-	// session, so a test can show which sessions actually carried the
-	// negotiation rather than assuming it went through the hub.
-	signals map[string]int
+	// signals counts /fed/signal/ requests arriving on each member's own hub
+	// session; delivered counts those the hub forwarded on into that member's
+	// process. A test can therefore show both hops rather than assuming the
+	// second followed the first.
+	signals   map[string]int
+	delivered map[string]int
 }
 
 func newHubProcess(t *testing.T) *hubProcess {
 	t.Helper()
-	h := &hubProcess{signaler: NewSignaler(), reg: NewRegistry(), signals: make(map[string]int)}
+	h := &hubProcess{
+		signaler:  NewSignaler(),
+		reg:       NewRegistry(),
+		signals:   make(map[string]int),
+		delivered: make(map[string]int),
+	}
 	h.handler = HubSessionHandler(Capabilities{}, h.signaler, NewRelay(h.reg, nil))
 	return h
 }
 
 // admit wires p in as a member of h in both directions, the way the token
-// handshake does in production: the hub registers the member (serveHubConn ->
-// acceptAndRegister) and serves HubHandler over that one session tagged with
-// the member's id (serveHubConn -> WithSessionPeer), while the member registers
-// the hub under "@hub" (runMember).
+// handshake does in production.
+//
+// Both directions are built from the shared constructors in
+// session_handlers.go rather than composed here, and that is the whole point of
+// this helper. The hub forwards through reg.Get(to).Client, which for a member
+// is a SessionClient on the session that member serves MemberHandler over
+// (runPeer -> runMember) — so the recipient side must be MemberSessionHandler.
+// An earlier version of this file registered the peer-session composition
+// there instead. Every test passed while production answered 404, because a
+// peer session mounts the relay and a member session did not.
 func (h *hubProcess) admit(t *testing.T, p *signalProcess) {
 	t.Helper()
-	h.reg.put(&Peer{ID: p.peerID, Client: p.srv.Client(), BaseURL: p.srv.URL, Caps: Capabilities{DirectWebRTC: true}})
+
+	// Inbound: what the hub reaches when it forwards to p.
+	member := MemberSessionHandler(Capabilities{DirectWebRTC: true}, p.signaler, nil)
+	memberSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/fed/signal/") {
+			h.mu.Lock()
+			h.delivered[p.peerID]++
+			h.mu.Unlock()
+		}
+		member.ServeHTTP(w, r)
+	}))
+	t.Cleanup(memberSrv.Close)
+	h.reg.put(&Peer{ID: p.peerID, Client: memberSrv.Client(), BaseURL: memberSrv.URL, Caps: Capabilities{DirectWebRTC: true}})
+
+	// Outbound: p's session to the hub, served by the hub's one HubHandler
+	// tagged with p's id, exactly as serveHubConn tags it.
 	session := WithSessionPeer(p.peerID, h.handler)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hubSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/fed/signal/") {
 			h.mu.Lock()
 			h.signals[p.peerID]++
@@ -94,8 +122,14 @@ func (h *hubProcess) admit(t *testing.T, p *signalProcess) {
 		}
 		session.ServeHTTP(w, r)
 	}))
-	t.Cleanup(srv.Close)
-	p.reg.put(&Peer{ID: hubPeerID, Client: srv.Client(), BaseURL: srv.URL})
+	t.Cleanup(hubSrv.Close)
+	p.reg.put(&Peer{ID: hubPeerID, Client: hubSrv.Client(), BaseURL: hubSrv.URL})
+}
+
+func (h *hubProcess) deliveredTo(peerID string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.delivered[peerID]
 }
 
 func (h *hubProcess) signalsOn(peerID string) int {
@@ -211,8 +245,8 @@ func TestWebRTCNegotiatesThroughHubWithNoDirectSession(t *testing.T) {
 	}{
 		{"alice's hub session", hub.signalsOn("alice")},
 		{"bob's hub session", hub.signalsOn("bob")},
-		{"bob's own signal route", int(bob.signalsIn.Load())},
-		{"alice's own signal route", int(alice.signalsIn.Load())},
+		{"bob's member session (what the hub forwards over)", hub.deliveredTo("bob")},
+		{"alice's member session", hub.deliveredTo("alice")},
 	} {
 		if c.n == 0 {
 			t.Fatalf("%s carried no signals: the negotiation did not go through the hub", c.what)
@@ -310,7 +344,7 @@ func TestHubRelayedWebRTCStreamsAudio(t *testing.T) {
 			t.Fatalf("%s = %q want %q", c.hdr, got, c.want)
 		}
 	}
-	if hub.signalsOn("alice") == 0 || hub.signalsOn("bob") == 0 {
+	if hub.signalsOn("alice") == 0 || hub.deliveredTo("bob") == 0 {
 		t.Fatal("the stream did not negotiate through the hub")
 	}
 }
@@ -433,7 +467,7 @@ func TestPeerSessionDoesNotForwardSignals(t *testing.T) {
 	body, _ := json.Marshal(SignalMsg{From: "alice", To: "other", Type: "offer", SID: "s", SDP: "x"})
 	for name, h := range map[string]http.Handler{
 		"peer":   PeerSessionHandler(Capabilities{}, NewSignaler(), nil, nil),
-		"member": MemberSessionHandler(Capabilities{}, nil),
+		"member": MemberSessionHandler(Capabilities{}, NewSignaler(), nil),
 	} {
 		rec := httptest.NewRecorder()
 		WithSessionPeer("alice", h).ServeHTTP(rec,

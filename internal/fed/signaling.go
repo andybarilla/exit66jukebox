@@ -227,6 +227,15 @@ func (s *Signaler) signalRelayHandler(fwd SignalForwarder) http.Handler {
 			http.Error(w, "bad signal", http.StatusBadRequest)
 			return
 		}
+		// The path is the routing key: it is what the mux matched, what
+		// isRegistered is checked against, and what the forward re-addresses. A
+		// body naming a different recipient is refused rather than quietly
+		// overwritten, so there is never a second source of truth for the same
+		// decision that a later change could come to read instead.
+		if msg.To != "" && msg.To != to {
+			http.Error(w, "recipient mismatch", http.StatusBadRequest)
+			return
+		}
 		msg.To = to
 		if msg.From == "" {
 			msg.From = r.URL.Query().Get("from")

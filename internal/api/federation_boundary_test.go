@@ -38,7 +38,7 @@ func fedHandlers(srv *Server, db *sql.DB) map[string]http.Handler {
 	caps := fed.Capabilities{DirectWebRTC: true}
 	relay := fed.NewRelay(fed.NewRegistry(), db)
 	return map[string]http.Handler{
-		"member": fed.MemberSessionHandler(caps, srv.Handler()),
+		"member": fed.MemberSessionHandler(caps, fed.NewSignaler(), srv.Handler()),
 		"peer":   fed.PeerSessionHandler(caps, fed.NewSignaler(), db, srv.Handler()),
 		"hub":    fed.HubSessionHandler(caps, fed.NewSignaler(), relay),
 	}
@@ -160,6 +160,29 @@ func TestFederationSessionKeepsFedRoutes(t *testing.T) {
 	}
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("POST /fed/signal/someone status = %d, want 503 (body %q)", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+}
+
+// TestMemberSessionCarriesTheSignalRelay pins the composition the hub actually
+// forwards over. A hub relays a signal through reg.Get(to).Client, which for a
+// member is a SessionClient on the session that member serves MemberHandler
+// over (runPeer -> runMember) — so if this route is missing there, the forward
+// 404s and hub-relayed signaling (#158) silently does not work, however green
+// the fed package's own tests are. It shipped that way once.
+//
+// 503 rather than 202 because this signaler hosts no mailbox for "someone", and
+// a member passes no forwarder. 404 is the regression.
+func TestMemberSessionCarriesTheSignalRelay(t *testing.T) {
+	srv, db := newTestServer(t)
+	h := fedHandlers(srv, db)["member"]
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/someone", strings.NewReader(`{"type":"offer"}`)))
+	if rec.Code == http.StatusNotFound {
+		t.Fatal("POST /fed/signal/{to} is not mounted on the member session; a hub cannot forward a signal to it")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST /fed/signal/someone on the member = %d, want 503", rec.Code)
 	}
 }
 

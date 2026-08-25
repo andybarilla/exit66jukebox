@@ -360,7 +360,7 @@ func newFedManager(s store.FederationSettings, db *sql.DB, app http.Handler, reg
 		PeerID:        s.PeerID,
 		HubAddr:       s.HubAddr, // member: hub to dial
 		HubListen:     s.Listen,  // hub/peer: local listen addr
-		MemberHandler: fed.MemberSessionHandler(caps, app),
+		MemberHandler: fed.MemberSessionHandler(caps, signaler, app),
 		Registry:      reg,
 		DB:            db,
 		Caps:          caps,

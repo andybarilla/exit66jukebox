@@ -25,8 +25,17 @@ import (
 // None of them mounts app at "/" — see peerVisibleAppRoutes.
 
 // MemberSessionHandler is what a member serves back to its hub.
-func MemberSessionHandler(caps Capabilities, app http.Handler) http.Handler {
-	return WithCapsRoute(caps, AppRoutes(app))
+//
+// It carries the signal relay because this — not the peer session — is the
+// handler a hub reaches when it forwards a signal onward. A peer with a HubAddr
+// serves this over its hub session (runPeer -> runMember), and the hub's
+// forwarder addresses it through that same session, so without the relay here
+// the forward 404s and the hub falls back to the 503 #158 exists to remove.
+//
+// The forwarder is nil: a member relays to its own mailboxes only, which is what
+// bounds hub relaying to a single hop.
+func MemberSessionHandler(caps Capabilities, signaler *Signaler, app http.Handler) http.Handler {
+	return WithCapsRoute(caps, WithSignalRelay(signaler, nil, AppRoutes(app)))
 }
 
 // HubSessionHandler is what a hub serves to its members: the relay routes plus

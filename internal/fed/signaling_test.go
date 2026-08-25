@@ -114,3 +114,39 @@ func TestSignalRelayRejectsOversizedBody(t *testing.T) {
 		t.Fatalf("relayed SDP = %q", msg.SDP)
 	}
 }
+
+// TestSignalRelayRefusesBodyRecipientMismatch keeps the gate and the forward on
+// one routing key. The handler checks isRegistered against the path value and
+// the hub re-addresses the forward from the message; a body naming someone else
+// would be two sources of truth for the same decision, which is how a bypass
+// appears later even though neither source is wrong today.
+func TestSignalRelayRefusesBodyRecipientMismatch(t *testing.T) {
+	s := NewSignaler()
+	ch := s.Register("bob")
+	defer s.Unregister("bob", ch)
+	h := WithSignalRelay(s, nil, http.NewServeMux())
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/bob",
+		strings.NewReader(`{"to":"carol","type":"offer"}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: the body named carol and the path named bob", rec.Code)
+	}
+	select {
+	case msg := <-ch:
+		t.Fatalf("a mismatched signal was delivered to bob anyway: %+v", msg)
+	default:
+	}
+
+	// Positive control: the same body agreeing with the path is accepted, so the
+	// 400 above is the mismatch check rather than a broken route.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/fed/signal/bob",
+		strings.NewReader(`{"to":"bob","type":"offer","sdp":"v=0"}`)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("matching signal status = %d, want 202", rec.Code)
+	}
+	if msg := <-ch; msg.SDP != "v=0" {
+		t.Fatalf("relayed SDP = %q", msg.SDP)
+	}
+}
